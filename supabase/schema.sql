@@ -558,7 +558,7 @@ CREATE INDEX ix_poker_removal_notices_undelivered
 -- =============================================================================
 
 -- Table: sports
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-201.1, SRS-201.2
 -- Purpose: Lists the sports that events can be filtered by.
 CREATE TABLE sports (
@@ -567,7 +567,7 @@ CREATE TABLE sports (
 );
 
 -- Table: leagues
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-201.1, SRS-201.2, SRS-201.3
 -- Purpose: Lists the leagues within each sport that events can be filtered by.
 CREATE TABLE leagues (
@@ -580,7 +580,7 @@ CREATE TABLE leagues (
 );
 
 -- Table: teams
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-202.3, SRS-212.1, SRS-213.1
 -- Purpose: Lists the teams that compete in each league.
 CREATE TABLE teams (
@@ -595,7 +595,7 @@ CREATE TABLE teams (
 );
 
 -- Table: sports_events
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-201.1, SRS-201.2, SRS-201.3, SRS-202.1, SRS-202.2, SRS-202.3, SRS-205.8, SRS-206.3, SRS-207.2, SRS-208.2, SRS-208.3, SRS-209.3, SRS-209.4, SRS-209.5, SRS-211.2, SRS-212.4, SRS-212.7
 -- Purpose: Stores each sports event with its league, two teams, start time, status, and score.
 CREATE TABLE sports_events (
@@ -631,7 +631,7 @@ CREATE TABLE sports_events (
 );
 
 -- Table: market_types
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-203.2, SRS-203.3, SRS-209.3, SRS-209.6, SRS-214.2, SRS-214.3, SRS-214.4
 -- Purpose: Defines each supported betting market type with its description, rules, tie handling, and refund conditions.
 CREATE TABLE market_types (
@@ -646,7 +646,7 @@ CREATE TABLE market_types (
 );
 
 -- Table: betting_markets
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-203.1, SRS-203.3, SRS-205.7, SRS-205.8, SRS-206.3, SRS-209.6, SRS-214.2
 -- Purpose: Stores each betting market offered on an event, its line for spreads and totals, and whether it is accepting wagers.
 CREATE TABLE betting_markets (
@@ -667,7 +667,7 @@ CREATE TABLE betting_markets (
 );
 
 -- Table: betting_options
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-203.1, SRS-203.2, SRS-204.1, SRS-204.2, SRS-205.1, SRS-207.3, SRS-211.3, SRS-214.1
 -- Purpose: Stores each selectable outcome within a market, its winning condition, and its current decimal odds.
 CREATE TABLE betting_options (
@@ -686,7 +686,7 @@ CREATE TABLE betting_options (
 );
 
 -- Table: wagers
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-109.3, SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-205.1, SRS-205.2, SRS-205.4, SRS-205.5, SRS-205.6, SRS-205.7, SRS-206.1, SRS-206.5, SRS-207.1, SRS-207.2, SRS-207.3, SRS-207.4, SRS-207.5, SRS-207.6, SRS-208.1, SRS-209.1, SRS-209.2, SRS-209.4, SRS-209.5, SRS-210.1, SRS-210.2, SRS-210.3, SRS-210.4, SRS-210.5, SRS-211.1, SRS-211.2, SRS-211.3, SRS-211.4, SRS-211.5, SRS-211.6, SRS-211.7, SRS-NFR-204
 -- Purpose: Stores each confirmed sports wager with its amount, odds at placement, and final result and payout once decided.
 CREATE TABLE wagers (
@@ -723,7 +723,7 @@ CREATE TABLE wagers (
 );
 
 -- Table: public_bets
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-212.1, SRS-212.4, SRS-212.6, SRS-212.7, SRS-213.1, SRS-213.2
 -- Purpose: Stores each designated community bet on which team will win an event, and whether it has been paid out or refunded.
 CREATE TABLE public_bets (
@@ -739,7 +739,7 @@ CREATE TABLE public_bets (
 );
 
 -- Table: public_bet_entries
--- Reviewed by: SP (<Samuel Parker>)
+-- Reviewed by: SP (Samuel Parker)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-212.1, SRS-212.2, SRS-212.3, SRS-212.5, SRS-212.6, SRS-212.7, SRS-213.1, SRS-213.2, SRS-NFR-205
 -- Purpose: Stores each player's single-team wager in a public bet and the share of the pool credited to them.
 CREATE TABLE public_bet_entries (

@@ -841,7 +841,7 @@ CREATE TABLE slot_spins (
 -- =============================================================================
 
 -- Table: blackjack_hands
--- Reviewed by: HC (<HC full name>)
+-- Reviewed by: HC (<HC Hersy Contreras>)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-901.1, SRS-901.2, SRS-907.1, SRS-908.1, SRS-909.1, SRS-1001.1
 -- Purpose: Stores each blackjack hand's bet, declared result, and net winnings or losses for the player's hand history.
 CREATE TABLE blackjack_hands (
@@ -871,7 +871,7 @@ CREATE TABLE blackjack_hands (
 );
 
 -- Table: ai_suggestions
--- Reviewed by: HC (<HC full name>)
+-- Reviewed by: HC (<HC Hersy Contreras>)
 -- Supports: SRS-1001.1, SRS-1001.2, SRS-1002.1, SRS-1003.1, SRS-1004.1, SRS-1005.1
 -- Purpose: Records each AI suggestion a player requested, its recommendation and explanation, and the fee deducted.
 CREATE TABLE ai_suggestions (

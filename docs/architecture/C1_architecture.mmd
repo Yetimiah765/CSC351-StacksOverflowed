@@ -1,0 +1,43 @@
+---
+config:
+  look: handDrawn
+  handDrawnSeed: 7
+  theme: base
+  themeVariables:
+    fontFamily: "Nothing You Could Do, Comic Sans MS, Segoe Print, cursive"
+    fontSize: 30px
+    lineColor: "#222222"
+    primaryTextColor: "#111111"
+    edgeLabelBackground: "#ffffff"
+  flowchart:
+    curve: linear
+    nodeSpacing: 70
+    rankSpacing: 150
+    padding: 26
+    wrappingWidth: 600
+---
+%% C1 - System Context: Stacks Overflowed
+%% Legend: rounded = people, gold = our system, dashed = external systems
+flowchart LR
+    player(["👤 <b>Player</b><br/>registered user, 21+<br/>plays, bets, shops"])
+    guest(["👤 <b>Unregistered User</b><br/>guest, not logged in"])
+
+    sys["<b>Stacks Overflowed</b><br/>virtual-currency casino<br/><br/>poker · blackjack<br/>roulette · slots<br/>sports betting<br/>cosmetic shop"]
+
+    db["<b>Supabase</b><br/><i>external system</i><br/>accounts, balances,<br/>stats, cosmetics"]
+    ai["<b>AI Provider (LLM)</b><br/><i>external system</i><br/>move &amp; bet advice"]
+    sports["<b>Sports Odds &amp; Scores API</b><br/><i>external system</i><br/>events, odds, results"]
+
+    player <-- "plays games, wagers coins<br/>&amp; gets live updates" --> sys
+    guest -- "browses games<br/>&amp; signs up" --> sys
+    sys -- "stores &amp; reads<br/>player data" --> db
+    sys -- "asks for<br/>suggestions" --> ai
+    sys -- "pulls odds<br/>&amp; results" --> sports
+
+    classDef person fill:#ffffff,stroke:#111,stroke-width:3px,color:#111
+    classDef system fill:#f5b400,stroke:#111,stroke-width:4px,color:#111
+    classDef external fill:#ffffff,stroke:#111,stroke-width:3px,stroke-dasharray:12 8,color:#111
+    class player,guest person
+    class sys system
+    class db,ai,sports external
+    linkStyle default stroke:#111,stroke-width:3px

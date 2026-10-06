@@ -64,7 +64,7 @@ DROP FUNCTION IF EXISTS fn_poker_tables_seat_capacity() CASCADE;
 -- =============================================================================
 
 -- Table: games
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-107.1, SRS-107.2, SRS-108.1, SRS-108.2, SRS-116.3, SRS-118.1, SRS-118.3
 -- Purpose: Lists each game and the sports-betting area shown on the home page and used to key per-game statistics.
 CREATE TABLE games (
@@ -75,7 +75,7 @@ CREATE TABLE games (
 );
 
 -- Table: players
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-101.1, SRS-101.2, SRS-101.3, SRS-101.10, SRS-102.1, SRS-102.2, SRS-102.3, SRS-103.2, SRS-104.5, SRS-104.6, SRS-106.3, SRS-106.6, SRS-106.7, SRS-106.8, SRS-109.1, SRS-109.2, SRS-109.3, SRS-110.1, SRS-110.2, SRS-110.3, SRS-110.4, SRS-110.5, SRS-112.1, SRS-112.3, SRS-114.1, SRS-114.2, SRS-114.4, SRS-114.5, SRS-115.1, SRS-115.2, SRS-115.3, SRS-115.4, SRS-115.6, SRS-8.1, SRS-8.2, SRS-8.3, SRS-121.4, SRS-121.5, SRS-NFR-101, SRS-NFR-102
 -- Purpose: Stores each registered player's account, authentication hash, virtual-currency balance, and profile details.
 CREATE TABLE players (
@@ -126,7 +126,7 @@ CREATE TABLE players (
 );
 
 -- Table: usernames
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-101.4, SRS-101.5, SRS-101.6, SRS-101.7, SRS-103.1, SRS-106.5, SRS-112.1, SRS-112.4, SRS-112.5, SRS-112.6, SRS-112.7, SRS-112.8, SRS-121.3
 -- Purpose: Stores each player's current username and any previous username still inside its 24-hour reservation window.
 CREATE TABLE usernames (
@@ -159,7 +159,7 @@ CREATE UNIQUE INDEX uq_usernames_one_current_per_player
     WHERE is_current;
 
 -- Table: player_sessions
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-103.3, SRS-103.4, SRS-103.5, SRS-103.6, SRS-103.7, SRS-103.8, SRS-105.1, SRS-105.2, SRS-105.3, SRS-106.7
 -- Purpose: Stores the single active authenticated session for each player so a new login or duplicated tab can invalidate it.
 CREATE TABLE player_sessions (
@@ -171,7 +171,7 @@ CREATE TABLE player_sessions (
 );
 
 -- Table: player_game_stats
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-103.2, SRS-111.2, SRS-116.1, SRS-116.2, SRS-116.3, SRS-116.4, SRS-116.12, SRS-117.1, SRS-117.2, SRS-117.4, SRS-117.5, SRS-118.1, SRS-118.2, SRS-118.3, SRS-118.4, SRS-118.5, SRS-121.6, SRS-121.7, SRS-121.8, SRS-NFR-102, SRS-NFR-107
 -- Purpose: Stores each player's active playtime, money won, and money lost per game; overall totals are the sum of these rows.
 CREATE TABLE player_game_stats (
@@ -199,7 +199,7 @@ CREATE TABLE player_game_stats (
 -- =============================================================================
 
 -- Table: cosmetics
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-119.2, SRS-119.3, SRS-119.4, SRS-120.1, SRS-120.3, SRS-122.2, SRS-123.5
 -- Purpose: Catalog of every card, chip, and profile-outline cosmetic, including the one default cosmetic per category.
 CREATE TABLE cosmetics (
@@ -223,7 +223,7 @@ CREATE UNIQUE INDEX uq_cosmetics_one_default_per_category
     WHERE is_default;
 
 -- Table: player_cosmetics
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-103.2, SRS-119.1, SRS-119.2, SRS-119.4, SRS-120.6, SRS-121.9, SRS-125.2, SRS-125.4, SRS-125.5, SRS-126.1, SRS-126.2, SRS-NFR-102
 -- Purpose: Records which cosmetics each player owns, with at most one copy of any cosmetic per player.
 CREATE TABLE player_cosmetics (
@@ -238,7 +238,7 @@ CREATE TABLE player_cosmetics (
 );
 
 -- Table: player_equipped_cosmetics
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-103.2, SRS-120.1, SRS-120.2, SRS-120.3, SRS-120.4, SRS-120.5, SRS-120.6, SRS-121.13, SRS-NFR-102, SRS-NFR-104
 -- Purpose: Stores the one cosmetic each player has equipped in each cosmetic category.
 CREATE TABLE player_equipped_cosmetics (
@@ -263,7 +263,7 @@ CREATE TABLE player_equipped_cosmetics (
 );
 
 -- Table: blind_boxes
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-122.1, SRS-122.2, SRS-124.4, SRS-124.5
 -- Purpose: Stores each blind box offered in the cosmetic shop with its description, price, and availability.
 CREATE TABLE blind_boxes (
@@ -276,7 +276,7 @@ CREATE TABLE blind_boxes (
 );
 
 -- Table: blind_box_rewards
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-122.2, SRS-123.1, SRS-123.2, SRS-123.3, SRS-123.4, SRS-123.5, SRS-123.6, SRS-125.1
 -- Purpose: Lists the possible cosmetic rewards in each blind box, each with equal 1/n probability.
 CREATE TABLE blind_box_rewards (
@@ -297,7 +297,7 @@ CREATE TABLE blind_box_rewards (
 );
 
 -- Table: blind_box_purchases
--- Reviewed by: JO (<JO full name>)
+-- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-117.10, SRS-117.11, SRS-124.4, SRS-124.6, SRS-124.7, SRS-125.1, SRS-125.3, SRS-125.6, SRS-126.1, SRS-126.3, SRS-126.4, SRS-126.5, SRS-127.1, SRS-127.4, SRS-NFR-103
 -- Purpose: Records each completed blind-box purchase with its single price deduction and single reward outcome, including any duplicate refund.
 CREATE TABLE blind_box_purchases (
@@ -767,7 +767,7 @@ CREATE TABLE public_bet_entries (
 -- =============================================================================
 
 -- Table: roulette_spins
--- Reviewed by: CL (<CL full name>)
+-- Reviewed by: CL (Cris Luperon)
 -- Supports: SRS-301.1, SRS-301.2, SRS-302.1, SRS-303.1, SRS-304.1
 -- Purpose: Stores each roulette round for a player, from open betting through the spin and its winning number.
 CREATE TABLE roulette_spins (
@@ -785,7 +785,7 @@ CREATE TABLE roulette_spins (
 );
 
 -- Table: roulette_bets
--- Reviewed by: CL (<CL full name>)
+-- Reviewed by: CL (Cris Luperon)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-301.1, SRS-304.1, SRS-305.1
 -- Purpose: Stores each bet a player places on a roulette round and its payout once the spin is settled.
 CREATE TABLE roulette_bets (
@@ -812,7 +812,7 @@ CREATE TABLE roulette_bets (
 -- =============================================================================
 
 -- Table: slot_bet_amounts
--- Reviewed by: CL (<CL full name>)
+-- Reviewed by: CL (Cris Luperon)
 -- Supports: SRS-306.1
 -- Purpose: Lists the bet amounts a player may choose from before spinning the slot machine.
 CREATE TABLE slot_bet_amounts (
@@ -821,7 +821,7 @@ CREATE TABLE slot_bet_amounts (
 );
 
 -- Table: slot_spins
--- Reviewed by: CL (<CL full name>)
+-- Reviewed by: CL (Cris Luperon)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-306.1, SRS-307.1, SRS-309.1
 -- Purpose: Records each slot spin with the bet amount chosen and the winnings credited.
 CREATE TABLE slot_spins (

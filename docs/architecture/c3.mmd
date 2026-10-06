@@ -1,0 +1,90 @@
+---
+config:
+  look: handDrawn
+  theme: neutral
+  flowchart:
+    curve: basis
+---
+
+flowchart LR
+
+    Frontend["🌐 Web Frontend<br/>User interface for games,<br/>profiles, betting and statistics"]
+
+    subgraph Backend["Backend API"]
+
+        direction LR
+
+        Auth["🔐 Authentication Component<br/>Login, registration<br/>and authorization"]
+
+        Blackjack["🃏 Blackjack Component<br/>Deals cards and handles<br/>Blackjack game rules"]
+
+        Sports["🏈 Sports Betting Component<br/>Handles virtual<br/>sports wagers"]
+
+        User["👤 User/Profile Component<br/>Manages profiles,<br/>accounts and statistics"]
+
+        Roulette["🎡 Roulette Component<br/>Handles roulette<br/>game logic"]
+
+        Slots["🎰 Slots Component<br/>Handles slot<br/>game logic"]
+
+        Poker["♠️ Poker Component<br/>Handles poker<br/>game logic"]
+
+        AI["🤖 AI Recommendation Component<br/>Provides recommendations<br/>only when requested"]
+
+        Currency["💰 Virtual Currency Component<br/>Balances, bets,<br/>wins and losses"]
+
+    end
+
+
+    LLM["🤖 External LLM Service<br/>Processes prompts and generates<br/>AI recommendations"]
+
+    Database[("🗄️ Database<br/>Stores users, balances,<br/>bets, game data and statistics")]
+
+    WebSocket["📡 WebSocket Service<br/>Handles real-time<br/>multiplayer communication"]
+
+
+    Frontend -->|"API requests"| Auth
+
+    Frontend -->|"Game actions"| Blackjack
+
+    Frontend -->|"Betting requests"| Sports
+
+    Frontend -->|"Account requests"| User
+
+    Frontend -->|"Game actions"| Roulette
+
+    Frontend -->|"Game actions"| Slots
+
+    Frontend -->|"Game actions"| Poker
+
+
+    Blackjack -->|"Requests suggestion"| AI
+
+    Blackjack -->|"Checks/updates bets"| Currency
+
+
+    Sports -->|"Requests recommendation"| AI
+
+    Sports -->|"Checks/updates bets"| Currency
+
+
+    Roulette -->|"Checks/updates bets"| Currency
+
+    Slots -->|"Checks/updates bets"| Currency
+
+    Poker -->|"Checks/updates bets"| Currency
+
+
+    AI -->|"Sends game data / prompt via API"| LLM
+
+    LLM -->|"Returns generated recommendation"| AI
+
+
+    Auth -->|"User data"| Database
+
+    User -->|"Profile/statistics data"| Database
+
+    Currency -->|"Balance/bet data"| Database
+
+
+    Poker -->|"Multiplayer game events"| WebSocket
+    

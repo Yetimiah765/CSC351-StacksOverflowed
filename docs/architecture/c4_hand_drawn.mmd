@@ -1,0 +1,60 @@
+---
+config:
+  look: handDrawn
+  theme: neutral
+  sequence:
+    actorFontSize: 18
+    messageFontSize: 16
+    noteFontSize: 16
+---
+%% C4 Level 4 code diagram for the Authentication Component
+%% Focus: user login and authenticated-session lifecycle
+%% Keep the C3 component name exactly "Authentication Component" for cross-diagram consistency.
+sequenceDiagram
+    title C4 - Code Diagram: Authentication Component (User Login) | Authors: James Ortiz Jr.
+
+    participant LC as LoginController [Class]
+    participant AS as AuthenticationService [Class]
+    participant UR as UserRepository [Module]
+    participant PV as PasswordVerifier [Module]
+    participant SM as SessionManager [Class]
+
+    LC->>AS: login(username, password, tabId)
+    AS->>UR: findByUsernameIgnoreCase(username)
+    UR-->>AS: UserRecord or null
+
+    alt user == null
+        AS-->>LC: LoginFailure(invalidCredentials)
+    else user found
+        AS->>AS: ensureAccountAccessible(accountStatus)
+        alt account status blocks login
+            AS-->>LC: LoginFailure(accountUnavailable)
+        else account accessible
+            AS->>PV: verify(password, passwordHash)
+            PV-->>AS: passwordMatches : boolean
+
+            alt passwordMatches == false
+                AS-->>LC: LoginFailure(invalidCredentials)
+            else passwordMatches == true
+                AS->>SM: startSession(userId, tabId)
+                SM->>SM: invalidatePriorActiveSession(userId)
+                SM-->>AS: sessionId
+
+                AS->>UR: loadAccountSnapshot(userId)
+                UR-->>AS: profile + balance + statistics + owned/equipped cosmetics
+                AS-->>LC: LoginSuccess(sessionId, accountSnapshot)
+            end
+        end
+    end
+
+    Note over LC,SM: Authenticated-session validation after successful login
+    LC->>SM: validateTab(sessionId, tabId)
+    alt duplicate authenticated tab detected
+        SM->>SM: invalidateDuplicatedSessions(userId)
+        SM-->>LC: ReauthenticationRequired
+    else active tab valid
+        SM-->>LC: SessionValid
+    end
+
+    LC->>SM: endSession(sessionId) [manual logout or active-tab close]
+    SM-->>LC: SessionEnded [no automatic restoration]

@@ -348,7 +348,7 @@ CREATE TABLE blind_box_purchases (
 -- =============================================================================
 
 -- Table: poker_tables
--- Reviewed by: JN (<JN full name>)
+-- Reviewed by: JN (Jeremiah Nicols)
 -- Supports: SRS-1.1, SRS-1.3, SRS-1.4, SRS-5.7, SRS-5.8, SRS-7.4, SRS-11.1, SRS-11.2, SRS-11.3, SRS-12.6, SRS-13.1, SRS-13.2, SRS-13.5, SRS-14.1, SRS-14.2, SRS-14.3, SRS-14.4, SRS-14.7, SRS-15.3, SRS-15.5, SRS-18.8, SRS-20.7, SRS-NFR-021, SRS-NFR-022
 -- Purpose: Stores each poker table's seat count, blind and chip-denomination settings, and the button and blind seats from its last successful hand setup.
 CREATE TABLE poker_tables (
@@ -409,7 +409,7 @@ CREATE TABLE poker_tables (
 );
 
 -- Table: poker_seats
--- Reviewed by: JN (<JN full name>)
+-- Reviewed by: JN (Jeremiah Nicols)
 -- Supports: SRS-1.1, SRS-1.2, SRS-1.3, SRS-1.4, SRS-1.5, SRS-1.7, SRS-2.1, SRS-2.4, SRS-7.1, SRS-7.2, SRS-7.3, SRS-7.4, SRS-8.1, SRS-9.1, SRS-9.2, SRS-9.3, SRS-9.4, SRS-9.5, SRS-9.6, SRS-9.7, SRS-9.8, SRS-9.10, SRS-10.1, SRS-10.2, SRS-10.3, SRS-11.1, SRS-11.2, SRS-11.3, SRS-11.4, SRS-11.5, SRS-11.13, SRS-11.14, SRS-11.15, SRS-12.1, SRS-12.4, SRS-12.5, SRS-12.6, SRS-12.9, SRS-12.10, SRS-20.6, SRS-21.1, SRS-NFR-013, SRS-NFR-014, SRS-NFR-015, SRS-NFR-019, SRS-NFR-021, SRS-NFR-022
 -- Purpose: Stores each occupied seat with its player, chip stack as of the last completed hand, missed-blind markers, and the connection, timeout, and busted state that carries across hands.
 CREATE TABLE poker_seats (
@@ -523,7 +523,7 @@ CREATE TRIGGER trg_poker_tables_seat_capacity
     EXECUTE FUNCTION fn_poker_tables_seat_capacity();
 
 -- Table: poker_removal_notices
--- Reviewed by: JN (<JN full name>)
+-- Reviewed by: JN (Jeremiah Nicols)
 -- Supports: SRS-9.4, SRS-9.7, SRS-9.11, SRS-9.12, SRS-12.10, SRS-NFR-020
 -- Purpose: Records each automatic seat removal and its reason so the player is notified immediately or, if disconnected, the next time they open the application.
 CREATE TABLE poker_removal_notices (
@@ -841,7 +841,7 @@ CREATE TABLE slot_spins (
 -- =============================================================================
 
 -- Table: blackjack_hands
--- Reviewed by: HC (<HC full name>)
+-- Reviewed by: HC (<HC Hersy Contreras>)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-901.1, SRS-901.2, SRS-907.1, SRS-908.1, SRS-909.1, SRS-1001.1
 -- Purpose: Stores each blackjack hand's bet, declared result, and net winnings or losses for the player's hand history.
 CREATE TABLE blackjack_hands (
@@ -871,7 +871,7 @@ CREATE TABLE blackjack_hands (
 );
 
 -- Table: ai_suggestions
--- Reviewed by: HC (<HC full name>)
+-- Reviewed by: HC (<HC Hersy Contreras>)
 -- Supports: SRS-1001.1, SRS-1001.2, SRS-1002.1, SRS-1003.1, SRS-1004.1, SRS-1005.1
 -- Purpose: Records each AI suggestion a player requested, its recommendation and explanation, and the fee deducted.
 CREATE TABLE ai_suggestions (

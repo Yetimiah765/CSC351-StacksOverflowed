@@ -1,0 +1,34 @@
+flowchart LR
+
+    Guest[Guest<br/>views home page & available games]
+    Player[Player<br/>plays games, sports bets, manages profile]
+
+    subgraph SO["Stacks Overflowed (our system)"]
+        Web["Web App<br/>(browser UI)<br/><br/>home, profile, shop,<br/>games, sports betting"]
+        API["API Server<br/>(REST / JSON + JWT)<br/>+ Game Logic<br/><br/>accounts, profile, balance,<br/>cosmetics, wagering,<br/>roulette, slots, blackjack,<br/>game rules & state coordination"]
+        Socket["Socket Server<br/>(WebSocket / Socket.io)<br/><br/>real-time poker tables,<br/>turn timers, live table sync"]
+
+        Web -->|"calls<br/>JSON + JWT"| API
+        Web -->|"connects<br/>WS / WSS"| Socket
+        API <-->|"validates session /<br/>coordinates state"| Socket
+        API -->|"game events /<br/>state updates"| Socket
+    end
+
+    Guest -->|"uses"| Web
+    Player -->|"uses"| Web
+
+    subgraph SUPA["Supabase (hosted cloud)"]
+        DB["Database<br/>(PostgreSQL)<br/><br/>accounts, balances,<br/>wagers, game history"]
+        Auth["Auth<br/>(Supabase Auth)<br/><br/>logins & tokens"]
+        Storage["Storage<br/>(Supabase Storage)<br/><br/>profile photos & cosmetic images"]
+    end
+
+    Odds["Sports Odds API<br/><br/>events, odds, scores"]
+    AI["AI Provider<br/><br/>ChatGPT / Claude / Gemini"]
+
+    API -->|"reads / writes"| DB
+    API -->|"checks logins"| Auth
+    API -->|"uploads / reads<br/>images"| Storage
+    API -->|"fetches<br/>sports data"| Odds
+    API -->|"gets betting<br/>suggestions"| AI
+    API -->|"gets blackjack<br/>suggestions"| AI

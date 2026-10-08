@@ -3,7 +3,15 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 
-type Profile = { id: string; username: string; biography: string; avatar_url: string | null };
+interface Profile {
+  playerId: number;
+  firstName: string;
+  lastName: string;
+  username: string | null;
+  bio: string | null;
+  balance: number;
+  profilePhotoDataUrl: string | null;
+}
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -12,48 +20,35 @@ export default function ProfilePage() {
   const [error, setError] = useState('');
 
   const [editing, setEditing] = useState(false);
-  const [biography, setBiography] = useState('');
+  const [bio, setBio] = useState('');
   const [saving, setSaving] = useState(false);
-
-  const [creating, setCreating] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
-  const [newBiography, setNewBiography] = useState('');
 
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem('access_token');
+    const stored = localStorage.getItem('player_token');
     setToken(stored);
-    if (!stored) { setLoading(false); return; }
+    if (!stored) {
+      setLoading(false);
+      return;
+    }
     fetchProfile(stored);
   }, []);
 
-  async function fetchProfile(accessToken: string) {
+  async function fetchProfile(playerToken: string) {
     setLoading(true);
     const res = await fetch('/api/profile', {
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: `Bearer ${playerToken}` },
     });
     const data = await res.json();
     setLoading(false);
-    if (!res.ok) { setError(data.error || 'Failed to load profile.'); return; }
+    if (!res.ok) {
+      setError(data.error || 'Failed to load profile.');
+      return;
+    }
     setProfile(data.profile);
-    if (data.profile) setBiography(data.profile.biography);
-  }
-
-  async function handleCreate(event: React.FormEvent) {
-    event.preventDefault();
-    if (!token) return;
-    setCreating(true);
-    const res = await fetch('/api/profile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ username: newUsername, biography: newBiography }),
-    });
-    const data = await res.json();
-    setCreating(false);
-    if (res.ok) { setProfile(data.profile); setBiography(data.profile.biography); }
-    else setError(data.error || 'Failed to create profile.');
+    setBio(data.profile?.bio ?? '');
   }
 
   async function handleSave() {
@@ -62,12 +57,16 @@ export default function ProfilePage() {
     const res = await fetch('/api/profile', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ biography }),
+      body: JSON.stringify({ bio }),
     });
     const data = await res.json();
     setSaving(false);
-    if (res.ok) { setProfile(data.profile); setEditing(false); }
-    else setError(data.error || 'Failed to save.');
+    if (res.ok) {
+      setProfile(data.profile);
+      setEditing(false);
+    } else {
+      setError(data.error || 'Failed to save.');
+    }
   }
 
   async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -83,8 +82,11 @@ export default function ProfilePage() {
     });
     const data = await res.json();
     setUploading(false);
-    if (res.ok) setProfile(data.profile);
-    else setError(data.error || 'Failed to upload image.');
+    if (res.ok) {
+      setProfile((previous) => (previous ? { ...previous, profilePhotoDataUrl: data.profilePhotoDataUrl } : previous));
+    } else {
+      setError(data.error || 'Failed to upload image.');
+    }
     event.target.value = '';
   }
 
@@ -118,41 +120,7 @@ export default function ProfilePage() {
           <p className="mt-4 rounded-xl border border-red-800 bg-red-900/30 p-3 text-sm text-red-300">{error}</p>
         ) : null}
 
-        {profile === null ? (
-          <>
-            <h1 className="mt-4 text-3xl font-semibold">Create your profile</h1>
-            <form onSubmit={handleCreate} className="mt-6 space-y-4">
-              <label className="block text-sm text-slate-200">
-                Username
-                <input
-                  type="text"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                  required
-                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400"
-                  placeholder="your_username"
-                />
-              </label>
-              <label className="block text-sm text-slate-200">
-                Biography
-                <textarea
-                  value={newBiography}
-                  onChange={(e) => setNewBiography(e.target.value)}
-                  rows={3}
-                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400"
-                  placeholder="Tell us about yourself…"
-                />
-              </label>
-              <button
-                type="submit"
-                disabled={creating}
-                className="w-full rounded-xl bg-emerald-400 px-4 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-70"
-              >
-                {creating ? 'Creating…' : 'Create profile'}
-              </button>
-            </form>
-          </>
-        ) : (
+        {profile ? (
           <>
             <div className="mt-6 flex flex-col items-center gap-3">
               <button
@@ -161,11 +129,11 @@ export default function ProfilePage() {
                 className="group relative h-24 w-24 overflow-hidden rounded-full border-2 border-slate-700 bg-slate-800 transition hover:border-emerald-400 disabled:opacity-70"
                 title="Change profile photo"
               >
-                {profile.avatar_url ? (
-                  <img src={profile.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
+                {profile.profilePhotoDataUrl ? (
+                  <img src={profile.profilePhotoDataUrl} alt="Avatar" className="h-full w-full object-cover" />
                 ) : (
                   <span className="text-3xl font-semibold text-slate-300">
-                    {profile.username[0].toUpperCase()}
+                    {(profile.username ?? profile.firstName)[0]?.toUpperCase()}
                   </span>
                 )}
                 <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-xs text-white opacity-0 transition group-hover:opacity-100">
@@ -175,11 +143,15 @@ export default function ProfilePage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/png"
                 className="hidden"
                 onChange={handleAvatarChange}
               />
+              <span className="text-xs text-slate-500">PNG only, up to 5 MB</span>
               <h1 className="text-3xl font-semibold">{profile.username}</h1>
+              <p className="text-sm text-slate-400">
+                {profile.firstName} {profile.lastName} &middot; {profile.balance.toLocaleString()} coins
+              </p>
             </div>
 
             <div className="mt-6">
@@ -187,8 +159,8 @@ export default function ProfilePage() {
               {editing ? (
                 <div className="mt-2 space-y-3">
                   <textarea
-                    value={biography}
-                    onChange={(e) => setBiography(e.target.value)}
+                    value={bio}
+                    onChange={(event) => setBio(event.target.value)}
                     rows={4}
                     className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400"
                   />
@@ -201,7 +173,10 @@ export default function ProfilePage() {
                       {saving ? 'Saving…' : 'Save'}
                     </button>
                     <button
-                      onClick={() => { setEditing(false); setBiography(profile.biography); }}
+                      onClick={() => {
+                        setEditing(false);
+                        setBio(profile.bio ?? '');
+                      }}
                       className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm hover:border-slate-600"
                     >
                       Cancel
@@ -210,7 +185,7 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <div className="mt-2">
-                  <p className="text-slate-300">{profile.biography || 'No biography yet.'}</p>
+                  <p className="text-slate-300">{profile.bio || 'No biography yet.'}</p>
                   <button
                     onClick={() => setEditing(true)}
                     className="mt-3 rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm hover:border-emerald-400 hover:text-emerald-200"
@@ -221,6 +196,8 @@ export default function ProfilePage() {
               )}
             </div>
           </>
+        ) : (
+          <p className="mt-4 text-slate-300">Unable to load your profile.</p>
         )}
 
         <p className="mt-8 text-sm text-slate-300">

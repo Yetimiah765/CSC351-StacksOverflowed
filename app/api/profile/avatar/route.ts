@@ -1,9 +1,15 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
+import { getPlayerIdForToken } from '../../../../lib/auth';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 }
+
+// SRS-115.1: PNG is verified by file signature, not filename.
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// SRS-115.3: 5 MB maximum, matching chk_players_profile_photo.
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 export async function POST(request: Request) {
   const token = getToken(request);
@@ -12,8 +18,8 @@ export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
 
-  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-  if (authError || !user) return Response.json({ error: 'Invalid or expired token.' }, { status: 401 });
+  const playerId = await getPlayerIdForToken(supabase, token);
+  if (playerId === null) return Response.json({ error: 'Invalid or expired session.' }, { status: 401 });
 
   let formData: FormData;
   try {
@@ -27,25 +33,26 @@ export async function POST(request: Request) {
     return Response.json({ error: 'image file is required.' }, { status: 400 });
   }
 
-  const ext = file instanceof File ? (file.name.split('.').pop() ?? 'jpg') : 'jpg';
-  const path = `${user.id}.${ext}`;
+  const buffer = Buffer.from(await file.arrayBuffer());
 
-  const { error: uploadError } = await supabase.storage
-    .from('avatars')
-    .upload(path, file, { upsert: true });
+  if (!buffer.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    return Response.json({ error: 'Profile photos must be PNG images.' }, { status: 400 });
+  }
 
-  if (uploadError) return Response.json({ error: uploadError.message }, { status: 400 });
+  if (buffer.byteLength > MAX_PHOTO_BYTES) {
+    return Response.json({ error: 'Profile photos must be 5 MB or smaller.' }, { status: 400 });
+  }
 
-  const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
-
-  const { data, error: updateError } = await supabase
-    .from('myapp_profile')
-    .update({ avatar_url: publicUrl })
-    .eq('id', user.id)
-    .select('id, username, biography, avatar_url')
-    .single();
+  // PostgREST accepts bytea input as a Postgres hex-escaped string.
+  const { error: updateError } = await supabase
+    .from('players')
+    .update({ profile_photo: `\\x${buffer.toString('hex')}` })
+    .eq('player_id', playerId);
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
 
-  return Response.json({ profile: data }, { status: 200 });
+  return Response.json(
+    { profilePhotoDataUrl: `data:image/png;base64,${buffer.toString('base64')}` },
+    { status: 200 }
+  );
 }

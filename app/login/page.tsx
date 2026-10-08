@@ -6,7 +6,7 @@ import { useState } from 'react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,14 +19,13 @@ export default function LoginPage() {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ username, password }),
     });
 
     const data = await response.json();
     setLoading(false);
     if (response.ok) {
-      const accessToken = data?.session?.session?.access_token;
-      if (accessToken) localStorage.setItem('access_token', accessToken);
+      if (data?.token) localStorage.setItem('player_token', data.token);
       router.push('/profile');
     } else {
       setMessage(data.error || 'Login failed.');
@@ -42,14 +41,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className="mt-8 space-y-4">
           <label className="block text-sm text-slate-200">
-            Email
+            Username
             <input
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
+              type="text"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
               required
               className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
-              placeholder="student@example.com"
+              placeholder="your_username"
             />
           </label>
 

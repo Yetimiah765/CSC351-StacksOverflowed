@@ -231,36 +231,69 @@ export default function PokerTablePage() {
           </p>
         ) : null}
 
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {tableState?.seats.map((seat) => (
-            <div
-              key={seat.seatNumber}
-              className={`flex items-center gap-3 rounded-xl border p-4 text-sm ${
-                seat.playerId
-                  ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-100'
-                  : 'border-slate-700 bg-slate-800/60 text-slate-400'
-              }`}
-            >
-              {seat.playerId ? (
-                <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-emerald-500/40 bg-slate-900">
-                  {avatars[seat.playerId] ? (
-                    <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+        <div className="relative mx-auto mt-8 h-[320px] w-full max-w-xl sm:h-[400px]">
+          {/* Wooden rail */}
+          <div className="absolute inset-[6%] rounded-[50%] bg-gradient-to-br from-amber-700 via-amber-900 to-amber-950 shadow-2xl shadow-black/60" />
+
+          {/* Felt */}
+          <div className="absolute inset-[11%] rounded-[50%] bg-[radial-gradient(ellipse_at_center,_#15803d_0%,_#065f46_60%,_#022c22_100%)] shadow-[inset_0_0_50px_rgba(0,0,0,0.6)]">
+            {/* Racetrack line */}
+            <div className="absolute inset-[9%] rounded-[50%] border border-emerald-300/15" />
+            {/* Center emblem */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+              <p className="text-xs uppercase tracking-[0.4em] text-emerald-300/25">Stacks Overflowed</p>
+              <p className="text-2xl font-bold uppercase tracking-[0.2em] text-emerald-200/15">Table 1</p>
+            </div>
+          </div>
+
+          {tableState?.seats.map((seat, index) => {
+            // Seats are placed by angle around an oval, starting at the top
+            // and going clockwise, like sitting around a real table.
+            const angle = (2 * Math.PI * index) / tableState.maxSeats - Math.PI / 2;
+            const left = 50 + 46 * Math.cos(angle);
+            const top = 50 + 44 * Math.sin(angle);
+            const isOwnSeat = seat.playerId === String(profile.playerId);
+
+            return (
+              <div
+                key={seat.seatNumber}
+                style={{ left: `${left}%`, top: `${top}%` }}
+                className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1"
+              >
+                <div
+                  className={`h-14 w-14 shrink-0 overflow-hidden rounded-full border-2 shadow-lg shadow-black/50 ${
+                    seat.playerId
+                      ? isOwnSeat
+                        ? 'border-emerald-300 bg-slate-900'
+                        : 'border-emerald-500/60 bg-slate-900'
+                      : 'border-slate-600/70 bg-slate-800/80'
+                  }`}
+                >
+                  {seat.playerId ? (
+                    avatars[seat.playerId] ? (
+                      <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-base font-semibold text-emerald-200">
+                        {seat.username?.[0]?.toUpperCase()}
+                      </span>
+                    )
                   ) : (
-                    <span className="flex h-full w-full items-center justify-center text-sm font-semibold text-emerald-200">
-                      {seat.username?.[0]?.toUpperCase()}
+                    <span className="flex h-full w-full items-center justify-center text-xs text-slate-500">
+                      {seat.seatNumber}
                     </span>
                   )}
                 </div>
-              ) : null}
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slate-500">Seat {seat.seatNumber}</p>
-                <p className="mt-1 font-medium">{seat.username ?? 'Open'}</p>
-                {seat.playerId === String(profile.playerId) ? (
-                  <p className="mt-1 text-xs text-emerald-300">(you)</p>
-                ) : null}
+                <p
+                  className={`max-w-[84px] truncate rounded-full bg-black/40 px-2 py-0.5 text-center text-xs font-medium backdrop-blur-sm ${
+                    seat.playerId ? 'text-emerald-100' : 'text-slate-400'
+                  }`}
+                >
+                  {seat.username ?? 'Open'}
+                </p>
+                {isOwnSeat ? <p className="text-[10px] text-emerald-300">(you)</p> : null}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div className="mt-8 space-y-4">

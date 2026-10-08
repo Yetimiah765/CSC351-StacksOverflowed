@@ -40,6 +40,6 @@ export const GAMES: Game[] = [
     id: 'sports-betting',
     name: 'Sports Betting',
     description: 'Bet virtual coins on live sports events.',
-    href: null,
+    href: '/sports',
   },
 ];

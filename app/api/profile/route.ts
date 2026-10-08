@@ -1,19 +1,11 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../lib/auth';
+import { photoToDataUrl } from '../../../lib/playerDisplay';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
-}
-
-// profile_photo comes back from PostgREST as a Postgres hex-encoded bytea
-// string (\x89504e47...). Convert it to a data URL the <img> tag can use
-// directly, or null for the default icon (SRS-115.5).
-function photoToDataUrl(hexBytea: string | null): string | null {
-  if (!hexBytea) return null;
-  const hex = hexBytea.startsWith('\\x') ? hexBytea.slice(2) : hexBytea;
-  return `data:image/png;base64,${Buffer.from(hex, 'hex').toString('base64')}`;
 }
 
 interface ProfileRow {

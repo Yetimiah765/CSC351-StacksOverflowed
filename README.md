@@ -24,6 +24,7 @@ SUPABASE_URL="https://your-project-id.supabase.co"
 SUPABASE_ANON_KEY="your-anon-key"
 SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
 NEXT_PUBLIC_SUPABASE_URL="https://your-project-id.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY="your-anon-key"
 ```
 
 ### 3. Run the schema script
@@ -35,6 +36,6 @@ In your Supabase project, open the **SQL Editor** and run the contents of [`supa
 ```bash
 npm install
 npm run dev     # http://localhost:3000
-npm run socket  # poker socket server, in a second terminal: http://localhost:4001
+npm run realtime  # poker realtime relay process, in a second terminal (connects outbound to Supabase, no port to open)
 npm test        # run all tests
 ```

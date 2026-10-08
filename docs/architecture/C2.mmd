@@ -6,12 +6,11 @@ flowchart LR
     subgraph SO["Stacks Overflowed (our system)"]
         Web["Web App<br/>(browser UI)<br/><br/>home, profile, shop,<br/>games, sports betting"]
         API["API Server<br/>(REST / JSON + JWT)<br/>+ Game Logic<br/><br/>accounts, profile, balance,<br/>cosmetics, wagering,<br/>roulette, slots, blackjack,<br/>game rules & state coordination"]
-        Socket["Socket Server<br/>(WebSocket / Socket.io)<br/><br/>real-time poker tables,<br/>turn timers, live table sync"]
+        PokerServer["Poker Realtime Server<br/>(Node process)<br/><br/>authoritative in-memory<br/>poker table state,<br/>turn timers, validates<br/>session tokens"]
 
         Web -->|"calls<br/>JSON + JWT"| API
-        Web -->|"connects<br/>WS / WSS"| Socket
-        API <-->|"validates session /<br/>coordinates state"| Socket
-        API -->|"game events /<br/>state updates"| Socket
+        API <-->|"validates session /<br/>coordinates state"| PokerServer
+        API -->|"game events /<br/>state updates"| PokerServer
     end
 
     Guest -->|"uses"| Web
@@ -21,7 +20,11 @@ flowchart LR
         DB["Database<br/>(PostgreSQL)<br/><br/>accounts, balances,<br/>wagers, game history"]
         Auth["Auth<br/>(Supabase Auth)<br/><br/>logins & tokens"]
         Storage["Storage<br/>(Supabase Storage)<br/><br/>profile photos & cosmetic images"]
+        Realtime["Realtime<br/>(Broadcast + Presence)<br/><br/>relays live poker table state<br/>between Web and PokerServer"]
     end
+
+    Web -->|"connects<br/>(outbound WS)"| Realtime
+    PokerServer -->|"connects<br/>(outbound WS)"| Realtime
 
     Odds["Sports Odds API<br/><br/>events, odds, scores"]
     AI["AI Provider<br/><br/>ChatGPT / Claude / Gemini"]

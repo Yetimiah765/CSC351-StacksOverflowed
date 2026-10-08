@@ -1,16 +1,24 @@
 // Sprint 1 scope: seating only. A player can join an open seat at the single
 // table and leave it again, subject to a configurable seat cap. This module
-// is intentionally decoupled from Socket.io so the seating rules can be unit
-// tested without standing up a real server.
+// is intentionally decoupled from any transport (Socket.io, Supabase
+// Realtime, or otherwise) so the seating rules can be unit tested without
+// standing up a real server.
 //
 // Traceability (docs/requirements/SRS):
 //   SRS-1.1  Join open seat
 //   SRS-1.4  Reject join on full table
 //   SRS-1.6  Join rejection message
-//   SRS-1.7  Public table state contents (seat occupancy + username only, for now)
+//   SRS-1.7  Public table state contents (seat occupancy, username, and
+//            profile picture, for now)
+//   SRS-8.1  Display seated players' profile pictures
+//   SRS-8.2  Default profile picture (seat.avatarUrl is null)
 //   SRS-21.1 Leave between hands (simplified: no in-hand/fold distinction yet,
 //            since hand/betting logic has not been built in this sprint)
 //   SRS-NFR-022 Maximum seat count (3-9 seats)
+//
+// playerId identifies the signed-in account (the players.player_id from
+// supabase/schema.sql, as a string), not a transport-level connection id —
+// the server layer maps each connection to the player_id it authenticated as.
 //
 // Buy-ins (SRS-1.2, SRS-1.3), reconnection grace periods (SRS-10.x, SRS-9.x),
 // and all hand/betting logic are deferred to later sprints.
@@ -23,6 +31,7 @@ export interface Seat {
   seatNumber: number;
   playerId: string | null;
   username: string | null;
+  avatarUrl: string | null;
 }
 
 export interface TableState {
@@ -62,6 +71,7 @@ export class PokerTable {
       seatNumber: index + 1,
       playerId: null,
       username: null,
+      avatarUrl: null,
     }));
   }
 
@@ -79,7 +89,7 @@ export class PokerTable {
   }
 
   /** SRS-1.1: occupy any open seat; SRS-1.4: reject when no seats are open. */
-  join(playerId: string, username: string): JoinResult {
+  join(playerId: string, username: string, avatarUrl: string | null = null): JoinResult {
     const trimmedUsername = username.trim();
 
     if (!trimmedUsername) {
@@ -102,6 +112,7 @@ export class PokerTable {
 
     openSeat.playerId = playerId;
     openSeat.username = trimmedUsername;
+    openSeat.avatarUrl = avatarUrl;
 
     return { ok: true, seatNumber: openSeat.seatNumber };
   }
@@ -116,6 +127,7 @@ export class PokerTable {
     const seatNumber = seat.seatNumber;
     seat.playerId = null;
     seat.username = null;
+    seat.avatarUrl = null;
 
     return { ok: true, seatNumber };
   }

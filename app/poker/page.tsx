@@ -1,13 +1,23 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { getSupabaseBrowserClient } from '../../lib/supabase';
+import {
+  POKER_CHANNEL_NAME,
+  POKER_EVENT_ACTION,
+  POKER_EVENT_ACK,
+  POKER_EVENT_STATE,
+  type PokerAckPayload,
+  type PokerAction,
+} from '../../lib/pokerRealtime';
 
 interface Seat {
   seatNumber: number;
   playerId: string | null;
   username: string | null;
+  avatarUrl: string | null;
 }
 
 interface TableState {
@@ -17,59 +27,192 @@ interface TableState {
   seats: Seat[];
 }
 
-interface ActionResult {
-  ok: boolean;
-  error?: string;
-  seatNumber?: number;
+interface OwnProfile {
+  playerId: number;
+  username: string | null;
+  profilePhotoDataUrl: string | null;
 }
 
-const SOCKET_URL = process.env.NEXT_PUBLIC_POKER_SOCKET_URL || 'http://localhost:4001';
+// A tiny dependency-free id, unique-enough for correlating requests/presence
+// — not crypto.randomUUID(), which is secure-context-only and would silently
+// break testing over plain http://<lan-ip>:3000, exactly the cross-laptop
+// scenario this page's real-time transport is for.
+function generateId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
 
 export default function PokerTablePage() {
-  const [socket, setSocket] = useState<Socket | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [profile, setProfile] = useState<OwnProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState('');
+
+  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
   const [connected, setConnected] = useState(false);
   const [tableState, setTableState] = useState<TableState | null>(null);
-  const [username, setUsername] = useState('');
-  const [error, setError] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [avatars, setAvatars] = useState<Record<string, string | null>>({});
 
+  const connectionIdRef = useRef(generateId());
+  const pendingRef = useRef(new Map<string, (ack: PokerAckPayload) => void>());
+  const fetchedAvatarsRef = useRef(new Set<string>());
+
+  // Avatars aren't carried through the table:state broadcast (a profile
+  // photo as base64 can exceed Realtime's broadcast payload size limit), so
+  // each seated player's avatar is fetched separately as seats appear.
   useEffect(() => {
-    const nextSocket = io(SOCKET_URL);
-    setSocket(nextSocket);
+    if (!tableState) return;
 
-    nextSocket.on('connect', () => setConnected(true));
-    nextSocket.on('disconnect', () => setConnected(false));
-    nextSocket.on('table:state', (state: TableState) => setTableState(state));
+    tableState.seats.forEach((seat) => {
+      if (!seat.playerId || fetchedAvatarsRef.current.has(seat.playerId)) return;
+      fetchedAvatarsRef.current.add(seat.playerId);
 
-    return () => {
-      nextSocket.disconnect();
-    };
+      fetch(`/api/players/${seat.playerId}/avatar`)
+        .then((res) => res.json())
+        .then((data) => setAvatars((prev) => ({ ...prev, [seat.playerId as string]: data.avatarUrl ?? null })))
+        .catch(() => setAvatars((prev) => ({ ...prev, [seat.playerId as string]: null })));
+    });
+  }, [tableState]);
+
+  // SRS-1.1/1.7: joining (and seeing the table) requires a signed-in player
+  // whose own profile — username and picture — is what gets seated.
+  useEffect(() => {
+    const stored = localStorage.getItem('player_token');
+    setToken(stored);
+    if (!stored) {
+      setProfileLoading(false);
+      return;
+    }
+
+    fetch('/api/profile', { headers: { Authorization: `Bearer ${stored}` } })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) {
+          setProfileError(data.error || 'Failed to load your profile.');
+          return;
+        }
+        setProfile(data.profile);
+      })
+      .finally(() => setProfileLoading(false));
   }, []);
 
-  const mySeat = useMemo(() => {
-    if (!socket || !tableState) return null;
-    return tableState.seats.find((seat) => seat.playerId === socket.id) ?? null;
-  }, [socket, tableState]);
+  useEffect(() => {
+    if (!token || !profile) return;
 
-  const isFull = tableState ? tableState.seatedCount >= tableState.maxSeats : false;
+    const supabase = getSupabaseBrowserClient();
+    if (!supabase) {
+      setJoinError('Realtime is not configured.');
+      return;
+    }
 
-  function handleJoin() {
-    if (!socket) return;
-    setError('');
-    socket.emit('table:join', { username }, (result: ActionResult) => {
-      if (!result.ok) {
-        setError(result.error || 'Unable to join the table.');
+    const connectionId = connectionIdRef.current;
+    const nextChannel = supabase.channel(POKER_CHANNEL_NAME, {
+      config: { broadcast: { self: false }, presence: { key: connectionId } },
+    });
+
+    nextChannel.on(
+      'broadcast',
+      { event: POKER_EVENT_STATE },
+      ({ payload }: { payload: TableState }) => setTableState(payload)
+    );
+    nextChannel.on(
+      'broadcast',
+      { event: POKER_EVENT_ACK },
+      ({ payload }: { payload: PokerAckPayload }) => {
+        pendingRef.current.get(payload.requestId)?.(payload);
+        pendingRef.current.delete(payload.requestId);
       }
+    );
+
+    nextChannel.subscribe((status) => {
+      setConnected(status === 'SUBSCRIBED');
+      if (status === 'SUBSCRIBED') {
+        nextChannel.send({
+          type: 'broadcast',
+          event: POKER_EVENT_ACTION,
+          payload: { requestId: generateId(), action: 'sync', connectionId },
+        });
+      }
+    });
+
+    setChannel(nextChannel);
+
+    return () => {
+      supabase.removeChannel(nextChannel);
+    };
+  }, [token, profile]);
+
+  function sendAction(action: PokerAction): Promise<PokerAckPayload> {
+    return new Promise((resolve) => {
+      const requestId = generateId();
+      pendingRef.current.set(requestId, resolve);
+      channel?.send({
+        type: 'broadcast',
+        event: POKER_EVENT_ACTION,
+        payload: {
+          requestId,
+          action,
+          connectionId: connectionIdRef.current,
+          token: token ?? undefined,
+        },
+      });
     });
   }
 
-  function handleLeave() {
-    if (!socket) return;
-    setError('');
-    socket.emit('table:leave', (result: ActionResult) => {
-      if (!result.ok) {
-        setError(result.error || 'Unable to leave the table.');
-      }
-    });
+  const mySeat = useMemo(() => {
+    if (!profile || !tableState) return null;
+    return tableState.seats.find((seat) => seat.playerId === String(profile.playerId)) ?? null;
+  }, [profile, tableState]);
+
+  const isFull = tableState ? tableState.seatedCount >= tableState.maxSeats : false;
+
+  async function handleJoin() {
+    if (!channel || !token) return;
+    setJoinError('');
+    const result = await sendAction('join');
+    if (result.ok) {
+      await channel.track({ joinedAt: Date.now() });
+    } else {
+      setJoinError(result.error || 'Unable to join the table.');
+    }
+  }
+
+  async function handleLeave() {
+    if (!channel) return;
+    setJoinError('');
+    const result = await sendAction('leave');
+    if (result.ok) {
+      await channel.untrack();
+    } else {
+      setJoinError(result.error || 'Unable to leave the table.');
+    }
+  }
+
+  if (profileLoading) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+        <p className="text-slate-400">Loading…</p>
+      </main>
+    );
+  }
+
+  // SRS-1.1 (simplified): the poker room is only accessible to a signed-in player.
+  if (!token || !profile) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6">
+        <section className="text-center space-y-4">
+          <p className="text-slate-300">
+            {profileError || 'You must be logged in to join the poker table.'}
+          </p>
+          <Link
+            href="/login"
+            className="inline-block rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm hover:border-emerald-400 hover:text-emerald-200"
+          >
+            Go to login
+          </Link>
+        </section>
+      </main>
+    );
   }
 
   return (
@@ -92,50 +235,71 @@ export default function PokerTablePage() {
           {tableState?.seats.map((seat) => (
             <div
               key={seat.seatNumber}
-              className={`rounded-xl border p-4 text-sm ${
+              className={`flex items-center gap-3 rounded-xl border p-4 text-sm ${
                 seat.playerId
                   ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-100'
                   : 'border-slate-700 bg-slate-800/60 text-slate-400'
               }`}
             >
-              <p className="text-xs uppercase tracking-wide text-slate-500">Seat {seat.seatNumber}</p>
-              <p className="mt-1 font-medium">{seat.username ?? 'Open'}</p>
-              {seat.playerId === socket?.id ? <p className="mt-1 text-xs text-emerald-300">(you)</p> : null}
+              {seat.playerId ? (
+                <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-emerald-500/40 bg-slate-900">
+                  {avatars[seat.playerId] ? (
+                    <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-sm font-semibold text-emerald-200">
+                      {seat.username?.[0]?.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slate-500">Seat {seat.seatNumber}</p>
+                <p className="mt-1 font-medium">{seat.username ?? 'Open'}</p>
+                {seat.playerId === String(profile.playerId) ? (
+                  <p className="mt-1 text-xs text-emerald-300">(you)</p>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>
 
         <div className="mt-8 space-y-4">
-          {!mySeat ? (
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <input
-                type="text"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="Enter a username"
-                className="flex-1 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none transition focus:border-emerald-400"
-              />
-              <button
-                type="button"
-                onClick={handleJoin}
-                disabled={!connected || isFull}
-                className="rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                Join table
-              </button>
+          <div className="flex items-center gap-3 rounded-xl border border-slate-700 bg-slate-800/60 p-3">
+            <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full border border-slate-700 bg-slate-900">
+              {profile.profilePhotoDataUrl ? (
+                <img src={profile.profilePhotoDataUrl} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <span className="flex h-full w-full items-center justify-center text-sm font-semibold text-slate-300">
+                  {profile.username?.[0]?.toUpperCase()}
+                </span>
+              )}
             </div>
+            <p className="text-sm text-slate-300">
+              Signed in as <span className="font-semibold text-slate-100">{profile.username}</span>
+            </p>
+          </div>
+
+          {!mySeat ? (
+            <button
+              type="button"
+              onClick={handleJoin}
+              disabled={!connected || isFull}
+              className="w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {isFull ? 'Table full' : 'Join table'}
+            </button>
           ) : (
             <button
               type="button"
               onClick={handleLeave}
-              className="rounded-xl bg-red-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-red-300"
+              className="w-full rounded-xl bg-red-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-red-300"
             >
               Leave seat {mySeat.seatNumber}
             </button>
           )}
 
-          {error ? (
-            <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{error}</p>
+          {joinError ? (
+            <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{joinError}</p>
           ) : null}
         </div>
 

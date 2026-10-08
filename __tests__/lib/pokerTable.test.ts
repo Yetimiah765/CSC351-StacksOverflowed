@@ -9,7 +9,20 @@ describe('PokerTable', () => {
 
     expect(result).toEqual({ ok: true, seatNumber: 1 });
     expect(table.getState().seatedCount).toBe(1);
-    expect(table.getState().seats[0]).toEqual({ seatNumber: 1, playerId: 'player-1', username: 'Alice' });
+    expect(table.getState().seats[0]).toEqual({
+      seatNumber: 1,
+      playerId: 'player-1',
+      username: 'Alice',
+      avatarUrl: null,
+    });
+  });
+
+  it('stores the avatar URL passed at join time (SRS-8.1)', () => {
+    const table = new PokerTable('table-1', 3);
+
+    table.join('player-1', 'Alice', 'data:image/png;base64,abc123');
+
+    expect(table.getState().seats[0].avatarUrl).toBe('data:image/png;base64,abc123');
   });
 
   it('fills seats in order as more players join', () => {
@@ -71,7 +84,12 @@ describe('PokerTable', () => {
 
     expect(result).toEqual({ ok: true, seatNumber: 1 });
     expect(table.getState().seatedCount).toBe(0);
-    expect(table.getState().seats[0]).toEqual({ seatNumber: 1, playerId: null, username: null });
+    expect(table.getState().seats[0]).toEqual({
+      seatNumber: 1,
+      playerId: null,
+      username: null,
+      avatarUrl: null,
+    });
   });
 
   it('allows a freed seat to be rejoined by a different player', () => {

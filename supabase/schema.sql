@@ -575,6 +575,9 @@ CREATE TABLE leagues (
     sport_id        INTEGER      NOT NULL
                     REFERENCES sports(sport_id),
     league_name     VARCHAR(100) NOT NULL,
+    -- The Odds API sport key (e.g. 'americanfootball_nfl'); NULL for
+    -- leagues entered by hand.
+    odds_api_key    VARCHAR(100) UNIQUE,
 
     CONSTRAINT uq_leagues_name_per_sport UNIQUE (sport_id, league_name)
 );
@@ -600,6 +603,9 @@ CREATE TABLE teams (
 -- Purpose: Stores each sports event with its league, two teams, start time, status, and score.
 CREATE TABLE sports_events (
     event_id        SERIAL       PRIMARY KEY,
+    -- The Odds API event id, used to upsert on each sync; NULL for events
+    -- entered by hand.
+    external_id     VARCHAR(64)  UNIQUE,
     league_id       INTEGER      NOT NULL
                     REFERENCES leagues(league_id),
     home_team_id    INTEGER      NOT NULL,
@@ -911,3 +917,22 @@ INSERT INTO games (game_code, display_name) VALUES
     ('slots',          'Slot Machine'),
     ('blackjack',      'Blackjack'),
     ('sports_betting', 'Sports Betting');
+
+-- SRS-203.1, SRS-203.2, SRS-215.2: the market types synced from The Odds API
+-- (h2h, spreads, totals) with the rules shown to players.
+INSERT INTO market_types (market_type_code, display_name, description, rules_text, tie_rules, refund_conditions) VALUES
+    ('moneyline', 'Moneyline',
+     'Pick which team wins the game outright.',
+     'Your pick must win the game. Overtime counts.',
+     'If the game ends in a tie and no Draw option was offered, the wager is refunded. If a Draw option was offered, only the Draw pick wins.',
+     'Refunded if the event is canceled or postponed.'),
+    ('point_spread', 'Point Spread',
+     'Pick a team to cover the spread: the favorite must win by more than the line, the underdog must win or lose by less than it.',
+     'Add the spread to your team''s final score. Your pick wins if that adjusted score is higher than the opponent''s. Overtime counts.',
+     'If the adjusted scores are equal (a push), the wager is refunded.',
+     'Refunded on a push, or if the event is canceled or postponed.'),
+    ('total', 'Over/Under',
+     'Pick whether the combined final score will be over or under the line.',
+     'Add both teams'' final scores. Over wins if the sum is above the line; Under wins if it is below. Overtime counts.',
+     'If the combined score equals the line exactly (a push), the wager is refunded.',
+     'Refunded on a push, or if the event is canceled or postponed.');

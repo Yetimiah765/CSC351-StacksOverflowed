@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 interface Profile {
@@ -14,6 +15,7 @@ interface Profile {
 }
 
 export default function ProfilePage() {
+  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,11 +28,14 @@ export default function ProfilePage() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [loggingOut, setLoggingOut] = useState(false);
+
   useEffect(() => {
     const stored = localStorage.getItem('player_token');
     setToken(stored);
+    // SRS-111.3: guests are redirected to log in.
     if (!stored) {
-      setLoading(false);
+      router.replace('/login');
       return;
     }
     fetchProfile(stored);
@@ -41,6 +46,13 @@ export default function ProfilePage() {
     const res = await fetch('/api/profile', {
       headers: { Authorization: `Bearer ${playerToken}` },
     });
+    // The session ended elsewhere (a newer login, SRS-103.5), so this
+    // browser is no longer logged in.
+    if (res.status === 401) {
+      localStorage.removeItem('player_token');
+      router.replace('/login');
+      return;
+    }
     const data = await res.json();
     setLoading(false);
     if (!res.ok) {
@@ -90,29 +102,36 @@ export default function ProfilePage() {
     event.target.value = '';
   }
 
+  // SRS-105.1: end the session on the server too, so this token stops
+  // working everywhere. The local token is cleared even if that request
+  // fails, so the player is always logged out of this browser.
+  async function handleLogout() {
+    setLoggingOut(true);
+    try {
+      if (token) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      }
+    } catch {
+      // Network failure: still log out locally below.
+    }
+    localStorage.removeItem('player_token');
+    router.push('/');
+  }
+
+  // Guests stay on this view until the redirect to /login completes.
   if (loading) {
     return (
-      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+      <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center">
         <p className="text-slate-400">Loading…</p>
       </main>
     );
   }
 
-  if (!token) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6">
-        <section className="text-center space-y-4">
-          <p className="text-slate-300">You must be logged in to view your profile.</p>
-          <Link href="/login" className="inline-block rounded-full border border-slate-700 bg-slate-800 px-4 py-2 text-sm hover:border-emerald-400 hover:text-emerald-200">
-            Go to login
-          </Link>
-        </section>
-      </main>
-    );
-  }
-
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
+    <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
       <section className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/30">
         <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Profile</p>
 
@@ -200,9 +219,19 @@ export default function ProfilePage() {
           <p className="mt-4 text-slate-300">Unable to load your profile.</p>
         )}
 
-        <p className="mt-8 text-sm text-slate-300">
-          Back to <Link href="/" className="text-emerald-300 hover:underline">home</Link>
-        </p>
+        <div className="mt-8 flex items-center justify-between">
+          <p className="text-sm text-slate-300">
+            Back to <Link href="/" className="text-emerald-300 hover:underline">home</Link>
+          </p>
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={loggingOut}
+            className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-sm hover:border-red-400 hover:text-red-200 disabled:opacity-70"
+          >
+            {loggingOut ? 'Logging out…' : 'Log out'}
+          </button>
+        </div>
       </section>
     </main>
   );

@@ -762,396 +762,911 @@ flowchart LR
 
 *Traces to: UR-016*
 
-* # Login/Registration Page
+# Login/Registration Page
 
-* ### **UR-101, JO – Sign Up**
+### UR-101, JO – Sign Up
 
-  * **SRS-101.1, Required registration information.** The system shall require a new player to provide a first name, last name, birthday, username, and password before creating an account.  
-    Traces to: UR-101  
-  * **SRS-101.2, Name validation.** The system shall allow first and last names to contain letters, spaces, apostrophes, and hyphens. The system shall reject names containing numbers or other special characters.  
-    Traces to: UR-101  
-  * **SRS-101.3, Username length.** The system shall require usernames to contain between 6 and 10 characters.  
-    Traces to: UR-101  
-  * **SRS-101.4, Username characters.** The system shall allow only letters and numbers in usernames and shall reject spaces and special characters.  
-    Traces to: UR-101  
-  * **SRS-101.5, Username uniqueness.** The system shall reject account creation when the requested username is already assigned to or temporarily reserved by another account.  
-    Traces to: UR-101  
-  * **SRS-101.6, Case-insensitive usernames.** The system shall treat usernames as case-insensitive when identifying accounts and checking username uniqueness.  
-    Traces to: UR-101  
-  * **SRS-101.7, Password composition.** The system shall require passwords to contain at least 8 characters, at least one letter, and at least one number. Passwords shall contain only letters and numbers.  
-    Traces to: UR-101  
-  * **SRS-101.8, Case-sensitive passwords.** The system shall treat uppercase and lowercase letters in passwords as different characters.  
-    Traces to: UR-101  
-  * **SRS-101.9, No email requirement.** The system shall not require an email address during registration.  
-    Traces to: UR-101  
-  * **SRS-101.10, No account recovery.** The system shall not provide an account-recovery or password-recovery feature.  
-    Traces to: UR-101
+*User story: As a new player, I want to create an account using my first name, last name, birthday, unique username, and password, so that I may access and play the games available on the website.*
 
-* ### **UR-102, JO – Age Requirement**
+**SRS-101.1, JO, Required registration information.** The system shall require a new player to provide a first name, last name, birthday, username, and password before creating an account.
 
-  * **SRS-102.1, Minimum age.** The system shall permit account creation only when the birthday provided during registration indicates that the player is at least 21 years old.  
-    Traces to: UR-102  
-  * **SRS-102.2, Birthday persistence.** The system shall store the birthday provided during registration and shall not provide a function for the player to edit it after account creation.  
-    Traces to: UR-102, UR-112
+*Traces to: UR-101*
 
-* ### **UR-103, JO – Log In**
+**SRS-101.2, JO, Allowed name characters.** The system shall allow first and last names to contain letters, spaces, apostrophes, and hyphens.
 
-  * **SRS-103.1, Login credentials.** The system shall allow a registered player to log in using their username and password.  
-    Traces to: UR-103  
-  * **SRS-103.2, Account restoration.** After successful login, the system shall retrieve the player's saved profile information, balance, statistics, owned cosmetics, and equipped cosmetics.  
-    Traces to: UR-103  
-  * **SRS-103.3, Session persistence.** The system shall keep the player logged in while the active website tab remains open unless the player manually logs out or the session is invalidated.  
-    Traces to: UR-103  
-  * **SRS-103.4, Single active session.** The system shall allow only one authenticated browser tab or window to use an account at a time.  
-    Traces to: UR-103  
-  * **SRS-103.5, Replacement login.** When the same account successfully logs in from another browser tab or window, the system shall invalidate the previously active authenticated session.  
-    Traces to: UR-103  
-  * **SRS-103.6, Duplicated-tab handling.** If an authenticated browser tab is duplicated and causes the same account session to exist in more than one tab, the system shall invalidate both tabs and redirect both to the login/registration page.  
-    Traces to: UR-103  
-  * **SRS-103.7, Reauthentication after duplication.** After duplicated authenticated tabs are invalidated, the player shall be required to successfully log in again before accessing the account.  
-    Traces to: UR-103
+*Traces to: UR-101*
 
-* ### **UR-104, JO – Account Validation**
+**SRS-101.3, JO, Invalid name characters.** The system shall reject first and last names containing numbers or other special characters.
 
-  * **SRS-104.1, Registration validation.** The system shall validate all registration fields before creating an account.  
-    Traces to: UR-104  
-  * **SRS-104.2, Credential verification.** The system shall verify the submitted username and password against the stored credentials before granting account access.  
-    Traces to: UR-104  
-  * **SRS-104.3, Invalid registration information.** The system shall reject registration information that does not satisfy the applicable registration requirements.  
-    Traces to: UR-104  
-  * **SRS-104.4, Password hashing.** The system shall store passwords using a secure password-hashing method and shall never store passwords in plaintext.  
-    Traces to: UR-104  
-  * **SRS-104.5, Password verification.** Login and password-confirmation operations shall verify submitted passwords against the stored password hash rather than against plaintext password data.  
-    Traces to: UR-104
+*Traces to: UR-101*
 
-* ### **UR-105, JO – Log Out**
+**SRS-101.4, JO, Username length.** The system shall require usernames to contain between 6 and 10 characters.
 
-  * **SRS-105.1, Manual logout.** The system shall provide a logout control that ends the player's current authenticated session.  
-    Traces to: UR-105  
-  * **SRS-105.2, Tab closure.** The system shall end the player's authenticated session when the active website tab is closed.  
-    Traces to: UR-105  
-  * **SRS-105.3, Session restoration.** The system shall not automatically restore the previous authenticated session when the website is reopened after the active tab was closed.  
-    Traces to: UR-105
+*Traces to: UR-101*
 
-* ### **UR-106, JO – Delete Account**
+**SRS-101.5, JO, Username characters.** The system shall allow only letters and numbers in usernames and shall reject spaces and special characters.
 
-  * **SRS-106.1, Account-deletion confirmation.** The system shall display a confirmation prompt before beginning permanent account deletion.  
-    Traces to: UR-106  
-  * **SRS-106.2, Password verification for deletion.** The system shall require the player to enter and successfully verify their current password before account deletion can begin.  
-    Traces to: UR-106  
-  * **SRS-106.3, Permanent account deletion.** When final deletion occurs, the system shall permanently delete all information associated with the account, including profile information, balance, statistics, cosmetics, and authentication information.  
-    Traces to: UR-106  
-  * **SRS-106.4, No deleted-account recovery.** The system shall not provide a method for recovering a permanently deleted account.  
-    Traces to: UR-106  
-  * **SRS-106.5, Username release after deletion.** After an account is permanently deleted, the system shall make the deleted account's username available for registration or use by another account.  
-    Traces to: UR-106  
-  * **SRS-106.6, Pending-deletion state.** If the player confirms account deletion while unresolved account activity exists, the system shall place the account into a pending-deletion state.  
-    Traces to: UR-106  
-  * **SRS-106.7, Pending-deletion access restriction.** While an account is pending deletion, the system shall prevent the player from accessing or using the account.  
-    Traces to: UR-106  
-  * **SRS-106.8, Pending-deletion activity restriction.** A pending-deletion account shall not be permitted to begin new games, place new wagers, make purchases, edit profile information, or perform other player-initiated account actions.  
-    Traces to: UR-106  
-  * **SRS-106.9, Existing activity settlement.** The system shall continue processing unresolved activity that existed before the account entered the pending-deletion state until that activity reaches a final result.  
-    Traces to: UR-106  
-  * **SRS-106.10, Final deletion.** After all unresolved account activity reaches a final result, the system shall permanently delete the account and all associated account data.  
-    Traces to: UR-106
+*Traces to: UR-101*
 
-  * # Home Page
+**SRS-101.6, JO, Username uniqueness.** The system shall reject account creation when the requested username is already assigned to or temporarily reserved by another account.
 
-* ### **UR-107, JO – View Available Games**
+*Traces to: UR-101*
 
-  * **SRS-107.1, Display available games.** The system shall display the games currently available from the home page.  
-    Traces to: UR-107  
-  * **SRS-107.2, Guest home-page access.** The system shall allow unauthenticated guests to view the home page and available game listings.  
-    Traces to: UR-107
+**SRS-101.7, JO, Case-insensitive usernames.** The system shall treat usernames as case-insensitive when identifying accounts and checking username uniqueness.
 
-* ### **UR-108, JO – Select Game**
+*Traces to: UR-101*
 
-  * **SRS-108.1, Player game selection.** The system shall allow a logged-in player to select an available game from the home page.  
-    Traces to: UR-108  
-  * **SRS-108.2, Game navigation.** Selecting an available game while authenticated shall navigate the player to that game's interface.  
-    Traces to: UR-108  
-  * **SRS-108.3, Guest game restriction.** If an unauthenticated guest attempts to enter a game, the system shall redirect the guest to the login/registration page and shall not begin gameplay.  
-    Traces to: UR-108
+**SRS-101.8, JO, Password composition.** The system shall require passwords to contain at least 8 characters, at least one letter, and at least one number. Passwords shall contain only letters and numbers.
 
-* ### **UR-109, JO – View Balance**
+*Traces to: UR-101*
 
-  * **SRS-109.1, Player balance display.** The system shall display the authenticated player's current virtual-currency balance.  
-    Traces to: UR-109  
-  * **SRS-109.2, Persistent balance.** The system shall preserve the player's balance across logout, tab closure, disconnection, and future login sessions.  
-    Traces to: UR-109  
-  * **SRS-109.3, Insufficient-balance protection.** The system shall prevent a transaction or wager that requires more virtual currency than the player currently possesses.  
-    Traces to: UR-109  
-  * **SRS-109.4, Guest balance display.** The system shall display a balance of 0 coins to unauthenticated guests.  
-    Traces to: UR-109
+**SRS-101.9, JO, Case-sensitive passwords.** The system shall treat uppercase and lowercase letters in passwords as different characters.
 
-* ### **UR-110, JO – Receive Virtual Currency**
+*Traces to: UR-101*
 
-  * **SRS-110.1, Initial currency.** The system shall assign 1,000 coins to the player's balance when the account is successfully created.  
-    Traces to: UR-110  
-  * **SRS-110.2, Daily-reward eligibility.** The system shall make an account eligible for daily currency only after the account has existed for at least 24 hours.  
-    Traces to: UR-110  
-  * **SRS-110.3, First daily award.** After the account becomes eligible, the system shall add the first 1,000-coin daily reward at the next 12:00 AM calendar-day boundary in the America/New\_York time zone.  
-    Traces to: UR-110  
-  * **SRS-110.4, Recurring daily award.** After the first daily award, the system shall add another 1,000 coins at each subsequent 12:00 AM America/New\_York calendar-day boundary.  
-    Traces to: UR-110  
-  * **SRS-110.5, Login-independent accrual.** The system shall ensure that eligible daily rewards are credited regardless of whether the player logs into the system.  
-    Traces to: UR-110  
-  * **SRS-110.6, Missed-day accrual.** If a player does not log in for multiple eligible calendar days, the player's balance shall include every daily 1,000-coin increase accumulated during that period.  
-    Traces to: UR-110  
-  * **SRS-110.7, Automatic daily rewards.** The system shall add daily rewards without requiring the player to manually claim them.  
-    Traces to: UR-110  
-  * **SRS-110.8, No daily-reward popup.** The system shall not require the player to acknowledge a popup or other notification when a daily reward is added.  
-    Traces to: UR-110  
-  * **SRS-110.9, Live balance update.** If a daily 1,000-coin reward is credited while the player has an active session, the system shall update the displayed balance without requiring a page refresh or reload.  
-    Traces to: UR-110
+**SRS-101.10, JO, No email requirement.** The system shall not require an email address during registration.
 
-  * # Profile Page
+*Traces to: UR-101*
 
-* ### **UR-111, JO – View Profile**
+**SRS-101.11, JO, No account recovery.** The system shall not provide an account-recovery or password-recovery feature.
 
-  * **SRS-111.1, Profile navigation.** The system shall provide a method for the logged-in player to navigate to their own profile page.  
-    Traces to: UR-111  
-  * **SRS-111.2, Profile content.** The player's profile page shall display their permitted account information, statistics, owned cosmetics, and equipped cosmetics.  
-    Traces to: UR-111  
-  * **SRS-111.3, Guest profile restriction.** If an unauthenticated guest attempts to access a profile, the system shall redirect the guest to the login/registration page.  
-    Traces to: UR-111
+*Traces to: UR-101*
 
-* ### **UR-112, JO – Edit Profile**
+### UR-102, JO – Age Requirement
 
-  * **SRS-112.1, Editable information.** The system shall allow the player to edit their first name, last name, username, profile photo, and bio. Password changes shall be handled only through the Change Password functionality defined under UR-113.  
-    Traces to: UR-112  
-  * **SRS-112.2, Birthday restriction.** The system shall not allow the player to edit their birthday after account creation.  
-    Traces to: UR-112  
-  * **SRS-112.3, Edited-name validation.** Edited first and last names shall satisfy the same name requirements used during registration.  
-    Traces to: UR-112  
-  * **SRS-112.4, Username-change validation.** A changed username shall satisfy the same length, character, uniqueness, and case-insensitivity requirements used during registration.  
-    Traces to: UR-112  
-  * **SRS-112.5, Username-change authentication.** The system shall not require the player to re-enter their password solely to change their username.  
-    Traces to: UR-112  
-  * **SRS-112.6, Username-change frequency.** The system shall allow a player to change their username no more than once within any 24-hour period.  
-    Traces to: UR-112  
-  * **SRS-112.7, Previous-username reservation.** After a username change, the system shall keep the previous username unavailable for 24 hours.  
-    Traces to: UR-112  
-  * **SRS-112.8, Previous-username release.** After the 24-hour reservation period expires, the system shall make the previous username available for registration or use by another account.  
-    Traces to: UR-112
+*User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*
 
-* ### **UR-113, JO – Change Password**
+**SRS-102.1, JO, Minimum age.** The system shall permit account creation only when the birthday provided during registration indicates that the player is at least 21 years old.
 
-  * **SRS-113.1, Current-password requirement.** The system shall require the player to enter their current password before allowing the password to be changed.  
-    Traces to: UR-113  
-  * **SRS-113.2, Current-password verification.** The system shall verify the submitted current password before saving a new password.  
-    Traces to: UR-113  
-  * **SRS-113.3, New-password validation.** The new password shall satisfy the same password length, composition, character, and case-sensitivity requirements used during registration.  
-    Traces to: UR-113
+*Traces to: UR-102*
 
-* ### **UR-114, JO – Edit Bio**
+**SRS-102.2, JO, Birthday storage.** The system shall store the birthday provided during registration as part of the player's account information.
 
-  * **SRS-114.1, Bio maximum length.** The system shall limit a player's profile bio to a maximum of 50 words.  
-    Traces to: UR-114  
-  * **SRS-114.2, Optional bio.** The system shall allow the player to leave the bio empty.  
-    Traces to: UR-114  
-  * **SRS-114.3, Remove bio.** The system shall allow an existing bio to be cleared completely.  
-    Traces to: UR-114  
-  * **SRS-114.4, Bio word-count calculation.** The system shall determine the bio word count using whitespace-separated words after removing leading and trailing whitespace and treating consecutive whitespace characters as a single separator.  
-    Traces to: UR-114
+*Traces to: UR-102*
 
-* ### **UR-115, JO – Edit Profile Photo**
+**SRS-102.3, JO, Birthday editing restriction.** The system shall not provide a function for the player to edit their birthday after account creation.
 
-  * **SRS-115.1, Profile-photo format validation.** The system shall accept only valid PNG image files as uploaded profile photos and shall verify the actual file format rather than relying only on the .png filename extension.  
-    Traces to: UR-115  
-  * **SRS-115.2, Profile-photo size.** The system shall reject profile-photo files larger than 5 MB.  
-    Traces to: UR-115  
-  * **SRS-115.3, Default profile icon.** The system shall display a blank default profile icon for accounts that do not have an uploaded profile photo.  
-    Traces to: UR-115  
-  * **SRS-115.4, Remove profile photo.** The system shall allow the player to remove an uploaded profile photo and return to the blank default icon.  
-    Traces to: UR-115
+*Traces to: UR-102, UR-112*
 
-* ### **UR-116, JO – View Time Played**
+### UR-103, JO – Log In
 
-  * **SRS-116.1, Total time played.** The system shall store and display the player's total active casino-game playtime.  
-    Traces to: UR-116  
-  * **SRS-116.2, Per-game time played.** The system shall store and display active playtime separately for each supported casino game.  
-    Traces to: UR-116  
-  * **SRS-116.3, Gameplay-start requirement.** The system shall begin measuring playtime only when the player begins actively participating in a game. Opening or viewing the game page shall not begin the timer.  
-    Traces to: UR-116  
-  * **SRS-116.4, Active-game timing.** The system shall continue measuring time while an active game, hand, round, or equivalent gameplay sequence remains in progress and the player remains an active participant.  
-    Traces to: UR-116  
-  * **SRS-116.5, Between-round inactivity.** Time spent after a completed hand or round and before the player begins another gameplay sequence shall not be added to playtime.  
-    Traces to: UR-116  
-  * **SRS-116.6, Early exit.** If the player leaves before the active gameplay sequence is completed, the active time accumulated before leaving shall remain included in the player's statistics.  
-    Traces to: UR-116  
-  * **SRS-116.7, Timeout handling.** When a player reaches the timeout condition defined by the current game, the system shall stop adding time to the player's playtime.  
-    Traces to: UR-116  
-  * **SRS-116.8, Gameplay resumption.** After a timeout or interruption, the system shall begin adding time again only after the player resumes active gameplay.  
-    Traces to: UR-116  
-  * **SRS-116.9, Game-specific timeouts.** Each supported game shall define its own timeout duration and timeout behavior in that game's individual requirements.  
-    Traces to: UR-116  
-  * **SRS-116.10, Sports-betting exclusion.** The system shall not include time spent browsing, placing, monitoring, or resolving sports bets in the player's time-played statistics.  
-    Traces to: UR-116  
-  * **SRS-116.11, Multiplayer waiting time.** During an active multiplayer hand or round, time spent waiting for other active players to complete their turns shall count toward the player's time played.  
-    Traces to: UR-116
+*User story: As a returning player, I want to log into my account using my username and password, so that I may access my saved balance, profile information, statistics, and cosmetics.*
 
-* ### **UR-117, JO – View Overall Money Won and Lost**
+**SRS-103.1, JO, Login credentials.** The system shall allow a registered player to log in using their username and password.
 
-  * **SRS-117.1, Total money won.** The system shall store and display the player's cumulative virtual-currency profit from completed gameplay and sports-betting outcomes.  
-    Traces to: UR-117  
-  * **SRS-117.2, Profit calculation.** When an outcome produces a positive net result, the system shall add only the amount of profit to total money won rather than the full payout.  
-    Traces to: UR-117  
-  * **SRS-117.3, Total money lost.** The system shall store and display the cumulative virtual currency lost from completed gameplay and sports-betting outcomes.  
-    Traces to: UR-117  
-  * **SRS-117.4, Loss calculation.** When an outcome produces a negative net result, the system shall add the absolute value of that negative result to total money lost.  
-    Traces to: UR-117  
-  * **SRS-117.5, Tie or push.** When an outcome produces no net gain or loss, the system shall add zero to both money won and money lost.  
-    Traces to: UR-117  
-  * **SRS-117.6, Initial-currency exclusion.** The initial 1,000 coins received at account creation shall not count as money won.  
-    Traces to: UR-117  
-  * **SRS-117.7, Daily-currency exclusion.** Daily 1,000-coin rewards shall not count as money won.  
-    Traces to: UR-117  
-  * **SRS-117.8, Cosmetic-purchase exclusion.** Currency spent purchasing cosmetics or blind boxes shall not count as money lost.  
-    Traces to: UR-117  
-  * **SRS-117.9, Duplicate-refund exclusion.** Currency received from a duplicate-cosmetic refund shall not count as money won.  
-    Traces to: UR-117
+*Traces to: UR-103*
 
-* ### **UR-118, JO – View Money Won and Lost by Game**
+**SRS-103.2, JO, Account restoration.** After successful login, the system shall retrieve the player's saved profile information, balance, statistics, owned cosmetics, and equipped cosmetics.
 
-  * **SRS-118.1, Per-game winnings.** The system shall track and display virtual-currency profit separately for each supported casino game and sports betting.  
-    Traces to: UR-118  
-  * **SRS-118.2, Per-game losses.** The system shall track and display virtual-currency losses separately for each supported casino game and sports betting.  
-    Traces to: UR-118  
-  * **SRS-118.3, Consistent calculations.** Per-game statistics shall use the same profit, loss, tie, and exclusion rules used for the player's overall statistics.  
-    Traces to: UR-118
+*Traces to: UR-103*
 
-* ### **UR-119, JO – View Owned Cosmetics**
+**SRS-103.3, JO, Session persistence.** The system shall keep the player logged in while the active website tab remains open unless the player manually logs out or the session is invalidated.
 
-  * **SRS-119.1, Cosmetic inventory.** The system shall store and display all cosmetics currently owned by the player.  
-    Traces to: UR-119  
-  * **SRS-119.2, Cosmetic categories.** The system shall support card cosmetics, chip cosmetics, and profile-outline cosmetics.  
-    Traces to: UR-119  
-  * **SRS-119.3, Default owned cosmetics.** When an account is created, the system shall add one default card cosmetic, one default chip cosmetic, and one default profile-outline cosmetic to the player's owned cosmetic collection.  
-    Traces to: UR-119
+*Traces to: UR-103, UR-105*
 
-* ### **UR-120, JO – Manage Equipped Cosmetics**
+**SRS-103.4, JO, Single active session.** The system shall allow only one authenticated browser tab or window to use an account at a time.
 
-  * **SRS-120.1, Required equipped cosmetics.** The system shall maintain exactly one equipped cosmetic in each supported cosmetic category.  
-    Traces to: UR-120  
-  * **SRS-120.2, Initial equipped cosmetics.** The system shall equip the default card, chip, and profile-outline cosmetics when the account is created.  
-    Traces to: UR-120  
-  * **SRS-120.3, Equip owned cosmetic.** The system shall allow the player to equip an owned cosmetic in its corresponding cosmetic category.  
-    Traces to: UR-120  
-  * **SRS-120.4, Replace equipped cosmetic.** Equipping a cosmetic shall replace the previously equipped cosmetic in the same category without removing the previous cosmetic from the player's collection.  
-    Traces to: UR-120  
-  * **SRS-120.5, No unequipped category.** The system shall not allow a cosmetic category to have no equipped cosmetic.  
-    Traces to: UR-120
+*Traces to: UR-103*
 
-* ### **UR-121, JO – View Other Players' Profiles**
+**SRS-103.5, JO, Replacement login.** When the same account successfully logs in from another browser tab or window, the system shall invalidate the previously active authenticated session.
 
-  * **SRS-121.1, Gameplay profile access.** The system shall allow a player to open another player's public profile by selecting that player's displayed username or profile photo during gameplay.  
-    Traces to: UR-121  
-  * **SRS-121.2, No player search.** The system shall not provide a username-search feature for locating player profiles.  
-    Traces to: UR-121  
-  * **SRS-121.3, Public username.** The public profile shall display the player's username.  
-    Traces to: UR-121  
-  * **SRS-121.4, Public bio.** The public profile shall display the player's bio when one has been provided.  
-    Traces to: UR-121  
-  * **SRS-121.5, Public profile photo.** The public profile shall display the player's uploaded profile photo or blank default icon.  
-    Traces to: UR-121  
-  * **SRS-121.6, Public overall time played.** The public profile shall display the player's overall time played.  
-    Traces to: UR-121  
-  * **SRS-121.7, Public overall money won and lost.** The public profile shall display the player's overall money won and overall money lost.  
-    Traces to: UR-121  
-  * **SRS-121.8, Public owned cosmetics.** The public profile shall display all cosmetics owned by the player.  
-    Traces to: UR-121  
-  * **SRS-121.9, Private per-game statistics.** The system shall not display another player's per-game time-played or per-game money-won/money-lost statistics on their public profile.  
-    Traces to: UR-121  
-  * **SRS-121.10, Private account information.** The system shall not display another player's first name, last name, birthday, password, or virtual-currency balance on their public profile.  
-    Traces to: UR-121  
-  * **SRS-121.11, Public equipped cosmetics.** The public profile shall identify the player's currently equipped card cosmetic, chip cosmetic, and profile-outline cosmetic in addition to displaying the player's owned cosmetic collection.  
-    Traces to: UR-121
+*Traces to: UR-103*
+
+**SRS-103.6, JO, Duplicated-tab invalidation.** If an authenticated browser tab is duplicated and causes the same account session to exist in more than one tab, the system shall invalidate both authenticated tabs.
+
+*Traces to: UR-103*
+
+**SRS-103.7, JO, Duplicated-tab redirect.** After both duplicated authenticated tabs are invalidated, the system shall redirect both tabs to the login/registration page.
+
+*Traces to: UR-103*
+
+**SRS-103.8, JO, Reauthentication after duplication.** After duplicated authenticated tabs are invalidated, the player shall be required to successfully log in again before accessing the account.
+
+*Traces to: UR-103*
+
+### UR-104, JO – Account Validation
+
+*User story: As a player, I want the website to validate my registration and login information, so that invalid information is rejected and my account can be securely accessed.*
+
+**SRS-104.1, JO, Registration validation.** Before creating an account, the system shall validate each submitted registration field against the applicable registration and age requirements defined under UR-101 and UR-102.
+
+*Traces to: UR-101, UR-102, UR-104*
+
+**SRS-104.2, JO, Credential verification.** The system shall verify the submitted username and password against the stored credentials before granting account access.
+
+*Traces to: UR-104*
+
+**SRS-104.3, JO, Invalid registration information.** The system shall reject registration information that does not satisfy the applicable registration requirements.
+
+*Traces to: UR-104*
+
+**SRS-104.4, JO, Invalid login information.** The system shall deny account access when the submitted username and password do not successfully verify against the stored account credentials.
+
+*Traces to: UR-104*
+
+**SRS-104.5, JO, Password hashing.** The system shall store a one-way password hash for each account and shall not store the player's plaintext password.
+
+*Traces to: UR-104*
+
+**SRS-104.6, JO, Password verification.** Login and password-confirmation operations shall verify submitted passwords against the stored password hash rather than against plaintext password data.
+
+*Traces to: UR-104*
+
+### UR-105, JO – Log Out
+
+*User story: As a logged-in player, I want to manually log out of my account and have my login session end when I close the website tab, so that my account is not automatically accessible when I reopen the website.*
+
+**SRS-105.1, JO, Manual logout.** The system shall provide a logout control that ends the player's current authenticated session.
+
+*Traces to: UR-105*
+
+**SRS-105.2, JO, Tab closure.** The system shall end the player's authenticated session when the active website tab is closed.
+
+*Traces to: UR-105*
+
+**SRS-105.3, JO, Session restoration.** The system shall not automatically restore the previous authenticated session when the website is reopened after the active tab was closed.
+
+*Traces to: UR-105*
+
+### UR-106, JO – Delete Account
+
+*User story: As a player, I want to permanently delete my account after confirming my decision and entering my current password, so that I can permanently remove my information from the platform.*
+
+**SRS-106.1, JO, Account-deletion confirmation.** The system shall display a confirmation prompt before beginning permanent account deletion.
+
+*Traces to: UR-106*
+
+**SRS-106.2, JO, Password verification for deletion.** The system shall require the player to enter and successfully verify their current password before account deletion can begin.
+
+*Traces to: UR-106*
+
+**SRS-106.3, JO, Deleted account data.** When an account is permanently deleted, the system shall delete all information associated with the account, including profile information, balance, statistics, cosmetics, and authentication information.
+
+*Traces to: UR-106*
+
+**SRS-106.4, JO, No deleted-account recovery.** The system shall not provide a method for recovering a permanently deleted account.
+
+*Traces to: UR-106*
+
+**SRS-106.5, JO, Username release after deletion.** After an account is permanently deleted, the system shall make the deleted account's username available for registration or use by another account.
+
+*Traces to: UR-106*
+
+**SRS-106.6, JO, Pending-deletion state.** If the player confirms account deletion while unresolved account activity exists, the system shall place the account into a pending-deletion state.
+
+*Traces to: UR-106*
+
+**SRS-106.7, JO, Pending-deletion account-access restriction.** While an account is pending deletion, the system shall deny attempts to authenticate to or resume an interactive session for that account.
+
+*Traces to: UR-106*
+
+**SRS-106.8, JO, Pending-deletion activity restriction.** While an account is pending deletion, the system shall reject any new player-initiated request to begin a game, place a wager, make a purchase, edit profile information, or perform another account action.
+
+*Traces to: UR-106*
+
+**SRS-106.9, JO, Existing activity settlement.** The system shall continue processing unresolved activity that existed before the account entered the pending-deletion state until that activity reaches a final result.
+
+*Traces to: UR-106*
+
+**SRS-106.10, JO, Final deletion trigger.** After all unresolved account activity reaches a final result, the system shall initiate permanent account deletion.
+
+*Traces to: UR-106*
+
+# Home Page
+
+### UR-107, JO – View Available Games
+
+*User story: As a player or guest, I want to view the home page and see the games available on the website, so that I can see what the platform offers.*
+
+**SRS-107.1, JO, Display available games.** The system shall display the games currently available from the home page.
+
+*Traces to: UR-107*
+
+**SRS-107.2, JO, Guest home-page access.** The system shall allow unauthenticated guests to view the home page and available game listings.
+
+*Traces to: UR-107*
+
+### UR-108, JO – Select Game
+
+*User story: As a logged-in player, I want to select an available game from the home page, so that I can begin playing.*
+
+**SRS-108.1, JO, Player game selection.** The system shall allow a logged-in player to select an available game from the home page.
+
+*Traces to: UR-108*
+
+**SRS-108.2, JO, Game navigation.** Selecting an available game while authenticated shall navigate the player to that game's interface.
+
+*Traces to: UR-108*
+
+**SRS-108.3, JO, Guest game redirect.** If an unauthenticated guest attempts to enter a game, the system shall redirect the guest to the login/registration page.
+
+*Traces to: UR-108*
+
+**SRS-108.4, JO, Guest gameplay restriction.** The system shall not begin gameplay for an unauthenticated guest.
+
+*Traces to: UR-108*
+
+### UR-109, JO – View Balance
+
+*User story: As a player, I want to see my current virtual-currency balance, so that I know how much I have available for gameplay, sports betting, and cosmetic purchases.*
+
+**SRS-109.1, JO, Player balance display.** The system shall display the authenticated player's current virtual-currency balance.
+
+*Traces to: UR-109*
+
+**SRS-109.2, JO, Persistent balance.** The system shall preserve the player's balance across logout, tab closure, disconnection, and future login sessions.
+
+*Traces to: UR-103, UR-109*
+
+**SRS-109.3, JO, Insufficient-balance protection.** The system shall prevent a transaction or wager that requires more virtual currency than the player currently possesses.
+
+*Traces to: UR-109*
+
+**SRS-109.4, JO, Guest balance display.** The system shall display a balance of 0 coins to unauthenticated guests.
+
+*Traces to: UR-109*
+
+### UR-110, JO – Receive Virtual Currency
+
+*User story: As a player, I want my account to begin with 1,000 coins and be able to claim additional virtual currency through a free Daily Login Box, so that I can continue receiving currency for gameplay.*
+
+**SRS-110.1, JO, Initial currency.** The system shall assign 1,000 coins to the player's balance when the account is successfully created.
+
+*Traces to: UR-110*
+
+**SRS-110.2, JO, Initial Daily Login Box eligibility.** The system shall make the Daily Login Box available immediately after successful account registration, without requiring the account to have existed for 24 hours.
+
+*Traces to: UR-110, UR-128*
+
+**SRS-110.3, JO, Manual daily currency claiming.** The system shall require the authenticated player to manually open an available Daily Login Box to receive the daily virtual-currency reward.
+
+*Traces to: UR-110, UR-128*
+
+**SRS-110.4, JO, No automatic daily currency.** The system shall not award daily virtual currency solely because a calendar day has passed, the player has logged in, or the player has remained logged in.
+
+*Traces to: UR-110*
+
+**SRS-110.5, JO, Daily reward balance update.** After a Daily Login Box reward is successfully committed under SRS-128.9, the system shall display the updated account balance, including the credited reward, without applying an additional reward credit.
+
+*Traces to: UR-109, UR-110, UR-128*
+
+# Profile Page
+
+### UR-111, JO – View Profile
+
+*User story: As a logged-in player, I want to navigate to my profile, so that I may view my account information, statistics, and cosmetics.*
+
+**SRS-111.1, JO, Profile navigation.** The system shall provide a method for the logged-in player to navigate to their own profile page.
+
+*Traces to: UR-111*
+
+**SRS-111.2, JO, Profile content display.** The player's profile page shall display the player's profile information, time-played statistics, money-won and money-lost statistics, owned cosmetics, and currently equipped cosmetics.
+
+*Traces to: UR-111*
+
+**SRS-111.3, JO, Guest profile restriction.** If an unauthenticated guest attempts to access a profile, the system shall redirect the guest to the login/registration page.
+
+*Traces to: UR-111*
+
+### UR-112, JO – Edit Profile
+
+*User story: As a logged-in player, I want to update my first name, last name, username, profile photo, and bio, so that my profile and account information remain current.*
+
+**SRS-112.1, JO, Editable profile information.** The system shall allow the player to edit their first name, last name, username, profile photo, and bio.
+
+*Traces to: UR-112*
+
+**SRS-112.2, JO, Separate password changes.** The system shall provide password changes only through the Change Password functionality defined under UR-113.
+
+*Traces to: UR-112, UR-113*
+
+**SRS-112.3, JO, Edited-name validation.** Edited first and last names shall satisfy the same name requirements used during registration.
+
+*Traces to: UR-101, UR-112*
+
+**SRS-112.4, JO, Username-change validation.** A changed username shall satisfy the same length, character, uniqueness, and case-insensitivity requirements used during registration.
+
+*Traces to: UR-101, UR-112*
+
+**SRS-112.5, JO, Username-change authentication.** The system shall not require the player to re-enter their password solely to change their username.
+
+*Traces to: UR-112*
+
+**SRS-112.6, JO, Username-change frequency.** The system shall allow a player to change their username no more than once within any 24-hour period.
+
+*Traces to: UR-112*
+
+**SRS-112.7, JO, Previous-username reservation.** After a username change, the system shall keep the previous username unavailable for 24 hours.
+
+*Traces to: UR-112*
+
+**SRS-112.8, JO, Previous-username release.** After the 24-hour reservation period expires, the system shall make the previous username available for registration or use by another account.
+
+*Traces to: UR-112*
+
+### UR-113, JO – Change Password
+
+*User story: As a logged-in player, I want to change my password after verifying my current password, so that unauthorized users cannot change my account credentials.*
+
+**SRS-113.1, JO, Current-password requirement.** The system shall require the player to enter their current password before allowing the password to be changed.
+
+*Traces to: UR-113*
+
+**SRS-113.2, JO, Current-password verification.** The system shall verify the submitted current password before saving a new password.
+
+*Traces to: UR-113*
+
+**SRS-113.3, JO, New-password validation.** The new password shall satisfy the same password length, composition, character, and case-sensitivity requirements used during registration.
+
+*Traces to: UR-101, UR-113*
+
+### UR-114, JO – Edit Bio
+
+*User story: As a player, I want to add, change, or remove a profile bio of up to 50 words, so that I can personalize my public profile.*
+
+**SRS-114.1, JO, Bio maximum length.** The system shall limit a player's profile bio to a maximum of 50 words.
+
+*Traces to: UR-114*
+
+**SRS-114.2, JO, Optional bio.** The system shall allow the player to leave the bio empty.
+
+*Traces to: UR-114*
+
+**SRS-114.3, JO, Initial bio state.** For a newly created account, the system shall display the bio field as an empty text box until the player saves a bio.
+
+*Traces to: UR-114*
+
+**SRS-114.4, JO, Remove bio.** The system shall allow an existing bio to be cleared completely.
+
+*Traces to: UR-114*
+
+**SRS-114.5, JO, Bio word-count calculation.** The system shall determine the bio word count using whitespace-separated words after removing leading and trailing whitespace and treating consecutive whitespace characters as a single separator.
+
+*Traces to: UR-114*
+
+### UR-115, JO – Edit Profile Photo
+
+*User story: As a player, I want to upload, change, or remove my profile photo, so that I can personalize how my profile appears to other players.*
+
+**SRS-115.1, JO, Profile-photo format restriction.** The system shall accept only PNG image files as uploaded profile photos.
+
+*Traces to: UR-115*
+
+**SRS-115.2, JO, Profile-photo content validation.** The system shall verify that an uploaded profile-photo file contains valid PNG-format data rather than relying only on the file's .png filename extension.
+
+*Traces to: UR-115*
+
+**SRS-115.3, JO, Profile-photo size.** The system shall reject profile-photo files larger than 5 MB.
+
+*Traces to: UR-115*
+
+**SRS-115.4, JO, Replace profile photo.** The system shall allow a player with an existing uploaded profile photo to replace it with another valid profile photo.
+
+*Traces to: UR-115*
+
+**SRS-115.5, JO, Default profile icon.** The system shall display a blank default profile icon for accounts that do not have an uploaded profile photo.
+
+*Traces to: UR-115*
+
+**SRS-115.6, JO, Remove profile photo.** The system shall allow the player to remove an uploaded profile photo and return to the blank default icon.
+
+*Traces to: UR-115*
+
+### UR-116, JO – View Time Played
+
+*User story: As a player, I want to view my total time played and the amount of time I have spent playing each supported casino game, so that I can track my gaming activity.*
+
+**SRS-116.1, JO, Store total time played.** The system shall store the player's total active casino-game playtime.
+
+*Traces to: UR-116*
+
+**SRS-116.2, JO, Display total time played.** The system shall display the player's total active casino-game playtime on their own profile.
+
+*Traces to: UR-116*
+
+**SRS-116.3, JO, Store per-game time played.** The system shall store active playtime separately for each supported casino game.
+
+*Traces to: UR-116*
+
+**SRS-116.4, JO, Display per-game time played.** The system shall display active playtime separately for each supported casino game to the authenticated account owner.
+
+*Traces to: UR-116*
+
+**SRS-116.5, JO, Gameplay-start timing.** The system shall begin measuring playtime only when the player begins actively participating in a casino game.
+
+*Traces to: UR-116*
+
+**SRS-116.6, JO, Game-page viewing exclusion.** The system shall not begin measuring playtime solely because the player opens or views a game page.
+
+*Traces to: UR-116*
+
+**SRS-116.7, JO, Active-game timing.** The system shall continue measuring time while an active game, hand, round, or equivalent gameplay sequence remains in progress and the player remains an active participant.
+
+*Traces to: UR-116*
+
+**SRS-116.8, JO, Between-round inactivity.** Time spent after a completed hand or round and before the player begins another gameplay sequence shall not be added to playtime.
+
+*Traces to: UR-116*
+
+**SRS-116.9, JO, Early exit.** If the player leaves before the active gameplay sequence is completed, the active time accumulated before leaving shall remain included in the player's statistics.
+
+*Traces to: UR-116*
+
+**SRS-116.10, JO, Timeout handling.** When a player reaches the timeout condition defined by the current game, the system shall stop adding time to the player's playtime.
+
+*Traces to: UR-116*
+
+**SRS-116.11, JO, Gameplay resumption.** After a timeout or interruption, the system shall begin adding time again only after the player resumes active gameplay.
+
+*Traces to: UR-116*
+
+**SRS-116.12, JO, Sports-betting exclusion.** The system shall not include time spent browsing, placing, monitoring, or resolving sports bets in the player's time-played statistics.
+
+*Traces to: UR-116*
+
+**SRS-116.13, JO, Multiplayer waiting time.** During an active multiplayer hand or round, time spent waiting for other active players to complete their turns shall count toward the player's time played.
+
+*Traces to: UR-116*
+
+### UR-117, JO – View Overall Money Won and Lost
+
+*User story: As a player, I want to view my total virtual currency won and total virtual currency lost, so that I can track my overall financial performance within the platform.*
+
+**SRS-117.1, JO, Store total money won.** The system shall store the player's cumulative virtual-currency profit from completed gameplay and sports-betting outcomes.
+
+*Traces to: UR-117*
+
+**SRS-117.2, JO, Display total money won.** The system shall display the player's cumulative virtual-currency profit from completed gameplay and sports-betting outcomes.
+
+*Traces to: UR-117*
+
+**SRS-117.3, JO, Profit calculation.** When an outcome produces a positive net result, the system shall add only the amount of profit to total money won rather than the full payout.
+
+*Traces to: UR-117*
+
+**SRS-117.4, JO, Store total money lost.** The system shall store the cumulative virtual currency lost from completed gameplay and sports-betting outcomes.
+
+*Traces to: UR-117*
+
+**SRS-117.5, JO, Display total money lost.** The system shall display the cumulative virtual currency lost from completed gameplay and sports-betting outcomes.
+
+*Traces to: UR-117*
+
+**SRS-117.6, JO, Loss calculation.** When an outcome produces a negative net result, the system shall add the absolute value of that negative result to total money lost.
+
+*Traces to: UR-117*
+
+**SRS-117.7, JO, Tie or push.** When an outcome produces no net gain or loss, the system shall add zero to both money won and money lost.
+
+*Traces to: UR-117*
+
+**SRS-117.8, JO, Initial-currency exclusion.** The initial 1,000 coins received at account creation shall not count as money won.
+
+*Traces to: UR-110, UR-117*
+
+**SRS-117.9, JO, Daily Login Box exclusion.** Virtual currency received from opening the Daily Login Box shall not count toward the player's total money won or money lost.
+
+*Traces to: UR-110, UR-117, UR-128*
+
+**SRS-117.10, JO, Cosmetic-purchase exclusion.** Currency spent purchasing cosmetics or blind boxes shall not count as money lost.
+
+*Traces to: UR-117*
+
+**SRS-117.11, JO, Duplicate-refund exclusion.** Currency received from a duplicate-cosmetic refund shall not count as money won.
+
+*Traces to: UR-117, UR-126*
+
+### UR-118, JO – View Money Won and Lost by Game
+
+*User story: As a player, I want to view the virtual currency I have won and lost separately for each supported casino game and sports betting, so that I can see where my gains and losses occurred.*
+
+**SRS-118.1, JO, Track per-game winnings.** The system shall track virtual-currency profit separately for each supported casino game and sports betting.
+
+*Traces to: UR-118*
+
+**SRS-118.2, JO, Display per-game winnings.** The system shall display virtual-currency profit separately for each supported casino game and sports betting to the authenticated account owner.
+
+*Traces to: UR-118*
+
+**SRS-118.3, JO, Track per-game losses.** The system shall track virtual-currency losses separately for each supported casino game and sports betting.
+
+*Traces to: UR-118*
+
+**SRS-118.4, JO, Display per-game losses.** The system shall display virtual-currency losses separately for each supported casino game and sports betting to the authenticated account owner.
+
+*Traces to: UR-118*
+
+**SRS-118.5, JO, Consistent calculations.** Per-game statistics shall use the same profit, loss, tie, and exclusion rules used for the player's overall statistics.
+
+*Traces to: UR-118*
+
+### UR-119, JO – View Owned Cosmetics
+
+*User story: As a player, I want to view all cosmetics I own, so that I can see and manage my cosmetic collection.*
+
+**SRS-119.1, JO, Store cosmetic inventory.** The system shall store all cosmetics currently owned by the player.
+
+*Traces to: UR-119*
+
+**SRS-119.2, JO, Display cosmetic inventory.** The system shall display all cosmetics currently owned by the player.
+
+*Traces to: UR-119*
+
+**SRS-119.3, JO, Cosmetic categories.** The system shall support card cosmetics, chip cosmetics, and profile-outline cosmetics.
+
+*Traces to: UR-119*
+
+**SRS-119.4, JO, Default owned cosmetics.** When an account is created, the system shall add one default card cosmetic, one default chip cosmetic, and one default profile-outline cosmetic to the player's owned cosmetic collection.
+
+*Traces to: UR-119*
+
+### UR-120, JO – Manage Equipped Cosmetics
+
+*User story: As a player, I want to view and change my equipped cosmetics, so that I can customize how my account appears during gameplay.*
+
+**SRS-120.1, JO, Display equipped cosmetics.** The system shall display the player's currently equipped card cosmetic, chip cosmetic, and profile-outline cosmetic.
+
+*Traces to: UR-120*
+
+**SRS-120.2, JO, Required equipped cosmetics.** The system shall maintain exactly one equipped cosmetic in each supported cosmetic category.
+
+*Traces to: UR-120*
+
+**SRS-120.3, JO, Initial equipped cosmetics.** The system shall equip the default card, chip, and profile-outline cosmetics when the account is created.
+
+*Traces to: UR-120*
+
+**SRS-120.4, JO, Equip owned cosmetic.** The system shall allow the player to equip an owned cosmetic in its corresponding cosmetic category.
+
+*Traces to: UR-120*
+
+**SRS-120.5, JO, Replace equipped cosmetic.** When the player equips another cosmetic in a category, the system shall replace the currently equipped cosmetic in that category.
+
+*Traces to: UR-120*
+
+**SRS-120.6, JO, Preserve previously equipped cosmetic.** Replacing an equipped cosmetic shall not remove the previously equipped cosmetic from the player's owned cosmetic collection.
+
+*Traces to: UR-120*
+
+### UR-121, JO – View Other Players' Profiles
+
+*User story: As a player, I want to view another player's public profile by clicking their username or profile photo during gameplay, so that I can view their profile and overall gaming activity.*
+
+**SRS-121.1, JO, Gameplay profile access.** The system shall allow a player to open another player's public profile by selecting that player's displayed username or profile photo during gameplay.
+
+*Traces to: UR-121*
+
+**SRS-121.2, JO, No player search.** The system shall not provide a username-search feature for locating player profiles.
+
+*Traces to: UR-121*
+
+**SRS-121.3, JO, Public username.** The public profile shall display the player's username.
+
+*Traces to: UR-121*
+
+**SRS-121.4, JO, Public bio.** The public profile shall display the player's bio when one has been provided.
+
+*Traces to: UR-121*
+
+**SRS-121.5, JO, Public profile photo.** The public profile shall display the player's uploaded profile photo or blank default icon.
+
+*Traces to: UR-121*
+
+**SRS-121.6, JO, Public overall time played.** The public profile shall display the player's overall time played.
+
+*Traces to: UR-121*
+
+**SRS-121.7, JO, Public overall money won.** The public profile shall display the player's overall amount of virtual currency won.
+
+*Traces to: UR-121*
+
+**SRS-121.8, JO, Public overall money lost.** The public profile shall display the player's overall amount of virtual currency lost.
+
+*Traces to: UR-121*
+
+**SRS-121.9, JO, Public owned cosmetics.** The public profile shall display all cosmetics owned by the player.
+
+*Traces to: UR-121*
+
+**SRS-121.10, JO, Private per-game time played.** The system shall not display another player's per-game time-played statistics on their public profile.
+
+*Traces to: UR-121*
+
+**SRS-121.11, JO, Private per-game money statistics.** The system shall not display another player's per-game money-won or money-lost statistics on their public profile.
+
+*Traces to: UR-121*
+
+**SRS-121.12, JO, Private account information.** The system shall not display another player's first name, last name, birthday, password hashes, authentication data, or current virtual-currency balance on their public profile.
+
+*Traces to: UR-121*
+
+**SRS-121.13, JO, Public equipped cosmetics.** The public profile shall display the player's currently equipped card cosmetic, chip cosmetic, and profile-outline cosmetic.
+
+*Traces to: UR-121*
 
 # Cosmetic Shop Page
 
-* ### **UR-122, JO – Browse Blind Boxes**
+### UR-122, JO – Browse Blind Boxes
 
-  * **SRS-122.1, Display available blind boxes.** The system shall display all blind boxes currently available for purchase.  
-    Traces to: UR-122  
-  * **SRS-122.2, Blind-box information.** Each blind box shall display its description, price, and possible cosmetic rewards.  
-    Traces to: UR-122
+*User story: As a player, I want to view available blind boxes, including their descriptions, prices, and possible cosmetic rewards, so that I can decide which blind box I want to purchase.*
 
-* ### **UR-123, JO – View Reward Probabilities**
+**SRS-122.1, JO, Display available blind boxes.** The system shall display all blind boxes currently available for purchase.
 
-  * **SRS-123.1, Equal reward probability.** The system shall assign equal selection probability to every cosmetic contained within the same blind box.  
-    Traces to: UR-123  
-  * **SRS-123.2, Probability formula.** If a blind box contains n possible rewards, the probability of selecting each reward shall be 1/n.  
-    Traces to: UR-123  
-  * **SRS-123.3, Complete probability distribution.** The probabilities of all possible rewards in a blind box shall total 100%.  
-    Traces to: UR-123  
-  * **SRS-123.4, No custom-weight boxes.** The system shall not use event boxes or other blind boxes with individually assigned reward weights.  
-    Traces to: UR-123  
-  * **SRS-123.5, Default-cosmetic exclusion.** The system shall not include the default card cosmetic, default chip cosmetic, or default profile-outline cosmetic in any blind-box reward pool.  
-    Traces to: UR-123  
-  * **SRS-123.6, Minimum reward count.** Every available blind box shall contain at least one possible cosmetic reward.  
-    Traces to: UR-123  
-  * **SRS-123.7, Valid probability calculation.** The system shall calculate equal reward probabilities only for blind boxes containing one or more possible rewards, ensuring that n≥1.  
-    Traces to: UR-123
+*Traces to: UR-122*
 
-* ### **UR-124, JO – Purchase Blind Box**
+**SRS-122.2, JO, Blind-box information.** Each blind box shall display its description, price, and possible cosmetic rewards.
 
-  * **SRS-124.1, Sufficient balance.** The system shall permit a blind-box purchase only when the player's current balance is greater than or equal to the box's purchase price.  
-    Traces to: UR-124  
-  * **SRS-124.2, Purchase confirmation.** Before deducting any currency, the system shall display a confirmation prompt asking the player to confirm the selected blind-box purchase.  
-    Traces to: UR-124  
-  * **SRS-124.3, Cancel purchase.** If the player declines the confirmation prompt, the system shall not deduct currency or open the blind box.  
-    Traces to: UR-124  
-  * **SRS-124.4, Deduct purchase price.** After the player confirms a valid purchase, the system shall deduct the full purchase price from the player's balance.  
-    Traces to: UR-124  
-  * **SRS-124.5, Insufficient balance.** The system shall reject the purchase without deducting currency when the player's balance is lower than the purchase price.  
-    Traces to: UR-124  
-  * **SRS-124.6, Immediate opening.** After a successful purchase, the system shall immediately begin the blind-box reward-selection process and shall not store an unopened blind box in the player's inventory.  
-    Traces to: UR-124, UR-125
+*Traces to: UR-122*
 
-* ### **UR-125, JO – Receive Randomized Cosmetic**
+### UR-123, JO – View Reward Probabilities
 
-  * **SRS-125.1, Random reward selection.** The system shall randomly select one cosmetic from the purchased blind box using the equal 1/n reward probabilities.  
-    Traces to: UR-125  
-  * **SRS-125.2, New cosmetic storage.** If the selected cosmetic is not already owned, the system shall add it to the player's cosmetic collection.  
-    Traces to: UR-125  
-  * **SRS-125.3, Purchase completion after interruption.** Once the blind-box purchase price has been successfully deducted, the system shall complete and persist the reward outcome even if the player closes the tab, disconnects, times out, or otherwise leaves before viewing the result.  
-    Traces to: UR-125  
-  * **SRS-125.4, Interrupted new-cosmetic delivery.** If the player leaves before viewing a newly selected cosmetic, the system shall still add that cosmetic to the player's owned cosmetic collection.  
-    Traces to: UR-125  
-  * **SRS-125.5, Interrupted cosmetic availability.** A cosmetic added after an interrupted blind-box purchase shall be available for selection or equipping the next time the player accesses their profile.  
-    Traces to: UR-125  
-  * **SRS-125.6, Interrupted duplicate refund.** If an interrupted blind-box purchase produces a duplicate cosmetic, the system shall still apply the duplicate refund to the player's balance.  
-    Traces to: UR-125, UR-126  
-  * **SRS-125.7, No delayed blind-box presentation.** If the player leaves before viewing the blind-box result, the system shall not replay the blind-box animation or display a delayed result popup when the player later returns.  
-    Traces to: UR-125
+*User story: As a player, I want to see the probability of receiving each cosmetic from a purchasable blind box, so that I understand the possible outcomes before spending my virtual currency.*
 
-* ### **UR-126, JO – Handle Duplicate Cosmetics**
+**SRS-123.1, JO, Equal reward probability.** The system shall assign equal selection probability to every cosmetic contained within the same purchasable cosmetic blind box.
 
-  * **SRS-126.1, Duplicate detection.** The system shall determine whether the cosmetic selected from the blind box is already owned by the player.  
-    Traces to: UR-126  
-  * **SRS-126.2, No duplicate storage.** If the selected cosmetic is already owned, the system shall not add another copy to the player's cosmetic collection.  
-    Traces to: UR-126  
-  * **SRS-126.3, Duplicate refund.** The system shall add a refund equal to 50% of the blind box's purchase price to the player's balance when the selected cosmetic is a duplicate.  
-    Traces to: UR-126  
-  * **SRS-126.4, Refund rounding.** If the calculated 50% refund is not a whole number of coins, the system shall round the refund upward to the nearest whole coin.  
-    Traces to: UR-126  
-  * **SRS-126.5, Automatic duplicate handling.** The duplicate-refund process shall occur automatically without requiring the player to choose whether to keep or sell the duplicate.  
-    Traces to: UR-126  
-  * **SRS-126.6, Refund statistics exclusion.** Duplicate refunds shall not increase the player's money-won statistics.  
-    Traces to: UR-126, UR-117
+*Traces to: UR-123*
 
-* ### **UR-127, JO – View Received Cosmetic**
+**SRS-123.2, JO, Probability formula.** If a purchasable cosmetic blind box contains n possible rewards, the probability of selecting each reward shall be 1/n.
 
-  * **SRS-127.1, Display reward result.** If the player remains present when the blind-box reward-selection process completes, the system shall display the cosmetic that was selected.  
-    Traces to: UR-127  
-  * **SRS-127.2, New-cosmetic message.** If the selected cosmetic is new and the player remains present, the system shall indicate that the cosmetic was added to the player's collection.  
-    Traces to: UR-127  
-  * **SRS-127.3, Duplicate-result message.** If the selected cosmetic was already owned and the player remains present, the system shall indicate that the reward was a duplicate and display the refund that was added to the player's balance.  
-    Traces to: UR-127  
-  * **SRS-127.4, Interrupted-result behavior.** If the player leaves before the reward result is displayed, the system shall not display a delayed result popup or replay the blind-box animation when the player later returns.  
-    Traces to: UR-127
+*Traces to: UR-123*
+
+**SRS-123.3, JO, Complete probability distribution.** The probabilities of all possible cosmetic rewards in a purchasable blind box shall total 100%.
+
+*Traces to: UR-123*
+
+**SRS-123.4, JO, No custom-weight cosmetic boxes.** The system shall not use event boxes or other purchasable cosmetic blind boxes with individually assigned reward weights.
+
+*Traces to: UR-123*
+
+**SRS-123.5, JO, Default-cosmetic exclusion.** The system shall not include the default card cosmetic, default chip cosmetic, or default profile-outline cosmetic in any purchasable blind-box reward pool.
+
+*Traces to: UR-123*
+
+**SRS-123.6, JO, Minimum reward count.** Every available purchasable cosmetic blind box shall contain at least one possible cosmetic reward.
+
+*Traces to: UR-123*
+
+**SRS-123.7, JO, Daily Login Box distinction.** The equal-probability requirements for purchasable cosmetic blind boxes shall not apply to the free Daily Login Box, which shall use the weighted coin-reward distribution defined under UR-128.
+
+*Traces to: UR-123, UR-128*
+
+### UR-124, JO – Purchase Blind Box
+
+*User story: As a player, I want to purchase a blind box using my available virtual-currency balance, so that I can receive a randomized cosmetic.*
+
+**SRS-124.1, JO, Purchase confirmation.** Before deducting any currency, the system shall display a confirmation prompt asking the player to confirm the selected blind-box purchase.
+
+*Traces to: UR-124*
+
+**SRS-124.2, JO, Cancelled-purchase currency handling.** If the player declines the purchase confirmation, the system shall not deduct currency from the player's balance.
+
+*Traces to: UR-124*
+
+**SRS-124.3, JO, Cancelled-purchase box handling.** If the player declines the purchase confirmation, the system shall not begin the blind-box reward-selection process.
+
+*Traces to: UR-124*
+
+**SRS-124.4, JO, Deduct purchase price.** After the player confirms a valid purchase, the system shall deduct the full purchase price from the player's balance.
+
+*Traces to: UR-124*
+
+**SRS-124.5, JO, Insufficient balance.** The system shall reject the purchase without deducting currency when the player's balance is lower than the purchase price.
+
+*Traces to: UR-124*
+
+**SRS-124.6, JO, Immediate reward selection.** After a successful blind-box purchase, the system shall immediately begin the blind-box reward-selection process.
+
+*Traces to: UR-124, UR-125*
+
+**SRS-124.7, JO, No unopened blind-box inventory.** The system shall not store a successfully purchased blind box as an unopened item in the player's inventory.
+
+*Traces to: UR-124*
+
+### UR-125, JO – Receive Randomized Cosmetic
+
+*User story: As a player, I want one cosmetic to be randomly selected from the purchased blind box's possible rewards, so that I can receive a cosmetic for my collection.*
+
+**SRS-125.1, JO, Random reward selection.** The system shall randomly select one cosmetic from the purchased blind box using the equal 1/n reward probabilities.
+
+*Traces to: UR-125*
+
+**SRS-125.2, JO, New cosmetic storage.** If the selected cosmetic is not already owned, the system shall add it to the player's cosmetic collection.
+
+*Traces to: UR-125*
+
+**SRS-125.3, JO, Purchase completion after interruption.** Once the blind-box purchase price has been successfully deducted, the system shall complete the reward-selection process even if the player closes the tab, disconnects, times out, or otherwise leaves before viewing the result.
+
+*Traces to: UR-125*
+
+**SRS-125.4, JO, Interrupted new-cosmetic delivery.** If the player leaves before viewing a newly selected cosmetic, the system shall still add that cosmetic to the player's owned cosmetic collection.
+
+*Traces to: UR-125*
+
+**SRS-125.5, JO, Interrupted cosmetic availability.** A cosmetic added after an interrupted blind-box purchase shall be available for selection or equipping the next time the player accesses their profile.
+
+*Traces to: UR-125*
+
+**SRS-125.6, JO, Interrupted duplicate refund.** If an interrupted blind-box purchase produces a duplicate cosmetic, the system shall still apply the duplicate refund to the player's balance.
+
+*Traces to: UR-125, UR-126*
+
+### UR-126, JO – Handle Duplicate Cosmetics
+
+*User story: As a player, I want a cosmetic I already own to automatically provide a partial refund rather than another copy of the same cosmetic, so that duplicate rewards still provide value.*
+
+**SRS-126.1, JO, Duplicate detection.** The system shall determine whether the cosmetic selected from the blind box is already owned by the player.
+
+*Traces to: UR-126*
+
+**SRS-126.2, JO, No duplicate storage.** If the selected cosmetic is already owned, the system shall not add another copy to the player's cosmetic collection.
+
+*Traces to: UR-126*
+
+**SRS-126.3, JO, Duplicate refund.** The system shall add a refund equal to 50% of the blind box's purchase price to the player's balance when the selected cosmetic is a duplicate.
+
+*Traces to: UR-126*
+
+**SRS-126.4, JO, Refund rounding.** If the calculated 50% refund is not a whole number of coins, the system shall round the refund upward to the nearest whole coin.
+
+*Traces to: UR-126*
+
+**SRS-126.5, JO, Automatic duplicate handling.** The duplicate-refund process shall occur automatically without requiring the player to choose whether to keep or sell the duplicate.
+
+*Traces to: UR-126*
+
+### UR-127, JO – View Received Cosmetic
+
+*User story: As a player who remains on the blind-box result screen, I want to see the result of my blind-box purchase, so that I know which cosmetic was selected.*
+
+**SRS-127.1, JO, Display reward result.** If the player remains present when the blind-box reward-selection process completes, the system shall display the cosmetic that was selected.
+
+*Traces to: UR-127*
+
+**SRS-127.2, JO, New-cosmetic message.** If the selected cosmetic is new and the player remains present, the system shall indicate that the cosmetic was added to the player's collection.
+
+*Traces to: UR-127*
+
+**SRS-127.3, JO, Duplicate-result message.** If the selected cosmetic was already owned and the player remains present, the system shall indicate that the selected reward was a duplicate.
+
+*Traces to: UR-127*
+
+**SRS-127.4, JO, Duplicate-refund display.** If the selected cosmetic was already owned and the player remains present, the system shall display the refund amount added to the player's balance.
+
+*Traces to: UR-126, UR-127*
+
+**SRS-127.5, JO, Interrupted-result behavior.** If the player leaves before the reward result is displayed, the system shall not display a delayed result popup or replay the blind-box animation when the player later returns.
+
+*Traces to: UR-125, UR-127*
+
+### UR-128, JO – Daily Login Box
+
+*User story: As a registered player, I want to open a free Daily Login Box in the Cosmetic Shop to receive a randomized coin reward once every 24 hours, so that I can earn additional virtual currency by returning to the website.*
+
+**SRS-128.1, JO, Daily Login Box placement.** The system shall display the Daily Login Box as the first item on the Cosmetic Shop page, before all purchasable cosmetic blind boxes.
+
+*Traces to: UR-128*
+
+**SRS-128.2, JO, Free Daily Login Box.** The system shall allow an eligible authenticated player to open the Daily Login Box without deducting any virtual currency.
+
+*Traces to: UR-128*
+
+**SRS-128.3, JO, Initial box availability.** The system shall make the Daily Login Box immediately available to a newly registered player after successful account creation.
+
+*Traces to: UR-110, UR-128*
+
+**SRS-128.4, JO, Manual box opening.** The system shall require the player to select the Open control on an available Daily Login Box before initiating a reward.
+
+*Traces to: UR-110, UR-128*
+
+**SRS-128.5, JO, Possible coin rewards.** The system shall randomly select exactly one reward amount from the following values: 25 coins, 50 coins, 75 coins, or 100 coins.
+
+*Traces to: UR-128*
+
+**SRS-128.6, JO, Weighted reward probabilities.** The system shall assign the following probabilities to Daily Login Box rewards: 40% for 25 coins, 30% for 50 coins, 20% for 75 coins, and 10% for 100 coins.
+
+*Traces to: UR-128*
+
+**SRS-128.7, JO, Display reward probabilities.** The system shall display all four possible Daily Login Box reward amounts and their assigned probabilities before the player opens an available box.
+
+*Traces to: UR-128*
+
+**SRS-128.8, JO, Reward crediting.** When an eligible player successfully opens a Daily Login Box, the system shall add the selected reward amount to the player's persistent virtual-currency balance.
+
+*Traces to: UR-109, UR-110, UR-128*
+
+**SRS-128.9, JO, Atomic box-opening transaction.** When the player initiates a valid Daily Login Box opening, the system shall complete and persist the random reward selection, reward credit, claim record, and next-available timestamp as one transaction before beginning the reward-reveal animation. If any part of the transaction fails, none of these changes shall be committed and the box shall remain available.
+
+*Traces to: UR-128*
+
+**SRS-128.10, JO, Opening animation.** After the box-opening transaction has been successfully committed, the system shall display an animation revealing the selected coin reward to the player.
+
+*Traces to: UR-128*
+
+**SRS-128.11, JO, Cooldown start.** Upon successfully committing a Daily Login Box opening, the system shall start a cooldown lasting exactly 24 hours from the recorded completion time of that transaction.
+
+*Traces to: UR-128*
+
+**SRS-128.12, JO, Cooldown restriction.** The system shall reject any attempt to open another Daily Login Box before 24 hours have elapsed since the previous successful opening.
+
+*Traces to: UR-128*
+
+**SRS-128.13, JO, Cooldown visibility.** During the 24-hour cooldown, the system shall continue displaying the Daily Login Box as the first item on the Cosmetic Shop page with its Open control disabled and a countdown showing the remaining cooldown time.
+
+*Traces to: UR-128*
+
+**SRS-128.14, JO, Cooldown expiration.** Once the 24-hour cooldown expires, the system shall make the Daily Login Box available for opening again without requiring the player to reload the page.
+
+*Traces to: UR-128*
+
+**SRS-128.15, JO, Unclaimed box persistence.** If a player does not open an available Daily Login Box, the box shall remain available until the player claims it. The system shall not automatically award its reward, remove the available box, or accumulate additional unopened Daily Login Boxes.
+
+*Traces to: UR-110, UR-128*
+
+**SRS-128.16, JO, Interrupted box opening.** If the player refreshes the page, closes the browser tab, loses the connection, or experiences an unexpected interruption after the box-opening transaction has successfully committed but before the animation finishes, the system shall preserve the credited reward, claim record, and active cooldown.
+
+*Traces to: UR-128*
+
+**SRS-128.17, JO, Interrupted animation behavior.** If a Daily Login Box animation is interrupted after the reward transaction has completed, the system shall not replay the animation or display a delayed reward-result popup when the player returns to the Cosmetic Shop.
+
+*Traces to: UR-128*
+
+**SRS-128.18, JO, Returning-player cooldown display.** When an authenticated player returns to the Cosmetic Shop during an active Daily Login Box cooldown, the system shall display the remaining cooldown based on the saved next-available timestamp.
+
+*Traces to: UR-128*
+
+**SRS-128.19, JO, Duplicate claim prevention.** The system shall prevent simultaneous or repeated box-opening requests from awarding more than one Daily Login Box reward during the same 24-hour cooldown period.
+
+*Traces to: UR-128*
+
+**SRS-128.20, JO, Authentication restriction.** The system shall allow only authenticated players with active accounts to open the Daily Login Box and shall reject opening requests from unauthenticated users or accounts pending deletion.
+
+*Traces to: UR-103, UR-106, UR-128*
+
+**SRS-128.21, JO, Failed Daily Login Box opening.** If a Daily Login Box opening fails before its reward transaction is committed, the system shall display an error message, preserve the player's existing balance, and leave the Daily Login Box available for another opening attempt without starting the 24-hour cooldown.
+
+*Traces to: UR-128*
+
+# JO Non-Functional Requirements
+
+**SRS-NFR-101, JO, Password security.** The system shall store player passwords using salted bcrypt hashing with a cost factor of at least 10. The system shall not store passwords in plaintext or reversibly encrypted form and shall retain zero plaintext password copies in persistent storage or application logs after registration, login, password-change, or password-verification operations.
+
+*Traces to: UR-101, UR-103, UR-104, UR-106, UR-113*
+
+**SRS-NFR-102, JO, Persistent account-data durability.** After the system confirms that account data has been successfully saved, 100% of the committed account state required by this SRS shall remain stored and available after logout, browser-tab closure, disconnection, and later login unless that state is subsequently changed or deleted by another valid system operation. Persistent account state includes the player's first name, last name, birthday, username, password hash and authentication data, virtual-currency balance, bio, profile photo, total and per-game time-played statistics, total and per-game money-won and money-lost statistics, owned cosmetics, currently equipped cosmetics, Daily Login Box claim history and cooldown state, username-change and username-reservation state, and account-deletion state.
+
+*Traces to: UR-101, UR-102, UR-103, UR-104, UR-106, UR-109, UR-110, UR-112, UR-113, UR-114, UR-115, UR-116, UR-117, UR-118, UR-119, UR-120, UR-128*
+
+**SRS-NFR-103, JO, Blind-box transaction reliability.** For each successfully confirmed blind-box purchase, the system shall persist exactly one purchase-price deduction and exactly one reward outcome, even if the player disconnects or closes the browser tab before viewing the result.
+
+*Traces to: UR-124, UR-125, UR-126*
+
+**SRS-NFR-104, JO, Balance and equipped-cosmetic update latency.** After the system successfully commits a balance or equipped-cosmetic change during an active session, the updated value shall become visible to the player within 2 seconds without requiring a manual page refresh.
+
+*Traces to: UR-109, UR-110, UR-120, UR-124, UR-126, UR-128*
+
+**SRS-NFR-105, JO, Desktop-browser compatibility.** 100% of web-interface functional requirements defined by this SRS shall operate as specified in the two most recent major desktop versions available at the time of testing of Google Chrome, Mozilla Firefox, Apple Safari, and Microsoft Edge.
+
+*Applies to: all browser-based system features*
+
+**SRS-NFR-106, JO, Private-profile data protection.** When an unauthenticated user or another authenticated player requests a player's public profile, the system shall return and display only information authorized for public viewing. The system shall expose zero private account fields, including first name, last name, birthday, password hashes, authentication data, current virtual-currency balance, per-game time-played statistics, and per-game money-won or money-lost statistics. The authenticated account owner shall retain access to their own overall and per-game statistics.
+
+*Traces to: UR-111, UR-116, UR-117, UR-118, UR-121*
+
+**SRS-NFR-107, JO, Displayed account-state consistency.** After an account-state change has been successfully committed, 100% of subsequently loaded authorized pages displaying that account's balance, time-played statistics, money-won or money-lost statistics, cosmetic ownership, or equipped cosmetics shall display values matching the stored account state.
+
+*Traces to: UR-109, UR-110, UR-116, UR-117, UR-118, UR-119, UR-120, UR-128*
+
+**SRS-NFR-108, JO, Daily Login Box transaction reliability.** For each successfully committed Daily Login Box opening, the system shall persist exactly one reward credit, one claim record, and one corresponding next-available timestamp. The system shall preserve these values across browser refreshes, browser-tab closures, connection interruptions, and subsequent login sessions. An interrupted animation or duplicate opening request shall result in zero additional reward credits.
+
+*Traces to: UR-110, UR-128*
+
+**SRS-NFR-109, JO, Accessibility conformance.** Every page of the website shall conform to WCAG 2.1 Level AA success criteria. Verification shall include automated accessibility testing with zero critical or serious violations and manual testing of success criteria that cannot be verified automatically.
+
+*Applies to: All website pages.*
+
+**SRS-NFR-110, JO, Home page load time.** The home page shall complete its initial rendering within 3 seconds of navigation, measured using browser performance metrics on a 25 Mbps broadband connection.
+
+*Traces to: UR-107*
 
 # **7\. Sports Betting on Live Sports**
 
@@ -1583,22 +2098,6 @@ The system shall propagate an updated game state (pot, board, or player action) 
 
 *Traces to: URD-001, URD-002, URD-003*
 
-**SRS-NFR-2, JO, Password Storage Security.**
-
-The system shall store every player password using a salted cryptographic hash (e.g., bcrypt with a minimum cost factor of 10\) and shall never store a password in plaintext or reversibly-encrypted form.
-
-*Applies to: Account registration and authentication, system-wide.*
-
-*Traces to: URD-101, URD-103*
-
-**SRS-NFR-3, JO, Idle Session Timeout.**
-
-The system shall automatically terminate an authenticated session and require re-login after 30 consecutive minutes with no player interaction.
-
-*Applies to: All authenticated pages.*
-
-*Traces to: URD-102, URD-104*
-
 **SRS-NFR-4, SP, Atomic Balance Updates.**
 
 The system shall commit every virtual-currency balance change (debit or credit) as a single atomic transaction, such that no game or purchase outcome can leave the recorded balance inconsistent with the corresponding transaction log entry.
@@ -1622,30 +2121,6 @@ The system shall preserve a disconnected player's poker seat and chip stack for 
 *Applies to: Poker Room.*
 
 *Traces to: URD-002*
-
-**SRS-NFR-7, JO, Accessibility Conformance.**
-
-Every page shall conform to WCAG 2.1 Level AA success criteria, as verified by an automated accessibility audit tool with zero critical or serious violations.
-
-*Applies to: Entire website.*
-
-*Traces to: System-wide*
-
-**SRS-NFR-8, JO, Home Page Load Time.**
-
-The home page shall complete rendering within 3 seconds of navigation, measured via browser load-time metrics on a 25 Mbps broadband connection.
-
-*Applies to: Home page.*
-
-*Traces to: URD-105*
-
-**SRS-NFR-9, JO, Public Profile Data Minimization.**
-
-The system shall exclude private account information, including email address, password hash, and payment or billing details, from any profile view accessible to a player other than the account owner.
-
-*Applies to: Public profile pages.*
-
-*Traces to: URD-111 (unnumbered public-profile item)*
 
 **SRS-NFR-10, Team, No Real-Currency Transactions.**
 

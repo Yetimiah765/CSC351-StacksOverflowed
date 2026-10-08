@@ -1,6 +1,6 @@
 # SSU Starter App V2
 
-Professor Brockenbrough's Next.js starter with Tailwind CSS, Supabase auth, and a user profile system.
+Professor Brockenbrough's Next.js starter with Tailwind CSS, a Supabase-backed Postgres database, and a username/password account system.
 
 ## Prerequisites
 
@@ -28,16 +28,13 @@ NEXT_PUBLIC_SUPABASE_URL="https://your-project-id.supabase.co"
 
 ### 3. Run the schema script
 
-In your Supabase project, open the **SQL Editor** and run the contents of [`supabase/schema.sql`](supabase/schema.sql). This creates the `myapp_profile` table used by the profile page.
-
-### 4. Create the avatars storage bucket
-
-In your Supabase project, go to **Storage → New bucket**, name it `avatars`, and check **Public bucket**.
+In your Supabase project, open the **SQL Editor** and run the contents of [`supabase/schema.sql`](supabase/schema.sql). This creates `players`, `usernames`, `poker_tables`, and the rest of the tables the app reads and writes directly (there is no separate storage bucket to create — profile photos are stored as PNG bytes in `players.profile_photo`).
 
 ## Quick start
 
 ```bash
 npm install
 npm run dev     # http://localhost:3000
+npm run socket  # poker socket server, in a second terminal: http://localhost:4001
 npm test        # run all tests
 ```

@@ -11,8 +11,9 @@ export default function Home() {
           <a href="/login" className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 hover:border-emerald-400 hover:text-emerald-200">Go to login</a>
           <a href="/register" className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 hover:border-emerald-400 hover:text-emerald-200">Go to register</a>
           <a href="/profile" className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 hover:border-emerald-400 hover:text-emerald-200">Go to profile</a>
+          <a href="/poker" className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2 hover:border-emerald-400 hover:text-emerald-200">Go to poker table</a>
           <span className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2">Tailwind CSS</span>
-          <span className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2">Supabase auth routes</span>
+          <span className="rounded-full border border-slate-700 bg-slate-800 px-4 py-2">Username/password accounts</span>
         </div>
       </section>
     </main>

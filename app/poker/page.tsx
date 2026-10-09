@@ -18,23 +18,33 @@ interface Seat {
   playerId: string | null;
   username: string | null;
   avatarUrl: string | null;
+  chipStack: number | null;
 }
 
 interface TableState {
   tableId: string;
   maxSeats: number;
+  /** The buy-in range is 50x-200x this (computed below), not a flat amount. */
+  bigBlind: number;
   seatedCount: number;
   seats: Seat[];
 }
+
+const MIN_BUY_IN_MULTIPLIER = 50;
+const MAX_BUY_IN_MULTIPLIER = 200;
+// Same idea as QUICK_AMOUNTS on the sportsbook page (app/sports/page.tsx),
+// but these add to the current amount rather than setting it outright.
+const QUICK_BUY_IN_INCREMENTS = [10, 50, 100, 500];
 
 interface OwnProfile {
   playerId: number;
   username: string | null;
   profilePhotoDataUrl: string | null;
+  balance: number;
 }
 
-// A tiny dependency-free id, unique-enough for correlating requests/presence
-// — not crypto.randomUUID(), which is secure-context-only and would silently
+// A tiny dependency-free id, unique-enough for correlating ack requests —
+// not crypto.randomUUID(), which is secure-context-only and would silently
 // break testing over plain http://<lan-ip>:3000, exactly the cross-laptop
 // scenario this page's real-time transport is for.
 function generateId(): string {
@@ -52,8 +62,12 @@ export default function PokerTablePage() {
   const [tableState, setTableState] = useState<TableState | null>(null);
   const [joinError, setJoinError] = useState('');
   const [avatars, setAvatars] = useState<Record<string, string | null>>({});
+  // Empty until the table's bigBlind is known (from the first table:state),
+  // at which point it's initialized to the minimum buy-in once. A string,
+  // not a number, so a player can freely type/clear it (same pattern as
+  // the wager amount input on the sportsbook page, app/sports/page.tsx).
+  const [buyInText, setBuyInText] = useState('');
 
-  const connectionIdRef = useRef(generateId());
   const pendingRef = useRef(new Map<string, (ack: PokerAckPayload) => void>());
   const fetchedAvatarsRef = useRef(new Set<string>());
 
@@ -105,9 +119,8 @@ export default function PokerTablePage() {
       return;
     }
 
-    const connectionId = connectionIdRef.current;
     const nextChannel = supabase.channel(POKER_CHANNEL_NAME, {
-      config: { broadcast: { self: false }, presence: { key: connectionId } },
+      config: { broadcast: { self: false } },
     });
 
     nextChannel.on(
@@ -130,7 +143,7 @@ export default function PokerTablePage() {
         nextChannel.send({
           type: 'broadcast',
           event: POKER_EVENT_ACTION,
-          payload: { requestId: generateId(), action: 'sync', connectionId },
+          payload: { requestId: generateId(), action: 'sync' },
         });
       }
     });
@@ -142,7 +155,7 @@ export default function PokerTablePage() {
     };
   }, [token, profile]);
 
-  function sendAction(action: PokerAction): Promise<PokerAckPayload> {
+  function sendAction(action: PokerAction, extra?: { buyIn?: number }): Promise<PokerAckPayload> {
     return new Promise((resolve) => {
       const requestId = generateId();
       pendingRef.current.set(requestId, resolve);
@@ -152,8 +165,8 @@ export default function PokerTablePage() {
         payload: {
           requestId,
           action,
-          connectionId: connectionIdRef.current,
           token: token ?? undefined,
+          buyIn: extra?.buyIn,
         },
       });
     });
@@ -165,13 +178,59 @@ export default function PokerTablePage() {
   }, [profile, tableState]);
 
   const isFull = tableState ? tableState.seatedCount >= tableState.maxSeats : false;
+  const minBuyIn = tableState ? MIN_BUY_IN_MULTIPLIER * tableState.bigBlind : null;
+  const maxBuyIn =
+    tableState && profile ? Math.min(MAX_BUY_IN_MULTIPLIER * tableState.bigBlind, profile.balance) : null;
+  const canAffordBuyIn = minBuyIn !== null && maxBuyIn !== null && maxBuyIn >= minBuyIn;
+
+  // Same parsing approach as the sportsbook's wager input: only digits count
+  // as a valid amount, so an empty/partial/non-numeric entry is just null
+  // rather than NaN.
+  const parsedBuyIn = /^\d+$/.test(buyInText) ? Number(buyInText) : null;
+  let buyInError = '';
+  if (buyInText && parsedBuyIn === null) buyInError = 'Enter a whole number of chips.';
+  else if (parsedBuyIn !== null && minBuyIn !== null && parsedBuyIn < minBuyIn) {
+    buyInError = `Minimum buy-in is ${minBuyIn}.`;
+  } else if (parsedBuyIn !== null && maxBuyIn !== null && parsedBuyIn > maxBuyIn) {
+    buyInError = `Maximum buy-in is ${maxBuyIn}.`;
+  }
+  const buyInValid = parsedBuyIn !== null && !buyInError;
+
+  function addToBuyIn(amount: number) {
+    if (minBuyIn === null || maxBuyIn === null) return;
+    const base = parsedBuyIn ?? minBuyIn;
+    setBuyInText(String(Math.min(base + amount, maxBuyIn)));
+  }
+
+  // Initialize the input to the minimum once the table's bigBlind (and so
+  // minBuyIn) is known — it isn't available until the first table:state.
+  useEffect(() => {
+    if (buyInText === '' && minBuyIn !== null) {
+      setBuyInText(String(minBuyIn));
+    }
+  }, [buyInText, minBuyIn]);
+
+  // The buy-in/refund happens server-side against players.balance, but
+  // nothing here navigates, so the nav bar's own balance fetch (which only
+  // re-runs on route change) would otherwise never pick it up. Refresh this
+  // page's own copy of the balance too, so the buy-in slider's max stays
+  // accurate if the player leaves and rejoins.
+  async function refreshBalance() {
+    if (!token) return;
+    const res = await fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) {
+      const data = await res.json();
+      setProfile((prev) => (prev ? { ...prev, balance: data.balance } : prev));
+    }
+    window.dispatchEvent(new Event('balance:refresh'));
+  }
 
   async function handleJoin() {
-    if (!channel || !token) return;
+    if (!channel || !token || !buyInValid || parsedBuyIn === null) return;
     setJoinError('');
-    const result = await sendAction('join');
+    const result = await sendAction('join', { buyIn: parsedBuyIn });
     if (result.ok) {
-      await channel.track({ joinedAt: Date.now() });
+      await refreshBalance();
     } else {
       setJoinError(result.error || 'Unable to join the table.');
     }
@@ -182,7 +241,7 @@ export default function PokerTablePage() {
     setJoinError('');
     const result = await sendAction('leave');
     if (result.ok) {
-      await channel.untrack();
+      await refreshBalance();
     } else {
       setJoinError(result.error || 'Unable to leave the table.');
     }
@@ -290,6 +349,9 @@ export default function PokerTablePage() {
                 >
                   {seat.username ?? 'Open'}
                 </p>
+                {seat.chipStack !== null ? (
+                  <p className="text-[10px] text-amber-300">{seat.chipStack} chips</p>
+                ) : null}
                 {isOwnSeat ? <p className="text-[10px] text-emerald-300">(you)</p> : null}
               </div>
             );
@@ -313,22 +375,71 @@ export default function PokerTablePage() {
           </div>
 
           {!mySeat ? (
-            <button
-              type="button"
-              onClick={handleJoin}
-              disabled={!connected || isFull}
-              className="w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {isFull ? 'Table full' : 'Join table'}
-            </button>
+            isFull ? (
+              <button
+                type="button"
+                disabled
+                className="w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 opacity-70"
+              >
+                Table full
+              </button>
+            ) : minBuyIn === null || maxBuyIn === null ? (
+              <p className="rounded-xl border border-slate-700 bg-slate-800/60 p-3 text-sm text-slate-300">
+                Loading table…
+              </p>
+            ) : !canAffordBuyIn ? (
+              <p className="rounded-xl border border-slate-700 bg-slate-800/60 p-3 text-sm text-slate-300">
+                You need at least {minBuyIn} to join (your balance: {profile.balance}).
+              </p>
+            ) : (
+              <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-4 space-y-3">
+                <label htmlFor="buy-in-amount" className="block text-sm text-slate-300">
+                  Buy-in amount ({minBuyIn}&ndash;{maxBuyIn})
+                </label>
+                <input
+                  id="buy-in-amount"
+                  inputMode="numeric"
+                  value={buyInText}
+                  onChange={(e) => setBuyInText(e.target.value.trim())}
+                  placeholder={String(minBuyIn)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-emerald-400"
+                />
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_BUY_IN_INCREMENTS.map((amount) => (
+                    <button
+                      key={amount}
+                      type="button"
+                      onClick={() => addToBuyIn(amount)}
+                      className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-emerald-400/70"
+                    >
+                      +{amount}
+                    </button>
+                  ))}
+                </div>
+                {buyInError ? <p className="text-sm text-red-300">{buyInError}</p> : null}
+                <button
+                  type="button"
+                  onClick={handleJoin}
+                  disabled={!connected || !buyInValid}
+                  className="w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {buyInValid ? `Join with ${parsedBuyIn} chips` : 'Join table'}
+                </button>
+              </div>
+            )
           ) : (
-            <button
-              type="button"
-              onClick={handleLeave}
-              className="w-full rounded-xl bg-red-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-red-300"
-            >
-              Leave seat {mySeat.seatNumber}
-            </button>
+            <div className="space-y-2">
+              <p className="text-center text-sm text-slate-300">
+                Your stack: <span className="font-semibold text-amber-300">{mySeat.chipStack} chips</span>
+              </p>
+              <button
+                type="button"
+                onClick={handleLeave}
+                className="w-full rounded-xl bg-red-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-red-300"
+              >
+                Leave seat {mySeat.seatNumber}
+              </button>
+            </div>
           )}
 
           {joinError ? (

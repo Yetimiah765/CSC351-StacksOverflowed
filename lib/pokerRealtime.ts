@@ -13,8 +13,15 @@ export type PokerAction = 'join' | 'leave' | 'sync';
 export interface PokerActionPayload {
   requestId: string;
   action: PokerAction;
-  connectionId: string;
+  /**
+   * Both 'join' and 'leave' carry this — the server resolves identity from
+   * the token itself (never from which connection sent the message), so a
+   * seat survives a dropped connection and can be left again later from a
+   * different tab/session.
+   */
   token?: string;
+  /** Chosen buy-in amount; only meaningful for a 'join' action. */
+  buyIn?: number;
 }
 
 export interface PokerAckPayload {

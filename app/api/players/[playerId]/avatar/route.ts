@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
-import { photoToDataUrl } from '../../../../../lib/playerDisplay';
+import { photoToAvatarDataUrl } from '../../../../../lib/playerDisplay';
 
 // Public by design: a seated player's avatar is visible to anyone viewing
 // the poker table (SRS-8.1), the same as their username. Fetched on demand
@@ -24,5 +24,6 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!player) return Response.json({ error: 'Player not found.' }, { status: 404 });
 
-  return Response.json({ avatarUrl: photoToDataUrl(player.profile_photo) }, { status: 200 });
+  const avatarUrl = await photoToAvatarDataUrl(player.profile_photo);
+  return Response.json({ avatarUrl }, { status: 200 });
 }

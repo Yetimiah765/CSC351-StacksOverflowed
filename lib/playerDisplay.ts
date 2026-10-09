@@ -2,15 +2,36 @@
 // info (username + profile photo) used anywhere a player's identity needs
 // to be shown to other users — currently the profile page and the poker
 // table's seats (SRS-8.1/8.2). Centralized so the two don't drift apart.
+import sharp from 'sharp';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+function hexByteaToBuffer(hexBytea: string): Buffer {
+  const hex = hexBytea.startsWith('\\x') ? hexBytea.slice(2) : hexBytea;
+  return Buffer.from(hex, 'hex');
+}
 
 // profile_photo comes back from PostgREST as a Postgres hex-encoded bytea
 // string (\x89504e47...). Convert it to a data URL an <img> tag can use
 // directly, or null for the default icon (SRS-115.5 / SRS-8.2).
 export function photoToDataUrl(hexBytea: string | null): string | null {
   if (!hexBytea) return null;
-  const hex = hexBytea.startsWith('\\x') ? hexBytea.slice(2) : hexBytea;
-  return `data:image/png;base64,${Buffer.from(hex, 'hex').toString('base64')}`;
+  return `data:image/png;base64,${hexByteaToBuffer(hexBytea).toString('base64')}`;
+}
+
+const AVATAR_THUMBNAIL_SIZE = 96;
+
+// Seat avatars render at well under 100px, but an uploaded photo can be up
+// to 5MB (SRS-115.3) — serving it full-size over a bandwidth-limited link
+// (e.g. an ngrok tunnel for cross-network testing) makes the poker table
+// take a long time to populate. Resizing to a small thumbnail here keeps
+// the bytes actually sent proportional to how the image is used.
+export async function photoToAvatarDataUrl(hexBytea: string | null): Promise<string | null> {
+  if (!hexBytea) return null;
+  const thumbnail = await sharp(hexByteaToBuffer(hexBytea))
+    .resize(AVATAR_THUMBNAIL_SIZE, AVATAR_THUMBNAIL_SIZE, { fit: 'cover' })
+    .png()
+    .toBuffer();
+  return `data:image/png;base64,${thumbnail.toString('base64')}`;
 }
 
 export interface PlayerDisplay {

@@ -25,9 +25,9 @@ export default function NavBar() {
     setSignedIn(true);
     let cancelled = false;
 
-    async function loadBalance(playerToken: string) {
+    async function loadBalance() {
       const res = await fetch('/api/profile/balance', {
-        headers: { Authorization: `Bearer ${playerToken}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       if (cancelled) return;
 
@@ -45,9 +45,16 @@ export default function NavBar() {
       if (!cancelled) setBalance(data.balance);
     }
 
-    loadBalance(token).catch(() => {});
+    loadBalance().catch(() => {});
+
+    // Pages that change the balance without navigating anywhere (e.g. a
+    // poker buy-in or refund) dispatch this so the bar updates immediately
+    // instead of waiting for the next route change.
+    window.addEventListener('balance:refresh', loadBalance);
+
     return () => {
       cancelled = true;
+      window.removeEventListener('balance:refresh', loadBalance);
     };
   }, [pathname]);
 

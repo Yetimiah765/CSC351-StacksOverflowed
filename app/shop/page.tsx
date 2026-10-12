@@ -1,12 +1,17 @@
-// Placeholder so the nav bar's cart has somewhere to go until the Cosmetic
-// Shop (UR-122 through UR-128) is built.
+import DailyLoginBox from '../../components/DailyLoginBox';
+
+// SRS-128.1: the Daily Login Box is the first item, before the purchasable
+// blind boxes (UR-122 through UR-127, not built yet).
 export default function ShopPage() {
   return (
-    <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
-      <section className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 p-8 text-center shadow-2xl shadow-black/30">
-        <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Cosmetic Shop</p>
-        <h1 className="mt-4 text-3xl font-semibold">Coming soon</h1>
-        <p className="mt-2 text-slate-300">Blind boxes and the free Daily Login Box will live here.</p>
+    <main className="min-h-page bg-slate-950 px-6 py-12 text-slate-100">
+      <section className="mx-auto w-full max-w-3xl space-y-6">
+        <h1 className="text-3xl font-semibold">Cosmetic Shop</h1>
+        <DailyLoginBox />
+        <article className="rounded-3xl border border-slate-800/60 bg-slate-900/40 p-6">
+          <h2 className="text-xl font-semibold text-slate-400">Blind boxes</h2>
+          <p className="mt-2 text-sm text-slate-400">Coming soon.</p>
+        </article>
       </section>
     </main>
   );

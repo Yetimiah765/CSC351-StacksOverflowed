@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import { BALANCE_CHANGED_EVENT } from '../lib/balanceEvents';
 
 // Rendered on every page by app/layout.tsx. It is h-14 (3.5rem) tall, which
 // is why pages use `min-h-page` (see tailwind.config.js) instead of
@@ -11,9 +12,18 @@ export default function NavBar() {
   const pathname = usePathname();
   const [signedIn, setSignedIn] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
+  const [balanceVersion, setBalanceVersion] = useState(0);
+
+  // Pages that change the balance in place call notifyBalanceChanged().
+  useEffect(() => {
+    const handleChange = () => setBalanceVersion((version) => version + 1);
+    window.addEventListener(BALANCE_CHANGED_EVENT, handleChange);
+    return () => window.removeEventListener(BALANCE_CHANGED_EVENT, handleChange);
+  }, []);
 
   // Re-read the session on every navigation, so logging in (which lands on
-  // /profile) and logging out (which lands on /) both update the bar.
+  // /profile) and logging out (which lands on /) both update the bar, and
+  // whenever a page reports a balance change.
   useEffect(() => {
     const token = localStorage.getItem('player_token');
     if (!token) {
@@ -49,7 +59,7 @@ export default function NavBar() {
     return () => {
       cancelled = true;
     };
-  }, [pathname]);
+  }, [pathname, balanceVersion]);
 
   // SRS-111.3: guests are sent to log in (the login page links to sign up).
   const profileHref = signedIn ? '/profile' : '/login';

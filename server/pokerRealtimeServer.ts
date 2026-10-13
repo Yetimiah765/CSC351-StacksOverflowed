@@ -6,18 +6,20 @@
 // so this process still exists even though it no longer speaks Socket.io.
 //
 // It never binds an HTTP server or a port: all communication is an outbound
-// connection to a Supabase Realtime channel. That's what lets players on
+// connection to Supabase Realtime channels. That's what lets players on
 // different laptops/networks join without any inbound port-forwarding to
 // this process — only outbound reachability to Supabase is required, by
 // both this process and every browser client.
 //
-// Sprint 1 scope: a single hardcoded table that supports joining an open
-// seat, leaving a seat, a hard cap on seat count, and a buy-in (SRS-1.2,
-// SRS-1.3) deducted from/refunded to players.balance. A seat survives a
-// dropped connection (closing the tab does not free it or refund the stack)
-// so a player can reconnect and resume it later (SRS-2.1) — there is no
-// disconnection-timeout removal yet (SRS-9.x/10.x), and full hand/betting
-// logic is deferred to later sprints.
+// Sprint 1 scope: the fixed set of tables in lib/pokerTables.ts, each on its
+// own Realtime channel, plus a lobby channel summarizing all of them. A table
+// supports joining a chosen open seat, leaving a seat, a hard cap on seat
+// count, and a buy-in (SRS-1.2, SRS-1.3) deducted from/refunded to
+// players.balance. A player can be seated at only one table at a time. A
+// seat survives a dropped connection (closing the tab does not free it or
+// refund the stack) so a player can reconnect and resume it later
+// (SRS-2.1) — there is no disconnection-timeout removal yet (SRS-9.x/10.x),
+// and full hand/betting logic is deferred to later sprints.
 //
 // Both joining and leaving require a valid player_sessions token (the same
 // one issued by POST /api/auth/login): the server resolves it to a
@@ -30,25 +32,21 @@
 // Run with: npm run realtime
 
 import { config as loadEnv } from 'dotenv';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { DEFAULT_BIG_BLIND, DEFAULT_TABLE_SEATS, PokerTable } from '../lib/pokerTable';
+import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
+import { MAX_BUY_IN_MULTIPLIER, MIN_BUY_IN_MULTIPLIER, PokerTable } from '../lib/pokerTable';
+import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerIdForToken } from '../lib/auth';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import {
-  POKER_CHANNEL_NAME,
   POKER_EVENT_ACTION,
   POKER_EVENT_ACK,
   POKER_EVENT_STATE,
+  POKER_LOBBY_CHANNEL_NAME,
+  pokerTableChannelName,
   type PokerActionPayload,
+  type PokerLobbyState,
 } from '../lib/pokerRealtime';
-
-// The buy-in range for this single demo table is 50x-200x its big blind.
-// Not tied to poker_seats' own 40x-100x-big-blind rule in
-// supabase/schema.sql — that's a different multiplier for a table row this
-// sprint's single in-memory table doesn't have.
-const MIN_BUY_IN_MULTIPLIER = 50;
-const MAX_BUY_IN_MULTIPLIER = 200;
 
 // Unlike Next.js, a standalone Node process doesn't auto-load .env files, so
 // this has to happen before getSupabaseClient() reads process.env below.
@@ -56,32 +54,13 @@ const MAX_BUY_IN_MULTIPLIER = 200;
 loadEnv();
 loadEnv({ path: '.env.local', override: true });
 
-const MAX_SEATS = Number(process.env.POKER_TABLE_MAX_SEATS) || DEFAULT_TABLE_SEATS;
-const BIG_BLIND = Number(process.env.POKER_BIG_BLIND) || DEFAULT_BIG_BLIND;
-const MIN_BUY_IN = MIN_BUY_IN_MULTIPLIER * BIG_BLIND;
-const MAX_BUY_IN = MAX_BUY_IN_MULTIPLIER * BIG_BLIND;
-
-const table = new PokerTable('table-1', MAX_SEATS, BIG_BLIND);
-const supabase = getSupabaseClient();
-
-if (!supabase) {
-  // eslint-disable-next-line no-console
-  console.error(
-    'Supabase credentials are not configured — the poker server cannot verify signed-in players. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (see .env.example).'
-  );
+interface TableEntry {
+  config: PokerTableConfig;
+  table: PokerTable;
+  channel: RealtimeChannel;
 }
 
-const channel = supabase?.channel(POKER_CHANNEL_NAME, {
-  config: { broadcast: { self: false } },
-});
-
-function broadcastState() {
-  channel?.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload: table.getState() });
-}
-
-function sendAck(requestId: string, result: { ok: boolean; error?: string; seatNumber?: number }) {
-  channel?.send({ type: 'broadcast', event: POKER_EVENT_ACK, payload: { requestId, ...result } });
-}
+type AckResult = { ok: boolean; error?: string; seatNumber?: number };
 
 // PostgREST calls can't share a transaction, so both of these use an
 // optimistic-lock read-then-conditional-update (matching the balance just
@@ -137,111 +116,195 @@ async function refundBalance(supabase: SupabaseClient, playerId: number, amount:
   console.error(`Failed to refund ${amount} to player ${playerId} after ${BALANCE_WRITE_ATTEMPTS} attempts.`);
 }
 
-channel?.on(
-  'broadcast',
-  { event: POKER_EVENT_ACTION },
-  async ({ payload }: { payload: PokerActionPayload }) => {
-    const { requestId, action, token, buyIn } = payload;
+const CHANNEL_CONFIG = { config: { broadcast: { self: false } } };
 
-    // SRS-1.7 (simplified): any client can ask for the current table state.
-    // Realtime broadcast has no "send to just this one newly-subscribed
-    // client" primitive, so a freshly-subscribed client requests a snapshot
-    // itself instead of the server pushing one unprompted on connect.
-    if (action === 'sync') {
-      broadcastState();
-      return;
+function startServer(supabase: SupabaseClient) {
+  const lobbyChannel = supabase.channel(POKER_LOBBY_CHANNEL_NAME, CHANNEL_CONFIG);
+  const entries: TableEntry[] = POKER_TABLES.map((config) => ({
+    config,
+    table: new PokerTable(config.id, config.maxSeats, config.bigBlind, config.smallBlind),
+    channel: supabase.channel(pokerTableChannelName(config.id), CHANNEL_CONFIG),
+  }));
+
+  // Players with a join being processed right now. A join awaits several
+  // database calls between checking that the player isn't seated anywhere
+  // and actually seating them, so without this two quick joins at different
+  // tables could both pass that check and seat (and charge) them twice.
+  const joinsInFlight = new Set<number>();
+
+  function findSeatedEntry(playerId: string): TableEntry | undefined {
+    return entries.find((entry) => entry.table.getSeatNumber(playerId) !== null);
+  }
+
+  function getLobbyState(): PokerLobbyState {
+    return {
+      tables: entries.map(({ config, table }) => {
+        const state = table.getState();
+        return {
+          tableId: config.id,
+          name: config.name,
+          smallBlind: state.smallBlind,
+          bigBlind: state.bigBlind,
+          maxSeats: state.maxSeats,
+          seatedCount: state.seatedCount,
+          playerIds: state.seats.flatMap((seat) => (seat.playerId ? [seat.playerId] : [])),
+        };
+      }),
+    };
+  }
+
+  function broadcastLobby() {
+    lobbyChannel.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload: getLobbyState() });
+  }
+
+  function broadcastTable(entry: TableEntry) {
+    entry.channel.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload: entry.table.getState() });
+  }
+
+  async function handleJoin(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
+    const { token, buyIn, seatNumber } = payload;
+    const { table } = entry;
+
+    if (!token) return { ok: false, error: 'You must be signed in to join the table.' };
+
+    const playerId = await getPlayerIdForToken(supabase, token);
+    if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
+
+    if (joinsInFlight.has(playerId)) {
+      return { ok: false, error: 'Your previous join is still being processed.' };
     }
+    joinsInFlight.add(playerId);
 
-    if (action === 'join') {
-      if (!supabase) {
-        sendAck(requestId, { ok: false, error: 'Supabase credentials are not configured.' });
-        return;
-      }
-
-      if (!token) {
-        sendAck(requestId, { ok: false, error: 'You must be signed in to join the table.' });
-        return;
-      }
-
-      const playerId = await getPlayerIdForToken(supabase, token);
-      if (playerId === null) {
-        sendAck(requestId, { ok: false, error: 'Your session has expired. Please log in again.' });
-        return;
+    try {
+      // One table at a time: checked here (before any money moves) and
+      // still true when table.join() runs below, thanks to joinsInFlight.
+      const seatedEntry = findSeatedEntry(String(playerId));
+      if (seatedEntry === entry) return { ok: false, error: 'You are already seated at this table.' };
+      if (seatedEntry) {
+        return {
+          ok: false,
+          error: `You are already seated at ${seatedEntry.config.name}. Leave that table first.`,
+        };
       }
 
       const username = await getPlayerUsername(supabase, playerId);
-      if (!username) {
-        sendAck(requestId, { ok: false, error: 'Unable to load your profile.' });
-        return;
-      }
+      if (!username) return { ok: false, error: 'Unable to load your profile.' };
 
       // SRS-1.3: the server never trusts the client's chosen amount beyond
-      // this sprint's flat range — deductBalance() below re-checks it
-      // against the player's real, freshly-read balance regardless.
-      if (!Number.isInteger(buyIn) || (buyIn as number) < MIN_BUY_IN || (buyIn as number) > MAX_BUY_IN) {
-        sendAck(requestId, {
-          ok: false,
-          error: `Buy-in must be between ${MIN_BUY_IN} and ${MAX_BUY_IN}.`,
-        });
-        return;
+      // this table's range — deductBalance() below re-checks it against the
+      // player's real, freshly-read balance regardless.
+      const minBuyIn = MIN_BUY_IN_MULTIPLIER * table.bigBlind;
+      const maxBuyIn = MAX_BUY_IN_MULTIPLIER * table.bigBlind;
+      if (!Number.isInteger(buyIn) || (buyIn as number) < minBuyIn || (buyIn as number) > maxBuyIn) {
+        return { ok: false, error: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}.` };
+      }
+
+      // Reject a bad or taken seat before charging for it; table.join()
+      // re-checks, since someone else can take the seat while we await.
+      if (seatNumber !== undefined) {
+        const seatError = table.checkSeat(seatNumber);
+        if (seatError) return { ok: false, error: seatError };
       }
 
       const deduction = await deductBalance(supabase, playerId, buyIn as number);
-      if (!deduction.ok) {
-        sendAck(requestId, { ok: false, error: deduction.error });
-        return;
-      }
+      if (!deduction.ok) return { ok: false, error: deduction.error };
 
       // Seats carry only a username here — avatars are fetched separately
       // by clients (GET /api/players/[playerId]/avatar) rather than carried
       // through this broadcast, since a profile photo as base64 can easily
       // exceed Realtime's broadcast payload size limit.
-      const result = table.join(String(playerId), username, buyIn as number);
+      const result = table.join(String(playerId), username, buyIn as number, null, seatNumber);
       if (result.ok) {
-        broadcastState();
+        broadcastTable(entry);
+        broadcastLobby();
       } else {
         // The seat was taken out from under us between the deduction above
-        // and this call (e.g. the table filled up) — give the money back.
+        // and this call (e.g. someone else sat there) — give the money back.
         await refundBalance(supabase, playerId, buyIn as number);
       }
-      sendAck(requestId, result);
-      return;
-    }
-
-    if (action === 'leave') {
-      if (!supabase) {
-        sendAck(requestId, { ok: false, error: 'Supabase credentials are not configured.' });
-        return;
-      }
-
-      if (!token) {
-        sendAck(requestId, { ok: false, error: 'You must be signed in to leave the table.' });
-        return;
-      }
-
-      const playerId = await getPlayerIdForToken(supabase, token);
-      if (playerId === null) {
-        sendAck(requestId, { ok: false, error: 'Your session has expired. Please log in again.' });
-        return;
-      }
-
-      const result = table.leave(String(playerId));
-      if (result.ok) {
-        if (result.chipStack) {
-          await refundBalance(supabase, playerId, result.chipStack);
-        }
-        broadcastState();
-      }
-      sendAck(requestId, result);
+      return result;
+    } finally {
+      joinsInFlight.delete(playerId);
     }
   }
-);
 
-channel?.subscribe((status) => {
-  if (status === 'SUBSCRIBED') {
-    // eslint-disable-next-line no-console
-    console.log(
-      `Poker realtime server subscribed to "${POKER_CHANNEL_NAME}" (table cap: ${MAX_SEATS} seats, big blind: ${BIG_BLIND}, buy-in: ${MIN_BUY_IN}-${MAX_BUY_IN})`
+  async function handleLeave(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
+    const { token } = payload;
+
+    if (!token) return { ok: false, error: 'You must be signed in to leave the table.' };
+
+    const playerId = await getPlayerIdForToken(supabase, token);
+    if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
+
+    const result = entry.table.leave(String(playerId));
+    if (result.ok) {
+      if (result.chipStack) {
+        await refundBalance(supabase, playerId, result.chipStack);
+      }
+      broadcastTable(entry);
+      broadcastLobby();
+    }
+    return result;
+  }
+
+  // SRS-1.7 (simplified): any client can ask for the current state.
+  // Realtime broadcast has no "send to just this one newly-subscribed
+  // client" primitive, so a freshly-subscribed client requests a snapshot
+  // itself instead of the server pushing one unprompted on connect.
+  lobbyChannel.on('broadcast', { event: POKER_EVENT_ACTION }, ({ payload }: { payload: PokerActionPayload }) => {
+    if (payload.action === 'sync') broadcastLobby();
+  });
+
+  for (const entry of entries) {
+    entry.channel.on(
+      'broadcast',
+      { event: POKER_EVENT_ACTION },
+      async ({ payload }: { payload: PokerActionPayload }) => {
+        if (payload.action === 'sync') {
+          broadcastTable(entry);
+          return;
+        }
+
+        let result: AckResult;
+        if (payload.action === 'join') result = await handleJoin(entry, payload);
+        else if (payload.action === 'leave') result = await handleLeave(entry, payload);
+        else return;
+
+        entry.channel.send({
+          type: 'broadcast',
+          event: POKER_EVENT_ACK,
+          payload: { requestId: payload.requestId, ...result },
+        });
+      }
     );
   }
-});
+
+  lobbyChannel.subscribe((status) => {
+    if (status === 'SUBSCRIBED') {
+      // eslint-disable-next-line no-console
+      console.log(`Poker realtime server subscribed to "${POKER_LOBBY_CHANNEL_NAME}"`);
+    }
+  });
+
+  for (const { config, channel } of entries) {
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        // eslint-disable-next-line no-console
+        console.log(
+          `Poker realtime server subscribed to "${pokerTableChannelName(config.id)}" (${config.name}: ${config.maxSeats} seats, blinds ${config.smallBlind}/${config.bigBlind}, buy-in ${MIN_BUY_IN_MULTIPLIER * config.bigBlind}-${MAX_BUY_IN_MULTIPLIER * config.bigBlind})`
+        );
+      }
+    });
+  }
+}
+
+const supabase = getSupabaseClient();
+
+if (supabase) {
+  startServer(supabase);
+} else {
+  // eslint-disable-next-line no-console
+  console.error(
+    'Supabase credentials are not configured — the poker server cannot verify signed-in players. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (see .env.example).'
+  );
+}

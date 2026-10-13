@@ -12,6 +12,14 @@ export function getSupabaseClient() {
     auth: {
       persistSession: false,
     },
+    // Next 14 caches every server-side fetch() in its Data Cache by default,
+    // and supabase-js queries are fetch() calls — so a route Next considers
+    // static (e.g. GET /api/players/[playerId]/avatar, which never reads the
+    // request) would keep serving its first query result forever. Database
+    // reads must always be live. Plain Node (npm run realtime) ignores this.
+    global: {
+      fetch: (input, init) => fetch(input, { ...init, cache: 'no-store' }),
+    },
   });
 }
 

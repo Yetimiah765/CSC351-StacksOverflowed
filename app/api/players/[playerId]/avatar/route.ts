@@ -6,6 +6,14 @@ import { photoToAvatarDataUrl } from '../../../../../lib/playerDisplay';
 // by the poker page rather than carried through the Realtime state
 // broadcast, since a profile photo as base64 can exceed Realtime's
 // broadcast payload size limit.
+//
+// Unlike the other GET routes, this one never reads the request (no
+// Authorization header), so Next 14 would otherwise treat it as static and
+// cache its response — a player looked up before uploading a photo would
+// show the default avatar for good. (getSupabaseClient() also opts its
+// queries out of Next's fetch cache, which this alone doesn't do.)
+export const dynamic = 'force-dynamic';
+
 export async function GET(_request: Request, { params }: { params: { playerId: string } }) {
   const playerId = Number(params.playerId);
   if (!Number.isInteger(playerId)) {

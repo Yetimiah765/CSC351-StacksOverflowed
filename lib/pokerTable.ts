@@ -1,11 +1,13 @@
-// Sprint 1 scope: seating only. A player can join an open seat at the single
-// table and leave it again, subject to a configurable seat cap. This module
+// Sprint 1 scope: seating only. A player can join an open seat (one they pick,
+// or the first open one) and leave it again, subject to a configurable seat
+// cap. One instance is one table; the lobby's tables are listed in
+// lib/pokerTables.ts. This module
 // is intentionally decoupled from any transport (Socket.io, Supabase
 // Realtime, or otherwise) so the seating rules can be unit tested without
 // standing up a real server.
 //
 // Traceability (docs/requirements/SRS):
-//   SRS-1.1  Join open seat
+//   SRS-1.1  Join open seat (optionally a specific one)
 //   SRS-1.4  Reject join on full table
 //   SRS-1.6  Join rejection message
 //   SRS-1.7  Public table state contents (seat occupancy, username, and
@@ -31,6 +33,10 @@ export const MIN_TABLE_SEATS = 3;
 export const MAX_TABLE_SEATS = 9;
 export const DEFAULT_TABLE_SEATS = 6;
 export const DEFAULT_BIG_BLIND = 5;
+// The buy-in range is 50x-200x a table's big blind. Shared by the server
+// (which enforces it) and the table page (which clamps its input to it).
+export const MIN_BUY_IN_MULTIPLIER = 50;
+export const MAX_BUY_IN_MULTIPLIER = 200;
 
 export interface Seat {
   seatNumber: number;
@@ -45,6 +51,7 @@ export interface TableState {
   maxSeats: number;
   /** The table's configured big blind — the buy-in range is 50x-200x this. */
   bigBlind: number;
+  smallBlind: number;
   seatedCount: number;
   seats: Seat[];
 }
@@ -66,10 +73,17 @@ export interface LeaveResult {
 export class PokerTable {
   readonly tableId: string;
   readonly bigBlind: number;
+  readonly smallBlind: number;
   private readonly maxSeats: number;
   private seats: Seat[];
 
-  constructor(tableId: string, maxSeats: number = DEFAULT_TABLE_SEATS, bigBlind: number = DEFAULT_BIG_BLIND) {
+  /** smallBlind defaults to half the big blind, rounded down (minimum 1). */
+  constructor(
+    tableId: string,
+    maxSeats: number = DEFAULT_TABLE_SEATS,
+    bigBlind: number = DEFAULT_BIG_BLIND,
+    smallBlind: number = Math.max(1, Math.floor(bigBlind / 2))
+  ) {
     if (maxSeats < MIN_TABLE_SEATS || maxSeats > MAX_TABLE_SEATS) {
       throw new Error(
         `Table max seats must be between ${MIN_TABLE_SEATS} and ${MAX_TABLE_SEATS} (SRS-NFR-022).`
@@ -80,8 +94,13 @@ export class PokerTable {
       throw new Error('Table big blind must be a positive integer.');
     }
 
+    if (!Number.isInteger(smallBlind) || smallBlind <= 0 || smallBlind > bigBlind) {
+      throw new Error('Table small blind must be a positive integer no larger than the big blind.');
+    }
+
     this.tableId = tableId;
     this.bigBlind = bigBlind;
+    this.smallBlind = smallBlind;
     this.maxSeats = maxSeats;
     this.seats = Array.from({ length: maxSeats }, (_, index) => ({
       seatNumber: index + 1,
@@ -97,6 +116,7 @@ export class PokerTable {
       tableId: this.tableId,
       maxSeats: this.maxSeats,
       bigBlind: this.bigBlind,
+      smallBlind: this.smallBlind,
       seatedCount: this.seats.filter((seat) => seat.playerId !== null).length,
       seats: this.seats.map((seat) => ({ ...seat })),
     };
@@ -106,8 +126,34 @@ export class PokerTable {
     return this.seats.find((seat) => seat.playerId === playerId);
   }
 
-  /** SRS-1.1: occupy any open seat; SRS-1.4: reject when no seats are open. */
-  join(playerId: string, username: string, chipStack: number, avatarUrl: string | null = null): JoinResult {
+  /** The seat number this player holds here, or null if they aren't seated. */
+  getSeatNumber(playerId: string): number | null {
+    return this.findSeatByPlayerId(playerId)?.seatNumber ?? null;
+  }
+
+  /**
+   * Why `seatNumber` can't be sat in right now, or null if it can. Lets the
+   * server reject a bad seat choice before taking the buy-in from the
+   * player's balance; join() re-checks it regardless.
+   */
+  checkSeat(seatNumber: number): string | null {
+    const seat = this.seats.find((candidate) => candidate.seatNumber === seatNumber);
+    if (!seat) return 'That seat does not exist.';
+    if (seat.playerId !== null) return 'That seat is already taken.';
+    return null;
+  }
+
+  /**
+   * SRS-1.1: occupy the chosen open seat, or the first open seat when
+   * `seatNumber` is omitted; SRS-1.4: reject when no seats are open.
+   */
+  join(
+    playerId: string,
+    username: string,
+    chipStack: number,
+    avatarUrl: string | null = null,
+    seatNumber?: number
+  ): JoinResult {
     const trimmedUsername = username.trim();
 
     if (!trimmedUsername) {
@@ -132,12 +178,18 @@ export class PokerTable {
       return { ok: false, error: 'This table is full.' };
     }
 
-    openSeat.playerId = playerId;
-    openSeat.username = trimmedUsername;
-    openSeat.avatarUrl = avatarUrl;
-    openSeat.chipStack = chipStack;
+    if (seatNumber !== undefined) {
+      const seatError = this.checkSeat(seatNumber);
+      if (seatError) return { ok: false, error: seatError };
+    }
+    const seat = seatNumber === undefined ? openSeat : (this.seats[seatNumber - 1] as Seat);
 
-    return { ok: true, seatNumber: openSeat.seatNumber };
+    seat.playerId = playerId;
+    seat.username = trimmedUsername;
+    seat.avatarUrl = avatarUrl;
+    seat.chipStack = chipStack;
+
+    return { ok: true, seatNumber: seat.seatNumber };
   }
 
   /** SRS-21.1 (simplified): remove a seated player from their seat. */

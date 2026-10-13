@@ -1,13 +1,22 @@
-// Shared wire contract for the poker table's Supabase Realtime channel, used
-// by both server/pokerRealtimeServer.ts and app/poker/page.tsx so the two
-// don't drift apart on event names or payload shape.
+// Shared wire contract for the poker room's Supabase Realtime channels, used
+// by both server/pokerRealtimeServer.ts and the pages under app/poker/ so the
+// two don't drift apart on channel names, event names, or payload shape.
+//
+// There's one channel per table (pokerTableChannelName) carrying that
+// table's full state and its join/leave/sync actions, plus one lobby channel
+// carrying a small summary of every table.
 
-export const POKER_CHANNEL_NAME = 'poker:table-1';
+export const POKER_LOBBY_CHANNEL_NAME = 'poker:lobby';
+
+export function pokerTableChannelName(tableId: string): string {
+  return `poker:table-${tableId}`;
+}
 
 export const POKER_EVENT_ACTION = 'action';
 export const POKER_EVENT_STATE = 'state';
 export const POKER_EVENT_ACK = 'ack';
 
+/** The lobby channel only answers 'sync'; table channels answer all three. */
 export type PokerAction = 'join' | 'leave' | 'sync';
 
 export interface PokerActionPayload {
@@ -22,6 +31,8 @@ export interface PokerActionPayload {
   token?: string;
   /** Chosen buy-in amount; only meaningful for a 'join' action. */
   buyIn?: number;
+  /** The seat the player picked; only meaningful for a 'join' action. */
+  seatNumber?: number;
 }
 
 export interface PokerAckPayload {
@@ -29,4 +40,23 @@ export interface PokerAckPayload {
   ok: boolean;
   error?: string;
   seatNumber?: number;
+}
+
+/** One table's entry in the lobby channel's `state` broadcast. */
+export interface PokerLobbyTable {
+  tableId: string;
+  name: string;
+  smallBlind: number;
+  bigBlind: number;
+  maxSeats: number;
+  seatedCount: number;
+  /**
+   * Who is seated, so the lobby can send a player who is already seated
+   * somewhere straight to that table. Already public on the table channel.
+   */
+  playerIds: string[];
+}
+
+export interface PokerLobbyState {
+  tables: PokerLobbyTable[];
 }

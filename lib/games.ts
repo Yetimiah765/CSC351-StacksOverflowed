@@ -28,7 +28,7 @@ export const GAMES: Game[] = [
     id: 'roulette',
     name: 'Roulette',
     description: 'Bet on where the ball lands on the wheel.',
-    href: null,
+    href: '/roulette',
   },
   {
     id: 'slots',

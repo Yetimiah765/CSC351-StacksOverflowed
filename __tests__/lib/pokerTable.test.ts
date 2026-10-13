@@ -34,6 +34,15 @@ describe('PokerTable', () => {
       username: 'Alice',
       avatarUrl: null,
       chipStack: 500,
+      inHand: false,
+      folded: false,
+      bet: 0,
+      totalBet: 0,
+      allIn: false,
+      hasActed: false,
+      canRaise: true,
+      leaveRequested: false,
+      lastAction: null,
     });
   });
 
@@ -128,6 +137,15 @@ describe('PokerTable', () => {
       username: null,
       avatarUrl: null,
       chipStack: null,
+      inHand: false,
+      folded: false,
+      bet: 0,
+      totalBet: 0,
+      allIn: false,
+      hasActed: false,
+      canRaise: true,
+      leaveRequested: false,
+      lastAction: null,
     });
   });
 

@@ -2,12 +2,22 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
-import { MAX_BUY_IN_MULTIPLIER, MIN_BUY_IN_MULTIPLIER } from '../../../lib/pokerTable';
+import {
+  MAX_BUY_IN_MULTIPLIER,
+  MIN_BUY_IN_MULTIPLIER,
+  MIN_PLAYERS_TO_START,
+  getBettingOptions,
+  type BettingMove,
+  type HandResult,
+  type Street,
+  type TableState,
+} from '../../../lib/pokerTable';
 import { getPokerTableConfig } from '../../../lib/pokerTables';
 import { pokerTableChannelName } from '../../../lib/pokerRealtime';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
+import BettingControls from '../BettingControls';
 import {
   ConnectionPill,
   PokerRoomEyebrow,
@@ -18,27 +28,23 @@ import {
   StatPill,
 } from '../pokerUi';
 
-interface Seat {
-  seatNumber: number;
-  playerId: string | null;
-  username: string | null;
-  avatarUrl: string | null;
-  chipStack: number | null;
-}
-
-interface TableState {
-  tableId: string;
-  maxSeats: number;
-  /** The buy-in range is 50x-200x this (computed below), not a flat amount. */
-  bigBlind: number;
-  smallBlind: number;
-  seatedCount: number;
-  seats: Seat[];
-}
-
 // Same idea as QUICK_AMOUNTS on the sportsbook page (app/sports/page.tsx),
 // but these add to the current amount rather than setting it outright.
 const QUICK_BUY_IN_INCREMENTS = [10, 50, 100, 500];
+
+const STREET_LABELS: Record<Street, string> = {
+  preflop: 'Preflop',
+  flop: 'Flop',
+  turn: 'Turn',
+  river: 'River',
+};
+
+// "P1 wins 25" / "Split pot: P1 12 · P3 13".
+function describeHandResult(result: HandResult): string {
+  const [first] = result.awards;
+  if (result.awards.length === 1 && first) return `${first.username ?? `Seat ${first.seatNumber}`} wins ${first.amount}`;
+  return `Split pot: ${result.awards.map((award) => `${award.username ?? `Seat ${award.seatNumber}`} ${award.amount}`).join(' · ')}`;
+}
 
 export default function PokerTablePage({ params }: { params: { tableId: string } }) {
   const router = useRouter();
@@ -48,6 +54,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const [tableState, setTableState] = useState<TableState | null>(null);
   const [joinError, setJoinError] = useState('');
   const [leaving, setLeaving] = useState(false);
+  // Asked to leave while in a hand: the server folds this player when it's
+  // their turn and removes them when the hand ends (SRS-21.2/21.3).
+  const [leavePending, setLeavePending] = useState(false);
+  const [acting, setActing] = useState(false);
+  const [actError, setActError] = useState('');
   const [avatars, setAvatars] = useState<Record<string, string | null>>({});
   // The open seat the player clicked; they pick one before buying in.
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
@@ -56,6 +67,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // not a number, so a player can freely type/clear it (same pattern as
   // the wager amount input on the sportsbook page, app/sports/page.tsx).
   const [buyInText, setBuyInText] = useState('');
+  // When the pre-hand countdown ends, on this browser's clock — rebuilt from
+  // the server's relative countdownMsRemaining on every table:state, so a
+  // clock that disagrees with the server's doesn't matter.
+  const [countdownEndsAt, setCountdownEndsAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const fetchedAvatarsRef = useRef(new Set<string>());
 
@@ -66,8 +82,22 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   } = usePokerChannel<TableState>(
     config ? pokerTableChannelName(config.id) : null,
     Boolean(token && profile),
-    setTableState
+    (state) => {
+      setTableState(state);
+      setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);
+    }
   );
+
+  // Tick while a countdown is running so the seconds left re-render.
+  useEffect(() => {
+    if (countdownEndsAt === null) return;
+    setNow(Date.now());
+    const interval = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(interval);
+  }, [countdownEndsAt]);
+
+  const countdownSeconds =
+    countdownEndsAt === null ? null : Math.max(0, Math.ceil((countdownEndsAt - now) / 1000));
 
   // Avatars aren't carried through the table:state broadcast (a profile
   // photo as base64 can exceed Realtime's broadcast payload size limit), so
@@ -98,6 +128,22 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!profile || !tableState) return null;
     return tableState.seats.find((seat) => seat.playerId === String(profile.playerId)) ?? null;
   }, [profile, tableState]);
+
+  // Once a pending leave goes through at the end of the hand, this player's
+  // seat disappears from the state: go back to the lobby, like a normal leave.
+  useEffect(() => {
+    if (leavePending && tableState && !mySeat) {
+      notifyBalanceChanged();
+      router.push('/poker');
+    }
+  }, [leavePending, tableState, mySeat, router]);
+
+  // A rejected action is about the turn it was made on; drop the message
+  // once the turn moves on.
+  const activeSeat = tableState?.activeSeat ?? null;
+  useEffect(() => {
+    setActError('');
+  }, [activeSeat]);
 
   const isFull = tableState ? tableState.seatedCount >= tableState.maxSeats : false;
   const minBuyIn = tableState ? MIN_BUY_IN_MULTIPLIER * tableState.bigBlind : null;
@@ -169,19 +215,32 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     }
   }
 
-  // Leaving sends the player back to the lobby to pick another table.
+  // Leaving sends the player back to the lobby to pick another table —
+  // right away between hands, or once the hand ends if they're in it.
   async function handleLeave() {
     if (!connected || !token) return;
     setJoinError('');
     setLeaving(true);
     const result = await sendAction('leave', { token });
-    if (result.ok) {
+    if (result.ok && result.pending) {
+      setLeaving(false);
+      setLeavePending(true);
+    } else if (result.ok) {
       notifyBalanceChanged();
       router.push('/poker');
     } else {
       setLeaving(false);
       setJoinError(result.error || 'Unable to leave the table.');
     }
+  }
+
+  async function handleAct(move: BettingMove, amount?: number) {
+    if (!connected || !token || acting) return;
+    setActError('');
+    setActing(true);
+    const result = await sendAction('act', { token, move, amount });
+    setActing(false);
+    if (!result.ok) setActError(result.error || 'That action was not accepted.');
   }
 
   if (!config) {
@@ -215,6 +274,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const sliderValue =
     minBuyIn !== null && maxBuyIn !== null ? Math.min(Math.max(parsedBuyIn ?? minBuyIn, minBuyIn), maxBuyIn) : 0;
 
+  const inHandPhase = tableState?.phase === 'in-hand';
+  const isMyTurn = Boolean(mySeat && inHandPhase && tableState?.activeSeat === mySeat.seatNumber);
+  const activePlayer = inHandPhase ? tableState?.seats.find((seat) => seat.seatNumber === tableState.activeSeat) : null;
+  // Collected pots plus everything bet so far this round.
+  const potTotal = tableState ? tableState.pot + tableState.seats.reduce((sum, seat) => sum + seat.bet, 0) : 0;
+  const bettingOptions = mySeat && tableState ? getBettingOptions(mySeat, tableState) : null;
+
   return (
     <Room>
       <section className="w-full max-w-4xl">
@@ -245,6 +311,20 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           <div className="flex flex-wrap items-center gap-3 text-sm">
             {tableState ? (
               <StatPill>
+                {tableState.phase === 'in-hand' ? (
+                  <span className="font-semibold text-emerald-300">
+                    Hand #{tableState.handNumber}
+                    {tableState.street ? ` · ${STREET_LABELS[tableState.street]}` : ''}
+                  </span>
+                ) : tableState.phase === 'countdown' ? (
+                  <span className="font-semibold text-amber-300">Starting in {countdownSeconds ?? 0}s</span>
+                ) : (
+                  <span className="text-slate-400">Waiting for players</span>
+                )}
+              </StatPill>
+            ) : null}
+            {tableState ? (
+              <StatPill>
                 <span className="font-semibold tabular-nums text-amber-300">
                   {tableState.seatedCount} / {tableState.maxSeats}
                 </span>{' '}
@@ -268,13 +348,68 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           <div className="absolute inset-[12%] rounded-[50%] bg-[radial-gradient(ellipse_at_center,_#15803d_0%,_#065f46_60%,_#022c22_100%)] shadow-[inset_0_0_60px_rgba(0,0,0,0.65)]">
             {/* Racetrack line */}
             <div className="absolute inset-[8%] rounded-[50%] border border-emerald-300/15" />
-            {/* Center emblem */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-              <StakesChip stakes={config.stakes} size="h-8 w-8" />
-              <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-200/30 sm:text-xs">Stacks Overflowed</p>
-              <p className="text-2xl font-bold tabular-nums tracking-[0.15em] text-emerald-100/25 sm:text-3xl">
-                {config.smallBlind}/{config.bigBlind}
-              </p>
+            {/* Center: pot during a hand, the countdown before one, otherwise the emblem */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-center">
+              {tableState?.phase === 'in-hand' ? (
+                <>
+                  <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
+                    {tableState.street ? STREET_LABELS[tableState.street] : ''} · Hand #{tableState.handNumber}
+                  </p>
+                  <p className="flex items-center gap-2 rounded-full bg-black/35 px-4 py-1.5 text-xl font-bold tabular-nums text-amber-200 shadow-inner shadow-black/40 sm:text-2xl">
+                    <StakesChip stakes={config.stakes} size="h-5 w-5" />
+                    Pot {tableState.pot}
+                  </p>
+                  {tableState.pots.length > 1 ? (
+                    // SRS-19: main pot and side pots.
+                    <p className="text-[11px] tabular-nums text-emerald-100/60 sm:text-xs">
+                      {tableState.pots
+                        .map((pot, index) => `${index === 0 ? 'Main' : `Side ${index}`} ${pot.amount}`)
+                        .join(' · ')}
+                    </p>
+                  ) : null}
+                  {tableState.currentBet > 0 ? (
+                    <p className="text-[11px] text-emerald-100/50 sm:text-xs">Current bet {tableState.currentBet}</p>
+                  ) : null}
+                </>
+              ) : tableState?.phase === 'countdown' && countdownSeconds !== null ? (
+                <>
+                  {tableState.lastHandResult ? (
+                    <p className="max-w-[70%] text-xs font-semibold text-amber-100 sm:text-sm">
+                      {describeHandResult(tableState.lastHandResult)}
+                    </p>
+                  ) : null}
+                  <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
+                    {tableState.lastHandResult ? 'Next hand in' : 'Hand starts in'}
+                  </p>
+                  <p
+                    key={countdownSeconds}
+                    className="animate-countdown-tick text-5xl font-bold tabular-nums text-amber-200 drop-shadow-[0_0_18px_rgba(252,211,77,0.35)] sm:text-6xl"
+                  >
+                    {countdownSeconds}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <StakesChip stakes={config.stakes} size="h-8 w-8" />
+                  <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-200/30 sm:text-xs">
+                    Stacks Overflowed
+                  </p>
+                  {tableState?.lastHandResult ? (
+                    <p className="max-w-[70%] text-xs font-semibold text-amber-100 sm:text-sm">
+                      {describeHandResult(tableState.lastHandResult)}
+                    </p>
+                  ) : null}
+                  {tableState ? (
+                    // SRS-20.5: waiting-for-players indicator.
+                    <p className="text-xs text-emerald-100/60 sm:text-sm">
+                      Waiting for players ·{' '}
+                      <span className="tabular-nums">
+                        {Math.min(tableState.seatedCount, MIN_PLAYERS_TO_START)}/{MIN_PLAYERS_TO_START}
+                      </span>
+                    </p>
+                  ) : null}
+                </>
+              )}
             </div>
           </div>
 
@@ -287,83 +422,141 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             const isOwnSeat = seat.playerId === String(profile.playerId);
             const isSelected = seat.seatNumber === selectedSeat;
             const isPickable = canPickSeat && !seat.playerId;
+            // Seated, but sat down after this hand was dealt (or out of chips).
+            const sittingOut = Boolean(seat.playerId) && inHandPhase && !seat.inHand && !seat.folded;
+            const isActive = inHandPhase && tableState.activeSeat === seat.seatNumber;
+            const isBusted = Boolean(seat.playerId) && seat.chipStack === 0 && !seat.inHand;
+            // The button stays on its seat between hands, like a real table.
+            const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
+            // Only until the seat acts: after that the bet is theirs, not just the blind.
+            const blindLabel = !inHandPhase || seat.hasActed
+              ? null
+              : seat.seatNumber === tableState.smallBlindSeat
+                ? 'SB'
+                : seat.seatNumber === tableState.bigBlindSeat
+                  ? 'BB'
+                  : null;
 
             return (
-              <div
-                key={seat.seatNumber}
-                style={{ left: `${left}%`, top: `${top}%` }}
-                className="absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-              >
-                <button
-                  type="button"
-                  disabled={!isPickable}
-                  onClick={() => setSelectedSeat(seat.seatNumber)}
-                  aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
-                  aria-pressed={isPickable ? isSelected : undefined}
-                  className={`relative z-10 h-14 w-14 shrink-0 overflow-hidden rounded-full transition disabled:cursor-default sm:h-16 sm:w-16 ${
-                    seat.playerId
-                      ? isOwnSeat
-                        ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
-                        : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
-                      : isSelected
-                        ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
-                        : isPickable
-                          ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
-                          : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
-                  }`}
-                >
-                  {seat.playerId ? (
-                    avatars[seat.playerId] ? (
-                      <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
-                        {seat.username?.[0]?.toUpperCase()}
-                      </span>
-                    )
-                  ) : (
-                    <span
-                      className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
-                        isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
-                      }`}
-                    >
-                      {isPickable ? 'Sit' : seat.seatNumber}
-                    </span>
-                  )}
-                </button>
+              <Fragment key={seat.seatNumber}>
+                {/* Chips this seat has put in, pushed out toward the pot */}
+                {seat.bet > 0 ? (
+                  <div
+                    style={{ left: `${50 + 28 * Math.cos(angle)}%`, top: `${50 + 24 * Math.sin(angle)}%` }}
+                    className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border border-white/10 bg-black/60 py-0.5 pl-0.5 pr-2.5 shadow-lg shadow-black/50"
+                  >
+                    <StakesChip stakes={config.stakes} size="h-5 w-5" />
+                    <span className="text-xs font-semibold tabular-nums text-amber-100">{seat.bet}</span>
+                    {blindLabel ? (
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
+                    ) : null}
+                  </div>
+                ) : null}
 
-                {/* Name plate */}
+                {/* Dealer button (SRS-13.5) */}
+                {isDealer ? (
+                  <span
+                    title="Dealer"
+                    style={{ left: `${50 + 34 * Math.cos(angle + 0.38)}%`, top: `${50 + 31 * Math.sin(angle + 0.38)}%` }}
+                    className="absolute z-20 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-slate-300 bg-white text-[11px] font-black text-slate-900 shadow-[0_2px_8px_rgba(0,0,0,0.6)]"
+                  >
+                    D
+                  </span>
+                ) : null}
+
                 <div
-                  className={`-mt-2 min-w-[76px] max-w-[96px] rounded-lg border px-2 pb-1 pt-2.5 text-center shadow-lg shadow-black/50 ${
-                    seat.playerId
-                      ? isOwnSeat
-                        ? 'border-emerald-300/40 bg-slate-950/95'
-                        : 'border-white/10 bg-slate-950/95'
-                      : isSelected
-                        ? 'border-amber-300/40 bg-slate-950/90'
-                        : 'border-transparent bg-black/40'
+                  style={{ left: `${left}%`, top: `${top}%` }}
+                  className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-opacity ${
+                    sittingOut || seat.folded ? 'opacity-45' : ''
                   }`}
                 >
-                  <p
-                    className={`truncate text-xs font-medium ${
-                      seat.playerId
-                        ? isOwnSeat
-                          ? 'text-emerald-200'
-                          : 'text-slate-100'
-                        : isSelected
-                          ? 'text-amber-200'
-                          : 'text-slate-500'
+                  <button
+                    type="button"
+                    disabled={!isPickable}
+                    onClick={() => setSelectedSeat(seat.seatNumber)}
+                    aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
+                    aria-pressed={isPickable ? isSelected : undefined}
+                    className={`relative z-10 h-14 w-14 shrink-0 overflow-hidden rounded-full transition disabled:cursor-default sm:h-16 sm:w-16 ${
+                      isActive
+                        ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
+                        : seat.playerId
+                          ? isOwnSeat
+                            ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
+                            : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
+                          : isSelected
+                            ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
+                            : isPickable
+                              ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
+                              : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
                     }`}
                   >
-                    {seat.playerId ? (isOwnSeat ? 'You' : seat.username) : isSelected ? 'Your pick' : `Seat ${seat.seatNumber}`}
-                  </p>
-                  {seat.chipStack !== null ? (
-                    <p className="flex items-center justify-center gap-1 text-[11px] font-semibold tabular-nums text-amber-300">
-                      <span className="h-2 w-2 rounded-full border border-dashed border-white/70 bg-amber-500" />
-                      {seat.chipStack}
+                    {seat.playerId ? (
+                      avatars[seat.playerId] ? (
+                        <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
+                          {seat.username?.[0]?.toUpperCase()}
+                        </span>
+                      )
+                    ) : (
+                      <span
+                        className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
+                          isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
+                        }`}
+                      >
+                        {isPickable ? 'Sit' : seat.seatNumber}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Name plate */}
+                  <div
+                    className={`-mt-2 min-w-[76px] max-w-[96px] rounded-lg border px-2 pb-1 pt-2.5 text-center shadow-lg shadow-black/50 ${
+                      seat.playerId
+                        ? isOwnSeat
+                          ? 'border-emerald-300/40 bg-slate-950/95'
+                          : 'border-white/10 bg-slate-950/95'
+                        : isSelected
+                          ? 'border-amber-300/40 bg-slate-950/90'
+                          : 'border-transparent bg-black/40'
+                    }`}
+                  >
+                    <p
+                      className={`truncate text-xs font-medium ${
+                        seat.playerId
+                          ? isOwnSeat
+                            ? 'text-emerald-200'
+                            : 'text-slate-100'
+                          : isSelected
+                            ? 'text-amber-200'
+                            : 'text-slate-500'
+                      }`}
+                    >
+                      {seat.playerId ? (isOwnSeat ? 'You' : seat.username) : isSelected ? 'Your pick' : `Seat ${seat.seatNumber}`}
                     </p>
-                  ) : null}
+                    {seat.chipStack !== null ? (
+                      <p className="flex items-center justify-center gap-1 text-[11px] font-semibold tabular-nums text-amber-300">
+                        <span className="h-2 w-2 rounded-full border border-dashed border-white/70 bg-amber-500" />
+                        {seat.chipStack}
+                      </p>
+                    ) : null}
+                    {isActive ? (
+                      // SRS-3.2: active turn indicator.
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">To act</p>
+                    ) : seat.allIn ? (
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-red-300">All-in</p>
+                    ) : seat.folded ? (
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400">Folded</p>
+                    ) : seat.lastAction ? (
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">{seat.lastAction}</p>
+                    ) : isBusted ? (
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400">Out of chips</p>
+                    ) : sittingOut ? (
+                      <p className="text-[10px] uppercase tracking-wider text-slate-400">Next hand</p>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
+              </Fragment>
             );
           })}
         </div>
@@ -522,22 +715,70 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   </div>
                 )
               ) : (
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-slate-500">Your stack · Seat {mySeat.seatNumber}</p>
-                    <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
-                      <StakesChip stakes={config.stakes} size="h-7 w-7" />
-                      {mySeat.chipStack}
-                    </p>
+                <div className="space-y-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-wider text-slate-500">
+                        Your stack · Seat {mySeat.seatNumber}
+                      </p>
+                      <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
+                        <StakesChip stakes={config.stakes} size="h-7 w-7" />
+                        {mySeat.chipStack}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleLeave}
+                      disabled={leaving || leavePending}
+                      className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {leaving
+                        ? 'Leaving…'
+                        : leavePending
+                          ? 'Leaving after this hand'
+                          : mySeat.inHand && inHandPhase
+                            ? 'Leave after this hand'
+                            : 'Leave table'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleLeave}
-                    disabled={leaving}
-                    className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {leaving ? 'Leaving…' : 'Leave table'}
-                  </button>
+
+                  {isMyTurn && bettingOptions && tableState ? (
+                    <div className="rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
+                      <p className="mb-3 text-sm font-semibold text-amber-200">Your turn</p>
+                      <BettingControls
+                        // Fresh controls (and amount) for every turn and every change in the bet to match.
+                        key={`${tableState.handNumber}-${tableState.street}-${tableState.currentBet}-${mySeat.bet}`}
+                        options={bettingOptions}
+                        potTotal={potTotal}
+                        seatBet={mySeat.bet}
+                        disabled={acting || !connected}
+                        onAct={handleAct}
+                      />
+                    </div>
+                  ) : inHandPhase && mySeat.inHand ? (
+                    <p className="text-sm text-slate-400">
+                      {mySeat.allIn
+                        ? "You're all-in — sit tight until the hand is over."
+                        : `Waiting for ${activePlayer?.username ?? 'the next player'} to act…`}
+                    </p>
+                  ) : null}
+
+                  {leavePending ? (
+                    <p className="text-xs text-slate-500">
+                      You&apos;ll fold when it&apos;s your turn and leave the table when this hand ends — anything you
+                      win this hand comes with you.
+                    </p>
+                  ) : inHandPhase && mySeat.inHand ? (
+                    <p className="text-xs text-slate-500">
+                      Leaving during a hand folds you when it&apos;s your turn; you leave once the hand ends.
+                    </p>
+                  ) : inHandPhase && !mySeat.folded && !mySeat.inHand ? (
+                    <p className="text-xs text-slate-500">You sat down mid-hand, so you&apos;ll be dealt in next hand.</p>
+                  ) : null}
+
+                  {actError ? (
+                    <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{actError}</p>
+                  ) : null}
                 </div>
               )}
 

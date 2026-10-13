@@ -15,7 +15,12 @@
 // own Realtime channel, plus a lobby channel summarizing all of them. A table
 // supports joining a chosen open seat, leaving a seat, a hard cap on seat
 // count, and a buy-in (SRS-1.2, SRS-1.3) deducted from/refunded to
-// players.balance. A player can be seated at only one table at a time. A
+// players.balance. A player can be seated at only one table at a time. Once
+// three players are seated, a table counts down HAND_START_COUNTDOWN_MS and
+// then starts a hand (dealer button, blinds — see lib/pokerTable.ts); this
+// process owns that countdown's timer. Seated players then take turns with
+// `act` actions (fold/check/call/bet/raise) until the hand ends, which the
+// table works out itself. A
 // seat survives a dropped connection (closing the tab does not free it or
 // refund the stack) so a player can reconnect and resume it later
 // (SRS-2.1) — there is no disconnection-timeout removal yet (SRS-9.x/10.x),
@@ -31,9 +36,15 @@
 //
 // Run with: npm run realtime
 
+import { randomInt } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
-import { MAX_BUY_IN_MULTIPLIER, MIN_BUY_IN_MULTIPLIER, PokerTable } from '../lib/pokerTable';
+import {
+  HAND_START_COUNTDOWN_MS,
+  MAX_BUY_IN_MULTIPLIER,
+  MIN_BUY_IN_MULTIPLIER,
+  PokerTable,
+} from '../lib/pokerTable';
 import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerIdForToken } from '../lib/auth';
@@ -47,6 +58,7 @@ import {
   type PokerActionPayload,
   type PokerLobbyState,
 } from '../lib/pokerRealtime';
+import type { BettingMove } from '../lib/pokerTable';
 
 // Unlike Next.js, a standalone Node process doesn't auto-load .env files, so
 // this has to happen before getSupabaseClient() reads process.env below.
@@ -58,9 +70,13 @@ interface TableEntry {
   config: PokerTableConfig;
   table: PokerTable;
   channel: RealtimeChannel;
+  /** Fires when this table's pre-hand countdown ends; null when none is running. */
+  startTimer: ReturnType<typeof setTimeout> | null;
 }
 
-type AckResult = { ok: boolean; error?: string; seatNumber?: number };
+type AckResult = { ok: boolean; error?: string; seatNumber?: number; pending?: boolean };
+
+const BETTING_MOVES: BettingMove[] = ['fold', 'check', 'call', 'bet', 'raise'];
 
 // PostgREST calls can't share a transaction, so both of these use an
 // optimistic-lock read-then-conditional-update (matching the balance just
@@ -124,6 +140,7 @@ function startServer(supabase: SupabaseClient) {
     config,
     table: new PokerTable(config.id, config.maxSeats, config.bigBlind, config.smallBlind),
     channel: supabase.channel(pokerTableChannelName(config.id), CHANNEL_CONFIG),
+    startTimer: null,
   }));
 
   // Players with a join being processed right now. A join awaits several
@@ -147,6 +164,7 @@ function startServer(supabase: SupabaseClient) {
           bigBlind: state.bigBlind,
           maxSeats: state.maxSeats,
           seatedCount: state.seatedCount,
+          phase: state.phase,
           playerIds: state.seats.flatMap((seat) => (seat.playerId ? [seat.playerId] : [])),
         };
       }),
@@ -159,6 +177,44 @@ function startServer(supabase: SupabaseClient) {
 
   function broadcastTable(entry: TableEntry) {
     entry.channel.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload: entry.table.getState() });
+  }
+
+  // Players who asked to leave during a hand are removed when it ends
+  // (SRS-21.3) — refund what they had left. Call after anything that can end
+  // a hand.
+  async function settleRemovals(entry: TableEntry) {
+    for (const removal of entry.table.drainRemovals()) {
+      await refundBalance(supabase, Number(removal.playerId), removal.chipStack);
+    }
+  }
+
+  // Starts or cancels this table's countdown to match who's seated now (see
+  // PokerTable.updateCountdown). Called after every successful join/leave,
+  // before the resulting state is broadcast.
+  function refreshCountdown(entry: TableEntry) {
+    const change = entry.table.updateCountdown(Date.now());
+
+    if (change === 'started') {
+      entry.startTimer = setTimeout(() => {
+        entry.startTimer = null;
+        // SRS-13.1: crypto.randomInt picks the first hand's dealer, the same
+        // RNG the Daily Login Box uses for its rewards.
+        const started = entry.table.startHand((n) => randomInt(n));
+        void settleRemovals(entry);
+        if (started) {
+          const { handNumber, dealerSeat, smallBlindSeat, bigBlindSeat } = entry.table.getState();
+          // eslint-disable-next-line no-console
+          console.log(
+            `${entry.config.name}: hand #${handNumber} started (button seat ${dealerSeat}, SB seat ${smallBlindSeat}, BB seat ${bigBlindSeat})`
+          );
+        }
+        broadcastTable(entry);
+        broadcastLobby();
+      }, HAND_START_COUNTDOWN_MS);
+    } else if (change === 'cancelled' && entry.startTimer) {
+      clearTimeout(entry.startTimer);
+      entry.startTimer = null;
+    }
   }
 
   async function handleJoin(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
@@ -215,6 +271,7 @@ function startServer(supabase: SupabaseClient) {
       // exceed Realtime's broadcast payload size limit.
       const result = table.join(String(playerId), username, buyIn as number, null, seatNumber);
       if (result.ok) {
+        refreshCountdown(entry);
         broadcastTable(entry);
         broadcastLobby();
       } else {
@@ -236,11 +293,41 @@ function startServer(supabase: SupabaseClient) {
     const playerId = await getPlayerIdForToken(supabase, token);
     if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
 
+    // A player still in the hand gets `pending` back and stays seated until
+    // the hand ends (SRS-21.2/21.3); anyone else is removed and refunded now.
     const result = entry.table.leave(String(playerId));
     if (result.ok) {
       if (result.chipStack) {
         await refundBalance(supabase, playerId, result.chipStack);
       }
+      // Folding a leaver whose turn it was can end the hand.
+      await settleRemovals(entry);
+      // Leaving can cancel a countdown, or end a hand and start a new
+      // countdown right away.
+      refreshCountdown(entry);
+      broadcastTable(entry);
+      broadcastLobby();
+    }
+    return result;
+  }
+
+  // SRS-15: a betting action. The table checks it's this player's turn
+  // (SRS-3.1) and that the move and amount are legal (SRS-15.9/15.10).
+  async function handleAct(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
+    const { token, move, amount } = payload;
+
+    if (!token) return { ok: false, error: 'You must be signed in to play.' };
+    if (!move || !BETTING_MOVES.includes(move)) return { ok: false, error: 'Unknown action.' };
+
+    const playerId = await getPlayerIdForToken(supabase, token);
+    if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
+
+    const result = entry.table.act(String(playerId), move, amount);
+    if (result.ok) {
+      await settleRemovals(entry);
+      // The hand may have just ended: start the next countdown if there
+      // are still enough players.
+      refreshCountdown(entry);
       broadcastTable(entry);
       broadcastLobby();
     }
@@ -268,6 +355,7 @@ function startServer(supabase: SupabaseClient) {
         let result: AckResult;
         if (payload.action === 'join') result = await handleJoin(entry, payload);
         else if (payload.action === 'leave') result = await handleLeave(entry, payload);
+        else if (payload.action === 'act') result = await handleAct(entry, payload);
         else return;
 
         entry.channel.send({

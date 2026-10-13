@@ -6,6 +6,8 @@
 // table's full state and its join/leave/sync actions, plus one lobby channel
 // carrying a small summary of every table.
 
+import type { BettingMove, TablePhase } from './pokerTable';
+
 export const POKER_LOBBY_CHANNEL_NAME = 'poker:lobby';
 
 export function pokerTableChannelName(tableId: string): string {
@@ -16,8 +18,8 @@ export const POKER_EVENT_ACTION = 'action';
 export const POKER_EVENT_STATE = 'state';
 export const POKER_EVENT_ACK = 'ack';
 
-/** The lobby channel only answers 'sync'; table channels answer all three. */
-export type PokerAction = 'join' | 'leave' | 'sync';
+/** The lobby channel only answers 'sync'; table channels answer all four. */
+export type PokerAction = 'join' | 'leave' | 'sync' | 'act';
 
 export interface PokerActionPayload {
   requestId: string;
@@ -33,6 +35,10 @@ export interface PokerActionPayload {
   buyIn?: number;
   /** The seat the player picked; only meaningful for a 'join' action. */
   seatNumber?: number;
+  /** The betting move, for an 'act' action. */
+  move?: BettingMove;
+  /** For a 'bet' or 'raise' move: the amount the player's round contribution goes to. */
+  amount?: number;
 }
 
 export interface PokerAckPayload {
@@ -40,6 +46,11 @@ export interface PokerAckPayload {
   ok: boolean;
   error?: string;
   seatNumber?: number;
+  /**
+   * On a 'leave' ack: the player is still in the hand, so they'll be folded
+   * when it's their turn and removed (and refunded) when the hand ends.
+   */
+  pending?: boolean;
 }
 
 /** One table's entry in the lobby channel's `state` broadcast. */
@@ -50,6 +61,8 @@ export interface PokerLobbyTable {
   bigBlind: number;
   maxSeats: number;
   seatedCount: number;
+  /** Whether the table is waiting for players, counting down, or mid-hand. */
+  phase: TablePhase;
   /**
    * Who is seated, so the lobby can send a player who is already seated
    * somewhere straight to that table. Already public on the table channel.

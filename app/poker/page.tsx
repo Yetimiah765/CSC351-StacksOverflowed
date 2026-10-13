@@ -73,7 +73,20 @@ function TableCard({ table, stakes }: { table: PokerLobbyTable; stakes: Stakes }
           <h3 className="font-semibold text-slate-100">{table.name}</h3>
           <p className={`text-xs ${style.accent}`}>Blinds {table.smallBlind}/{table.bigBlind}</p>
         </div>
-        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyle}`}>{status}</span>
+        <div className="flex flex-col items-end gap-1">
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyle}`}>{status}</span>
+          {table.phase === 'in-hand' ? (
+            <span className="flex items-center gap-1.5 text-[11px] text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-300" />
+              In play
+            </span>
+          ) : table.phase === 'countdown' ? (
+            <span className="flex items-center gap-1.5 text-[11px] text-amber-200">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-200" />
+              Starting soon
+            </span>
+          ) : null}
+        </div>
       </div>
 
       <div className="my-3">

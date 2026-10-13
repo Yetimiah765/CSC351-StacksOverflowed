@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { notifyBalanceChanged } from '../lib/balanceEvents';
 import { DAILY_LOGIN_BOX_REWARDS, formatCountdown } from '../lib/dailyLoginBox';
+import SlotReveal from './SlotReveal';
 
 type BoxState =
   | { kind: 'loading' }
@@ -23,6 +24,7 @@ export default function DailyLoginBox() {
   const [state, setState] = useState<BoxState>({ kind: 'loading' });
   const [opening, setOpening] = useState(false);
   const [reward, setReward] = useState<number | null>(null);
+  const [showSpin, setShowSpin] = useState(false);
   const [error, setError] = useState('');
   const [now, setNow] = useState(() => Date.now());
 
@@ -80,12 +82,15 @@ export default function DailyLoginBox() {
       });
       const data = await res.json();
       if (res.ok) {
-        // The reward is already saved (SRS-128.9) before it's revealed
-        // (SRS-128.10), so leaving mid-animation loses nothing.
+        // The reward is already saved (SRS-128.9) before the spin reveals it
+        // (SRS-128.10), so leaving mid-spin loses nothing. The nav bar's
+        // balance refreshes when the reels stop (onStopped below), about
+        // 1.5 s from now, so it doesn't spoil the spin but still lands
+        // inside SRS-NFR-104's 2 seconds.
         setNow(Date.now());
         setReward(data.reward);
+        setShowSpin(true);
         setState({ kind: 'cooldown', readyAt: Date.now() + data.msRemaining });
-        notifyBalanceChanged();
       } else if (res.status === 409) {
         // Already opened elsewhere, e.g. in another tab (SRS-128.19).
         setNow(Date.now());
@@ -131,7 +136,7 @@ export default function DailyLoginBox() {
               disabled={state.kind !== 'available' || opening}
               className="rounded-xl bg-amber-400 px-6 py-2 text-sm font-semibold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-400"
             >
-              {state.kind === 'loading' ? 'Loading…' : opening ? 'Opening…' : 'Open'}
+              {state.kind === 'loading' ? 'Loading…' : opening ? 'Spinning…' : 'Spin'}
             </button>
           )}
           {state.kind === 'cooldown' ? (
@@ -148,7 +153,7 @@ export default function DailyLoginBox() {
           <li
             key={option.amount}
             className={`rounded-xl border px-3 py-2 text-center ${
-              reward === option.amount ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-950/60'
+              reward === option.amount && !showSpin ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-950/60'
             }`}
           >
             <p className="font-semibold text-slate-100">{option.amount} coins</p>
@@ -157,12 +162,14 @@ export default function DailyLoginBox() {
         ))}
       </ul>
 
-      {reward !== null ? (
-        // SRS-128.10: reveal the reward after it has been saved.
-        <div className="mt-5 animate-box-reveal rounded-2xl border border-amber-400/60 bg-amber-400/10 p-5 text-center">
-          <p className="text-4xl font-bold text-amber-300">+{reward} coins</p>
-          <p className="mt-1 text-sm text-slate-300">Added to your balance.</p>
-        </div>
+      {reward !== null && !showSpin ? (
+        <p className="mt-4 text-sm text-slate-300">
+          You won <span className="font-semibold text-amber-300">{reward} coins</span> today.
+        </p>
+      ) : null}
+
+      {reward !== null && showSpin ? (
+        <SlotReveal reward={reward} onStopped={notifyBalanceChanged} onClose={() => setShowSpin(false)} />
       ) : null}
 
       {error ? (

@@ -15,3 +15,14 @@ body {
   font-family: Arial, Helvetica, sans-serif;
   background: linear-gradient(135deg, #020617 0%, #111827 45%, #111827 100%);
 }
+
+/* Daily Login Box slot reels (components/SlotReveal.tsx). Each reel sets
+   --reel-stop to how far its strip travels before it stops. */
+@keyframes reel-spin {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(var(--reel-stop));
+  }
+}

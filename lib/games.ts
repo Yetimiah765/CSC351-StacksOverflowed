@@ -22,13 +22,13 @@ export const GAMES: Game[] = [
     id: 'blackjack',
     name: 'Blackjack',
     description: 'Get closer to 21 than the dealer without going over.',
-    href: null,
+    href: '/blackjack',
   },
   {
     id: 'roulette',
     name: 'Roulette',
     description: 'Bet on where the ball lands on the wheel.',
-    href: null,
+    href: '/roulette',
   },
   {
     id: 'slots',

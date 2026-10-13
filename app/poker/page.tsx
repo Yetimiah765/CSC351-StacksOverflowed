@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { getSupabaseBrowserClient } from '../../lib/supabase';
+import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import {
   POKER_CHANNEL_NAME,
   POKER_EVENT_ACTION,
@@ -222,7 +223,7 @@ export default function PokerTablePage() {
       const data = await res.json();
       setProfile((prev) => (prev ? { ...prev, balance: data.balance } : prev));
     }
-    window.dispatchEvent(new Event('balance:refresh'));
+    notifyBalanceChanged();
   }
 
   async function handleJoin() {

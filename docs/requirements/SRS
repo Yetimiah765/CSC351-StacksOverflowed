@@ -1554,7 +1554,7 @@ flowchart LR
 
 *Traces to: UR-110, UR-128*
 
-**SRS-128.4, JO, Manual box opening.** The system shall require the player to select the Open control on an available Daily Login Box before initiating a reward.
+**SRS-128.4, JO, Manual box opening.** The system shall require the player to select the Spin control on an available Daily Login Box before initiating a reward.
 
 *Traces to: UR-110, UR-128*
 
@@ -1590,7 +1590,7 @@ flowchart LR
 
 *Traces to: UR-128*
 
-**SRS-128.13, JO, Cooldown visibility.** During the 24-hour cooldown, the system shall continue displaying the Daily Login Box as the first item on the Cosmetic Shop page with its Open control disabled and a countdown showing the remaining cooldown time.
+**SRS-128.13, JO, Cooldown visibility.** During the 24-hour cooldown, the system shall continue displaying the Daily Login Box as the first item on the Cosmetic Shop page with its Spin control disabled and a countdown showing the remaining cooldown time.
 
 *Traces to: UR-128*
 

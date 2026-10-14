@@ -12,14 +12,20 @@ import {
   type BettingMove,
   type HandResult,
   type Street,
-  type TableState,
 } from '../../../lib/pokerTable';
-import { getPokerTableConfig } from '../../../lib/pokerTables';
-import { pokerTableChannelName } from '../../../lib/pokerRealtime';
+import { evaluateHand, type Card } from '../../../lib/pokerCards';
+import { POKER_TABLES, getPokerTableConfig } from '../../../lib/pokerTables';
+import {
+  pokerTableChannelName,
+  type PokerHoleCardsRequest,
+  type PokerTableBroadcast,
+} from '../../../lib/pokerRealtime';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
 import {
   ConnectionPill,
+  EmptyCardSlot,
+  PlayingCard,
   PokerRoomEyebrow,
   Room,
   RoomMessage,
@@ -39,11 +45,34 @@ const STREET_LABELS: Record<Street, string> = {
   river: 'River',
 };
 
-// "P1 wins 25" / "Split pot: P1 12 · P3 13".
+// "P1 wins 120 with Two pair, Kings and Fours" / "P1 +60 (Flush, Ace-high) · P3 +60 (...)".
 function describeHandResult(result: HandResult): string {
+  const name = (award: HandResult['awards'][number]) => award.username ?? `Seat ${award.seatNumber}`;
   const [first] = result.awards;
-  if (result.awards.length === 1 && first) return `${first.username ?? `Seat ${first.seatNumber}`} wins ${first.amount}`;
-  return `Split pot: ${result.awards.map((award) => `${award.username ?? `Seat ${award.seatNumber}`} ${award.amount}`).join(' · ')}`;
+  if (result.awards.length === 1 && first) {
+    return `${name(first)} wins ${first.amount}${first.handName ? ` with ${first.handName}` : ''}`;
+  }
+  return result.awards
+    .map((award) => `${name(award)} +${award.amount}${award.handName ? ` (${award.handName})` : ''}`)
+    .join(' · ');
+}
+
+// The previous hand's board and outcome, shown in the middle of the felt
+// until the next hand is dealt.
+function LastHandSummary({ result }: { result: HandResult }) {
+  return (
+    <>
+      {result.board.length > 0 ? (
+        <div className="flex gap-1">
+          {result.board.map((card) => (
+            <PlayingCard key={card} card={card} size="sm" />
+          ))}
+        </div>
+      ) : null}
+      <p className="max-w-[75%] text-xs font-semibold text-amber-100 sm:text-sm">{describeHandResult(result)}</p>
+      {result.ranOut ? <p className="text-[10px] text-emerald-100/50">All-in — board run out</p> : null}
+    </>
+  );
 }
 
 export default function PokerTablePage({ params }: { params: { tableId: string } }) {
@@ -51,7 +80,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const config = getPokerTableConfig(params.tableId);
   const { token, profile, setProfile, loading: profileLoading, error: profileError } = usePlayerProfile();
 
-  const [tableState, setTableState] = useState<TableState | null>(null);
+  const [tableState, setTableState] = useState<PokerTableBroadcast | null>(null);
+  // This player's own hole cards for the current hand, opened by
+  // POST /api/poker/hole-cards from the sealed copy in the state (SRS-6.1).
+  const [myCards, setMyCards] = useState<{ handNumber: number; cards: Card[] } | null>(null);
+  const requestedCardsForHandRef = useRef<number | null>(null);
   const [joinError, setJoinError] = useState('');
   const [leaving, setLeaving] = useState(false);
   // Asked to leave while in a hand: the server folds this player when it's
@@ -79,7 +112,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     connected,
     error: channelError,
     sendAction,
-  } = usePokerChannel<TableState>(
+  } = usePokerChannel<PokerTableBroadcast>(
     config ? pokerTableChannelName(config.id) : null,
     Boolean(token && profile),
     (state) => {
@@ -128,6 +161,33 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!profile || !tableState) return null;
     return tableState.seats.find((seat) => seat.playerId === String(profile.playerId)) ?? null;
   }, [profile, tableState]);
+
+  // Open this player's sealed hole cards once per hand. The sealed copy
+  // changes with every broadcast (fresh IV), so this keys off the hand number.
+  const handNumber = tableState?.handNumber ?? null;
+  const mySealedCards =
+    profile && tableState?.phase === 'in-hand' ? tableState.holeCards[String(profile.playerId)] : undefined;
+  useEffect(() => {
+    if (!mySealedCards || !token || !config || handNumber === null) return;
+    if (requestedCardsForHandRef.current === handNumber) return;
+    requestedCardsForHandRef.current = handNumber;
+
+    const request: PokerHoleCardsRequest = { tableId: config.id, handNumber, sealed: mySealedCards };
+    fetch('/api/poker/hole-cards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(request),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.cards) setMyCards({ handNumber, cards: data.cards });
+        // Let the next broadcast try again.
+        else requestedCardsForHandRef.current = null;
+      })
+      .catch(() => {
+        requestedCardsForHandRef.current = null;
+      });
+  }, [mySealedCards, token, config, handNumber]);
 
   // Once a pending leave goes through at the end of the hand, this player's
   // seat disappears from the state: go back to the lobby, like a normal leave.
@@ -206,7 +266,12 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   async function handleJoin() {
     if (!connected || !token || !buyInValid || parsedBuyIn === null || selectedSeat === null) return;
     setJoinError('');
-    const result = await sendAction('join', { token, buyIn: parsedBuyIn, seatNumber: selectedSeat });
+    const result = await sendAction(token, {
+      tableId: params.tableId,
+      action: 'join',
+      buyIn: parsedBuyIn,
+      seatNumber: selectedSeat,
+    });
     if (result.ok) {
       setSelectedSeat(null);
       await refreshBalance();
@@ -221,7 +286,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!connected || !token) return;
     setJoinError('');
     setLeaving(true);
-    const result = await sendAction('leave', { token });
+    const result = await sendAction(token, { tableId: params.tableId, action: 'leave' });
     if (result.ok && result.pending) {
       setLeaving(false);
       setLeavePending(true);
@@ -238,7 +303,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!connected || !token || acting) return;
     setActError('');
     setActing(true);
-    const result = await sendAction('act', { token, move, amount });
+    const result = await sendAction(token, { tableId: params.tableId, action: 'act', move, amount });
     setActing(false);
     if (!result.ok) setActError(result.error || 'That action was not accepted.');
   }
@@ -269,6 +334,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const canPickSeat = !mySeat && !leaving;
   const pageError = joinError || channelError;
   const tableMinBuyIn = MIN_BUY_IN_MULTIPLIER * config.bigBlind;
+  // Whether some lower-stakes table's minimum buy-in fits the player's balance.
+  const canAffordLowerStakes = POKER_TABLES.some(
+    (table) => table.bigBlind < config.bigBlind && MIN_BUY_IN_MULTIPLIER * table.bigBlind <= profile.balance
+  );
   const tableMaxBuyIn = MAX_BUY_IN_MULTIPLIER * config.bigBlind;
   // The range slider moves in big-blind steps; the text input still takes any amount.
   const sliderValue =
@@ -280,6 +349,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // Collected pots plus everything bet so far this round.
   const potTotal = tableState ? tableState.pot + tableState.seats.reduce((sum, seat) => sum + seat.bet, 0) : 0;
   const bettingOptions = mySeat && tableState ? getBettingOptions(mySeat, tableState) : null;
+  const myHoleCards = inHandPhase && myCards?.handNumber === tableState?.handNumber ? myCards.cards : null;
+  const board = tableState?.board ?? [];
+  const myHandName = myHoleCards && board.length >= 3 ? evaluateHand([...myHoleCards, ...board]).name : null;
+  // Between hands, the last hand's showdown stays on the table until the next deal.
+  const lastResult = !inHandPhase ? tableState?.lastHandResult ?? null : null;
 
   return (
     <Room>
@@ -355,6 +429,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
                     {tableState.street ? STREET_LABELS[tableState.street] : ''} · Hand #{tableState.handNumber}
                   </p>
+                  {/* Community cards (SRS-17) */}
+                  <div className="flex gap-1.5">
+                    {Array.from({ length: 5 }, (_, index) =>
+                      tableState.board[index] ? (
+                        <PlayingCard key={index} card={tableState.board[index]} />
+                      ) : (
+                        <EmptyCardSlot key={index} />
+                      )
+                    )}
+                  </div>
                   <p className="flex items-center gap-2 rounded-full bg-black/35 px-4 py-1.5 text-xl font-bold tabular-nums text-amber-200 shadow-inner shadow-black/40 sm:text-2xl">
                     <StakesChip stakes={config.stakes} size="h-5 w-5" />
                     Pot {tableState.pot}
@@ -373,32 +457,31 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 </>
               ) : tableState?.phase === 'countdown' && countdownSeconds !== null ? (
                 <>
-                  {tableState.lastHandResult ? (
-                    <p className="max-w-[70%] text-xs font-semibold text-amber-100 sm:text-sm">
-                      {describeHandResult(tableState.lastHandResult)}
-                    </p>
-                  ) : null}
+                  {lastResult ? <LastHandSummary result={lastResult} /> : null}
                   <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
-                    {tableState.lastHandResult ? 'Next hand in' : 'Hand starts in'}
+                    {lastResult ? 'Next hand in' : 'Hand starts in'}
                   </p>
                   <p
                     key={countdownSeconds}
-                    className="animate-countdown-tick text-5xl font-bold tabular-nums text-amber-200 drop-shadow-[0_0_18px_rgba(252,211,77,0.35)] sm:text-6xl"
+                    className={`animate-countdown-tick font-bold tabular-nums text-amber-200 drop-shadow-[0_0_18px_rgba(252,211,77,0.35)] ${
+                      lastResult ? 'text-3xl' : 'text-5xl sm:text-6xl'
+                    }`}
                   >
                     {countdownSeconds}
                   </p>
                 </>
               ) : (
                 <>
-                  <StakesChip stakes={config.stakes} size="h-8 w-8" />
-                  <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-200/30 sm:text-xs">
-                    Stacks Overflowed
-                  </p>
-                  {tableState?.lastHandResult ? (
-                    <p className="max-w-[70%] text-xs font-semibold text-amber-100 sm:text-sm">
-                      {describeHandResult(tableState.lastHandResult)}
-                    </p>
-                  ) : null}
+                  {lastResult ? (
+                    <LastHandSummary result={lastResult} />
+                  ) : (
+                    <>
+                      <StakesChip stakes={config.stakes} size="h-8 w-8" />
+                      <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-200/30 sm:text-xs">
+                        Stacks Overflowed
+                      </p>
+                    </>
+                  )}
                   {tableState ? (
                     // SRS-20.5: waiting-for-players indicator.
                     <p className="text-xs text-emerald-100/60 sm:text-sm">
@@ -426,6 +509,19 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             const sittingOut = Boolean(seat.playerId) && inHandPhase && !seat.inHand && !seat.folded;
             const isActive = inHandPhase && tableState.activeSeat === seat.seatNumber;
             const isBusted = Boolean(seat.playerId) && seat.chipStack === 0 && !seat.inHand;
+            // Cards at the seat: this player's own face up; everyone else
+            // still in the hand face down; at showdown, the revealed hands.
+            const shown = lastResult?.shown.find(
+              (hand) => hand.seatNumber === seat.seatNumber && hand.playerId === seat.playerId
+            );
+            const wonLastHand = Boolean(lastResult?.awards.some((award) => award.seatNumber === seat.seatNumber));
+            const seatCards: (Card | null)[] | null = shown
+              ? shown.cards
+              : isOwnSeat && myHoleCards && (seat.inHand || seat.folded)
+                ? myHoleCards
+                : inHandPhase && seat.inHand
+                  ? [null, null]
+                  : null;
             // The button stays on its seat between hands, like a real table.
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
             // Only until the seat acts: after that the bet is theirs, not just the blind.
@@ -470,6 +566,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     sittingOut || seat.folded ? 'opacity-45' : ''
                   }`}
                 >
+                  {seatCards ? (
+                    <div className="absolute -right-5 top-0 z-20 flex -space-x-2.5 sm:-right-6">
+                      {seatCards.map((card, cardIndex) => (
+                        <span key={cardIndex} className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}>
+                          <PlayingCard card={card} size="sm" highlight={Boolean(shown && wonLastHand)} />
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     disabled={!isPickable}
@@ -540,7 +645,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         {seat.chipStack}
                       </p>
                     ) : null}
-                    {isActive ? (
+                    {shown ? (
+                      <p
+                        className={`max-w-[96px] truncate text-[10px] font-semibold ${
+                          wonLastHand ? 'text-amber-300' : 'text-slate-300'
+                        }`}
+                      >
+                        {shown.handName}
+                      </p>
+                    ) : isActive ? (
                       // SRS-3.2: active turn indicator.
                       <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">To act</p>
                     ) : seat.allIn ? (
@@ -604,12 +717,23 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       You need at least <span className="font-semibold text-amber-300">{minBuyIn}</span> to sit
                       here (your balance: {profile.balance}).
                     </p>
-                    <Link
-                      href="/poker"
-                      className="inline-block rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
-                    >
-                      Try lower stakes
-                    </Link>
+                    {canAffordLowerStakes ? (
+                      <Link
+                        href="/poker"
+                        className="inline-block rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                      >
+                        Try lower stakes
+                      </Link>
+                    ) : (
+                      // Already the lowest stakes (or can't afford those either): the
+                      // shop's Daily Login Box is where free coins come from.
+                      <Link
+                        href="/shop"
+                        className="inline-block rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                      >
+                        Get free coins in the shop
+                      </Link>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">
@@ -737,10 +861,26 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         : leavePending
                           ? 'Leaving after this hand'
                           : mySeat.inHand && inHandPhase
-                            ? 'Leave after this hand'
+                            ? 'Leave'
                             : 'Leave table'}
                     </button>
                   </div>
+
+                  {myHoleCards ? (
+                    <div className="flex items-center gap-4">
+                      <div className="flex gap-2">
+                        {myHoleCards.map((card) => (
+                          <PlayingCard key={card} card={card} size="lg" />
+                        ))}
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-wider text-slate-500">Your hand</p>
+                        <p className="font-semibold text-slate-100">
+                          {mySeat.folded ? 'Folded' : myHandName ?? 'Waiting for the flop'}
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {isMyTurn && bettingOptions && tableState ? (
                     <div className="rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">

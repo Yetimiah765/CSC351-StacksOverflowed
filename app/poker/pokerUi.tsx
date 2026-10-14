@@ -3,6 +3,7 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import type { Card } from '../../lib/pokerCards';
 import type { PokerTableConfig } from '../../lib/pokerTables';
 
 export type Stakes = PokerTableConfig['stakes'];
@@ -101,4 +102,56 @@ export function RoomMessage({ message, href, linkText }: { message: string; href
       </section>
     </Room>
   );
+}
+
+const SUIT_SYMBOLS: Record<string, string> = { s: '♠', h: '♥', d: '♦', c: '♣' };
+const SUIT_NAMES: Record<string, string> = { s: 'spades', h: 'hearts', d: 'diamonds', c: 'clubs' };
+
+const CARD_SIZES = {
+  sm: 'h-9 w-[26px] rounded-[5px] text-[10px]',
+  md: 'h-14 w-10 rounded-lg text-sm',
+  lg: 'h-20 w-14 rounded-lg text-xl',
+};
+
+/** One playing card: face up when `card` is given, otherwise its back. */
+export function PlayingCard({
+  card,
+  size = 'md',
+  highlight = false,
+}: {
+  card?: Card | null;
+  size?: keyof typeof CARD_SIZES;
+  highlight?: boolean;
+}) {
+  const sizeClass = CARD_SIZES[size];
+
+  if (!card) {
+    return (
+      <span
+        aria-label="Face-down card"
+        className={`${sizeClass} inline-block shrink-0 border-2 border-white/80 bg-[repeating-linear-gradient(45deg,#991b1b_0_3px,#7f1d1d_3px_6px)] shadow-md shadow-black/60`}
+      />
+    );
+  }
+
+  const rank = card[0] === 'T' ? '10' : (card[0] as string);
+  const suit = card[1] as string;
+  const isRed = suit === 'h' || suit === 'd';
+
+  return (
+    <span
+      aria-label={`${rank} of ${SUIT_NAMES[suit]}`}
+      className={`${sizeClass} inline-flex shrink-0 flex-col items-center justify-center gap-0.5 bg-white font-bold leading-none shadow-md shadow-black/60 ${
+        isRed ? 'text-red-600' : 'text-slate-900'
+      } ${highlight ? 'ring-2 ring-amber-300 ring-offset-1 ring-offset-emerald-900' : ''}`}
+    >
+      <span>{rank}</span>
+      <span>{SUIT_SYMBOLS[suit]}</span>
+    </span>
+  );
+}
+
+/** Where a community card will go, before it's dealt. */
+export function EmptyCardSlot({ size = 'md' }: { size?: keyof typeof CARD_SIZES }) {
+  return <span className={`${CARD_SIZES[size]} inline-block shrink-0 border border-dashed border-emerald-200/20`} />;
 }

@@ -17,22 +17,24 @@
 // count, and a buy-in (SRS-1.2, SRS-1.3) deducted from/refunded to
 // players.balance. A player can be seated at only one table at a time. Once
 // three players are seated, a table counts down HAND_START_COUNTDOWN_MS and
-// then starts a hand (dealer button, blinds — see lib/pokerTable.ts); this
-// process owns that countdown's timer. Seated players then take turns with
-// `act` actions (fold/check/call/bet/raise) until the hand ends, which the
-// table works out itself. A
-// seat survives a dropped connection (closing the tab does not free it or
-// refund the stack) so a player can reconnect and resume it later
-// (SRS-2.1) — there is no disconnection-timeout removal yet (SRS-9.x/10.x),
-// and full hand/betting logic is deferred to later sprints.
+// then starts a hand (dealer button, blinds, cards — see lib/pokerTable.ts);
+// this process owns that countdown's timer. Seated players then take turns
+// with `act` actions (fold/check/call/bet/raise) until the hand ends, which
+// the table works out itself, showdown included. A seat survives a dropped
+// connection (closing the tab does not free it or refund the stack) so a
+// player can reconnect and resume it later (SRS-2.1) — there is no
+// disconnection-timeout removal yet (SRS-9.x/10.x).
 //
-// Both joining and leaving require a valid player_sessions token (the same
-// one issued by POST /api/auth/login): the server resolves it to a
-// player_id itself, rather than trusting whatever a client claims about
-// itself (SRS-8.1: every seated player's client sees the real profile
-// picture of who is actually seated) — this is also what makes leaving work
-// from a reconnected tab/session, since seat ownership is checked by
-// player_id, never by which connection is asking.
+// The channels are public (anyone with the anon key can read and send), so:
+// - join/leave/act are only accepted when signed with POKER_SERVER_SECRET by
+//   POST /api/poker/action, which resolved the player's session token over
+//   HTTPS (lib/pokerSecure.ts). The signed player_id is trusted; nothing a
+//   client broadcasts directly is, except 'sync'. Seat ownership is checked
+//   by player_id, never by which connection is asking, which is also what
+//   makes leaving work from a reconnected tab.
+// - each player's hole cards go out in the `state` broadcast sealed for
+//   them alone (SRS-6.1); POST /api/poker/hole-cards opens them for their
+//   owner.
 //
 // Run with: npm run realtime
 
@@ -47,7 +49,6 @@ import {
 } from '../lib/pokerTable';
 import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
-import { getPlayerIdForToken } from '../lib/auth';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import {
   POKER_EVENT_ACTION,
@@ -55,10 +56,17 @@ import {
   POKER_EVENT_STATE,
   POKER_LOBBY_CHANNEL_NAME,
   pokerTableChannelName,
-  type PokerActionPayload,
   type PokerLobbyState,
+  type PokerTableBroadcast,
 } from '../lib/pokerRealtime';
 import type { BettingMove } from '../lib/pokerTable';
+import {
+  RELAY_MAX_AGE_MS,
+  getPokerServerSecret,
+  sealHoleCards,
+  verifyRelayedAction,
+  type RelayedAction,
+} from '../lib/pokerSecure';
 
 // Unlike Next.js, a standalone Node process doesn't auto-load .env files, so
 // this has to happen before getSupabaseClient() reads process.env below.
@@ -134,7 +142,7 @@ async function refundBalance(supabase: SupabaseClient, playerId: number, amount:
 
 const CHANNEL_CONFIG = { config: { broadcast: { self: false } } };
 
-function startServer(supabase: SupabaseClient) {
+function startServer(supabase: SupabaseClient, secret: string) {
   const lobbyChannel = supabase.channel(POKER_LOBBY_CHANNEL_NAME, CHANNEL_CONFIG);
   const entries: TableEntry[] = POKER_TABLES.map((config) => ({
     config,
@@ -148,6 +156,19 @@ function startServer(supabase: SupabaseClient) {
   // and actually seating them, so without this two quick joins at different
   // tables could both pass that check and seat (and charge) them twice.
   const joinsInFlight = new Set<number>();
+
+  // Nonces of signed actions already handled, with when each may be
+  // forgotten — a copy of a signed message rebroadcast by someone else is
+  // ignored. Older messages are rejected by their timestamp anyway.
+  const seenNonces = new Map<string, number>();
+  function isReplay(action: RelayedAction, now: number): boolean {
+    seenNonces.forEach((expiresAt, nonce) => {
+      if (expiresAt < now) seenNonces.delete(nonce);
+    });
+    if (seenNonces.has(action.nonce)) return true;
+    seenNonces.set(action.nonce, now + 2 * RELAY_MAX_AGE_MS);
+    return false;
+  }
 
   function findSeatedEntry(playerId: string): TableEntry | undefined {
     return entries.find((entry) => entry.table.getSeatNumber(playerId) !== null);
@@ -176,7 +197,14 @@ function startServer(supabase: SupabaseClient) {
   }
 
   function broadcastTable(entry: TableEntry) {
-    entry.channel.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload: entry.table.getState() });
+    const state = entry.table.getState();
+    // SRS-6.1: every player's hole cards ride along sealed for them alone.
+    const holeCards: Record<string, string> = {};
+    for (const { playerId, cards } of entry.table.getHoleCards()) {
+      holeCards[playerId] = sealHoleCards(secret, entry.config.id, state.handNumber, playerId, cards);
+    }
+    const payload: PokerTableBroadcast = { ...state, holeCards };
+    entry.channel.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload });
   }
 
   // Players who asked to leave during a hand are removed when it ends
@@ -197,8 +225,8 @@ function startServer(supabase: SupabaseClient) {
     if (change === 'started') {
       entry.startTimer = setTimeout(() => {
         entry.startTimer = null;
-        // SRS-13.1: crypto.randomInt picks the first hand's dealer, the same
-        // RNG the Daily Login Box uses for its rewards.
+        // SRS-13.1/16.1: crypto.randomInt picks the first hand's dealer and
+        // shuffles the deck — the same RNG the Daily Login Box uses.
         const started = entry.table.startHand((n) => randomInt(n));
         void settleRemovals(entry);
         if (started) {
@@ -217,14 +245,9 @@ function startServer(supabase: SupabaseClient) {
     }
   }
 
-  async function handleJoin(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
-    const { token, buyIn, seatNumber } = payload;
+  async function handleJoin(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
+    const { playerId, buyIn, seatNumber } = action;
     const { table } = entry;
-
-    if (!token) return { ok: false, error: 'You must be signed in to join the table.' };
-
-    const playerId = await getPlayerIdForToken(supabase, token);
-    if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
 
     if (joinsInFlight.has(playerId)) {
       return { ok: false, error: 'Your previous join is still being processed.' };
@@ -285,13 +308,8 @@ function startServer(supabase: SupabaseClient) {
     }
   }
 
-  async function handleLeave(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
-    const { token } = payload;
-
-    if (!token) return { ok: false, error: 'You must be signed in to leave the table.' };
-
-    const playerId = await getPlayerIdForToken(supabase, token);
-    if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
+  async function handleLeave(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
+    const { playerId } = action;
 
     // A player still in the hand gets `pending` back and stays seated until
     // the hand ends (SRS-21.2/21.3); anyone else is removed and refunded now.
@@ -313,14 +331,10 @@ function startServer(supabase: SupabaseClient) {
 
   // SRS-15: a betting action. The table checks it's this player's turn
   // (SRS-3.1) and that the move and amount are legal (SRS-15.9/15.10).
-  async function handleAct(entry: TableEntry, payload: PokerActionPayload): Promise<AckResult> {
-    const { token, move, amount } = payload;
+  async function handleAct(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
+    const { playerId, move, amount } = action;
 
-    if (!token) return { ok: false, error: 'You must be signed in to play.' };
     if (!move || !BETTING_MOVES.includes(move)) return { ok: false, error: 'Unknown action.' };
-
-    const playerId = await getPlayerIdForToken(supabase, token);
-    if (playerId === null) return { ok: false, error: 'Your session has expired. Please log in again.' };
 
     const result = entry.table.act(String(playerId), move, amount);
     if (result.ok) {
@@ -338,33 +352,34 @@ function startServer(supabase: SupabaseClient) {
   // Realtime broadcast has no "send to just this one newly-subscribed
   // client" primitive, so a freshly-subscribed client requests a snapshot
   // itself instead of the server pushing one unprompted on connect.
-  lobbyChannel.on('broadcast', { event: POKER_EVENT_ACTION }, ({ payload }: { payload: PokerActionPayload }) => {
-    if (payload.action === 'sync') broadcastLobby();
+  lobbyChannel.on('broadcast', { event: POKER_EVENT_ACTION }, ({ payload }: { payload: { action?: string } }) => {
+    if (payload?.action === 'sync') broadcastLobby();
   });
 
   for (const entry of entries) {
-    entry.channel.on(
-      'broadcast',
-      { event: POKER_EVENT_ACTION },
-      async ({ payload }: { payload: PokerActionPayload }) => {
-        if (payload.action === 'sync') {
-          broadcastTable(entry);
-          return;
-        }
-
-        let result: AckResult;
-        if (payload.action === 'join') result = await handleJoin(entry, payload);
-        else if (payload.action === 'leave') result = await handleLeave(entry, payload);
-        else if (payload.action === 'act') result = await handleAct(entry, payload);
-        else return;
-
-        entry.channel.send({
-          type: 'broadcast',
-          event: POKER_EVENT_ACK,
-          payload: { requestId: payload.requestId, ...result },
-        });
+    entry.channel.on('broadcast', { event: POKER_EVENT_ACTION }, async ({ payload }: { payload: unknown }) => {
+      if ((payload as { action?: string } | null)?.action === 'sync') {
+        broadcastTable(entry);
+        return;
       }
-    );
+
+      // Anything else must be signed by POST /api/poker/action. Unsigned,
+      // forged, stale, or replayed messages are dropped without an ack.
+      const now = Date.now();
+      const action = verifyRelayedAction(payload, secret, entry.config.id, now);
+      if (!action || isReplay(action, now)) return;
+
+      let result: AckResult;
+      if (action.action === 'join') result = await handleJoin(entry, action);
+      else if (action.action === 'leave') result = await handleLeave(entry, action);
+      else result = await handleAct(entry, action);
+
+      entry.channel.send({
+        type: 'broadcast',
+        event: POKER_EVENT_ACK,
+        payload: { requestId: action.requestId, ...result },
+      });
+    });
   }
 
   lobbyChannel.subscribe((status) => {
@@ -387,12 +402,18 @@ function startServer(supabase: SupabaseClient) {
 }
 
 const supabase = getSupabaseClient();
+const secret = getPokerServerSecret();
 
-if (supabase) {
-  startServer(supabase);
-} else {
+if (!supabase) {
   // eslint-disable-next-line no-console
   console.error(
     'Supabase credentials are not configured — the poker server cannot verify signed-in players. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (see .env.example).'
   );
+} else if (!secret) {
+  // eslint-disable-next-line no-console
+  console.error(
+    'POKER_SERVER_SECRET is not configured — the poker server cannot verify player actions or deal private cards. Set the same value for the Next app and this process (see .env.example).'
+  );
+} else {
+  startServer(supabase, secret);
 }

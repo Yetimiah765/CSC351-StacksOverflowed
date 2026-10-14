@@ -2,18 +2,21 @@
 // they pick, or the first open one) and leave it again, subject to a
 // configurable seat cap. Once three players with chips are seated the table
 // counts down and starts a hand: it places the dealer button, posts the
-// blinds, and runs the betting rounds (preflop, flop, turn, river) — whose
-// turn it is, which moves are legal, when a round is over, collecting bets
-// into the pot(s), and awarding them when the hand ends. One instance is one
+// blinds, deals the cards, and runs the betting rounds (preflop, flop, turn,
+// river) — whose turn it is, which moves are legal, when a round is over,
+// collecting bets into the pot(s) — and at showdown ranks the hands
+// (lib/pokerCards.ts) and awards each pot. One instance is one
 // table; the lobby's tables are listed in lib/pokerTables.ts. This module is
 // intentionally decoupled from any transport (Socket.io, Supabase Realtime, or
 // otherwise) — and from the clock: the caller passes `now` in and owns the
 // countdown timer — so the rules can be unit tested without standing up a
 // real server.
 //
-// There are no cards yet (UR-005/006/016/017 are a later sprint), so a hand
-// that reaches showdown splits each pot evenly among the players eligible for
-// it, as a stand-in for comparing hands.
+// Hole cards never appear in getState(): the public table state is
+// broadcast to everyone, so getHoleCards() hands them to the server, which
+// sends each player only their own, encrypted (SRS-6.1). They're revealed in
+// the public state only at showdown (lastHandResult.shown, SRS-6.2/6.4), and
+// folded hands never are (SRS-6.3).
 //
 // Traceability (docs/requirements/SRS):
 //   SRS-1.1  Join open seat (optionally a specific one)
@@ -23,8 +26,11 @@
 //            blind-owed indicator)
 //   SRS-3.1  Reject out-of-turn actions
 //   SRS-3.2  Active turn (activeSeat) in the public state
-//   SRS-5.7/5.8 Split pots in whole chips, odd chips clockwise from the button
-//            (applied to every showdown until hands can be compared)
+//   SRS-5.1-5.5 Best five of seven cards, ranked (lib/pokerCards.ts)
+//   SRS-5.6 Each pot goes to the best hand among the players eligible for it
+//   SRS-5.7/5.8 Ties split in whole chips, odd chips clockwise from the button
+//   SRS-6.1-6.5 Hole cards kept out of the public state; revealed at
+//            showdown (and before an all-in run-out) in SRS-6.5's order
 //   SRS-8.1/8.2 Seated players' profile pictures (fetched by the client)
 //   SRS-13.1/13.2 Random first button, then the next eligible seat clockwise
 //   SRS-13.4 Dealt-in players (simplified: every seated player with chips —
@@ -38,9 +44,12 @@
 //   SRS-15.7 All-in call for less
 //   SRS-15.8 An incomplete all-in raise doesn't reopen raising
 //   SRS-15.9/15.10 Invalid amounts are rejected with the allowed range
+//   SRS-16.1-16.4 Shuffle, then two hole cards each, one at a time from the
+//            small blind clockwise, from one deck
+//   SRS-17.1-17.6 Burn a card, then deal the flop, turn, and river
 //   SRS-17.7 Award without showdown when one player is left
-//   SRS-17.8/17.9 Fewer than two able-to-act players: no more betting rounds,
-//            straight to showdown
+//   SRS-17.8/17.9 Fewer than two able-to-act players: run out the rest of the
+//            board with no more betting, then showdown
 //   SRS-18.1/18.2 First to act preflop (after the big blind) and postflop
 //            (after the button)
 //   SRS-18.3/18.4 Round completion (blinds aren't actions)
@@ -67,7 +76,9 @@
 // allowed buy-in range from this table's bigBlind (50x-200x) and passes an
 // already-validated chip count in here — this class just stores and returns
 // it. Reconnection grace periods (SRS-10.x, SRS-9.x), turn timers (SRS-4.x),
-// busted-player options (SRS-12.x) and cards are deferred to later sprints.
+// and busted-player options (SRS-12.x) are deferred to later sprints.
+
+import { createDeck, evaluateHand, shuffleDeck, type Card, type HandScore, compareScores } from './pokerCards';
 
 export const MIN_TABLE_SEATS = 3;
 export const MAX_TABLE_SEATS = 9;
@@ -144,9 +155,16 @@ export interface LastAction {
 
 export interface HandResult {
   handNumber: number;
-  /** 'fold': everyone else folded (SRS-17.7). 'showdown': pots split among those left. */
+  /** 'fold': everyone else folded (SRS-17.7). 'showdown': hands compared (SRS-5). */
   reason: 'fold' | 'showdown';
-  awards: { seatNumber: number; username: string | null; amount: number }[];
+  /** The board as it ended — all five cards after a showdown. */
+  board: Card[];
+  /** True when the board was run out with no betting because of all-ins (SRS-17.8). */
+  ranOut: boolean;
+  /** Hands revealed at showdown, in SRS-6.5's order. Empty when everyone else folded. */
+  shown: { seatNumber: number; playerId: string; username: string | null; cards: Card[]; handName: string }[];
+  /** Chips won per seat, across every pot; handName is null when the pot was won without a showdown. */
+  awards: { seatNumber: number; username: string | null; amount: number; handName: string | null }[];
 }
 
 export interface TableState {
@@ -168,6 +186,8 @@ export interface TableState {
   handNumber: number;
   /** Null between hands. */
   street: Street | null;
+  /** Community cards dealt so far this hand (empty between hands). */
+  board: Card[];
   /** Whose turn it is (SRS-3.2); null between hands. */
   activeSeat: number | null;
   /** Seat numbers; null before the first hand. dealerSeat stays set between hands. */
@@ -266,6 +286,8 @@ export function getBettingOptions(
 interface SeatRecord extends Seat {
   /** Acted since the last full bet/raise — who loses raising rights under SRS-15.8. */
   actedSinceFullRaise: boolean;
+  /** Private: never part of getState() (SRS-6.1). Empty when not dealt in. */
+  holeCards: Card[];
 }
 
 function emptySeat(seatNumber: number): SeatRecord {
@@ -285,6 +307,7 @@ function emptySeat(seatNumber: number): SeatRecord {
     leaveRequested: false,
     lastAction: null,
     actedSinceFullRaise: false,
+    holeCards: [],
   };
 }
 
@@ -300,6 +323,7 @@ function resetHandFields(seat: SeatRecord) {
   seat.leaveRequested = false;
   seat.lastAction = null;
   seat.actedSinceFullRaise = false;
+  seat.holeCards = [];
 }
 
 export class PokerTable {
@@ -312,7 +336,11 @@ export class PokerTable {
   private countdownEndsAt: number | null = null;
   private handNumber = 0;
   private street: Street | null = null;
+  private deck: Card[] = [];
+  private board: Card[] = [];
   private activeSeat: number | null = null;
+  /** Who made the last bet or raise this round — first to show at showdown (SRS-6.5). */
+  private lastAggressorSeat: number | null = null;
   private dealerSeat: number | null = null;
   private smallBlindSeat: number | null = null;
   private bigBlindSeat: number | null = null;
@@ -364,11 +392,13 @@ export class PokerTable {
       bigBlind: this.bigBlind,
       smallBlind: this.smallBlind,
       seatedCount: this.seats.filter((seat) => seat.playerId !== null).length,
-      seats: this.seats.map(({ actedSinceFullRaise: _internal, ...seat }) => seat),
+      // Hole cards stay out of the public state (SRS-6.1).
+      seats: this.seats.map(({ actedSinceFullRaise: _internal, holeCards: _private, ...seat }) => seat),
       phase: this.phase,
       countdownMsRemaining: this.countdownEndsAt === null ? null : Math.max(0, this.countdownEndsAt - now),
       handNumber: this.handNumber,
       street: this.street,
+      board: this.board.slice(),
       activeSeat: this.activeSeat,
       dealerSeat: this.dealerSeat,
       smallBlindSeat: this.smallBlindSeat,
@@ -454,14 +484,19 @@ export class PokerTable {
   }
 
   /**
-   * SRS-13.3 hand setup, blind posting (SRS-14), then hands the turn to the
-   * first player to act preflop (SRS-18.1). `randomIndex(n)` returns an
-   * integer in [0, n) and picks the first hand's dealer (SRS-13.1) — the
-   * server passes crypto.randomInt. Returns false, leaving the table
-   * waiting, when fewer than MIN_PLAYERS_TO_START have chips (SRS-20.7: the
-   * button doesn't move and no blinds are posted).
+   * SRS-13.3 hand setup, blind posting (SRS-14), the deal (SRS-16), then
+   * hands the turn to the first player to act preflop (SRS-18.1).
+   * `randomIndex(n)` returns a uniformly random integer in [0, n); it picks
+   * the first hand's dealer (SRS-13.1) and shuffles the deck (SRS-16.1) — the
+   * server passes crypto.randomInt. `presetDeck` replaces the shuffle with a
+   * fixed deck order, for tests. Returns false, leaving the table waiting,
+   * when fewer than MIN_PLAYERS_TO_START have chips (SRS-20.7: the button
+   * doesn't move and no blinds are posted).
    */
-  startHand(randomIndex: (n: number) => number = (n) => Math.floor(Math.random() * n)): boolean {
+  startHand(
+    randomIndex: (n: number) => number = (n) => Math.floor(Math.random() * n),
+    presetDeck?: Card[]
+  ): boolean {
     if (this.phase === 'in-hand') return false;
 
     this.countdownEndsAt = null;
@@ -498,11 +533,41 @@ export class PokerTable {
     this.putIn(bigBlind, Math.min(this.bigBlind, bigBlind.chipStack ?? 0));
     this.currentBet = this.bigBlind;
     this.minRaise = this.bigBlind;
+    this.lastAggressorSeat = null;
+
+    // SRS-16: shuffle, then two cards each, one at a time in two passes,
+    // starting from the small blind and going clockwise.
+    this.deck = presetDeck ? presetDeck.slice() : shuffleDeck(createDeck(), randomIndex);
+    this.board = [];
+    const dealOrder = Array.from(
+      { length: this.maxSeats },
+      (_, offset) => this.seats[(smallBlind.seatNumber - 1 + offset) % this.maxSeats] as SeatRecord
+    ).filter((seat) => seat.inHand);
+    for (let pass = 0; pass < 2; pass++) {
+      dealOrder.forEach((seat) => seat.holeCards.push(this.drawCard()));
+    }
 
     // SRS-18.1: action starts with the first able-to-act player after the big blind.
     this.activeSeat = bigBlind.seatNumber;
     this.advance();
     return true;
+  }
+
+  private drawCard(): Card {
+    const card = this.deck.shift();
+    if (!card) throw new Error('The deck ran out of cards.');
+    return card;
+  }
+
+  /**
+   * Each dealt-in player's hole cards, folded or not, for the server to
+   * deliver privately to their owner (SRS-6.1). Empty between hands.
+   */
+  getHoleCards(): { playerId: string; cards: Card[] }[] {
+    if (this.phase !== 'in-hand') return [];
+    return this.seats
+      .filter((seat) => seat.playerId !== null && seat.holeCards.length === 2)
+      .map((seat) => ({ playerId: seat.playerId as string, cards: seat.holeCards.slice() }));
   }
 
   /** Moves chips from a seat's stack into its round contribution; an empty stack is all-in. */
@@ -583,6 +648,7 @@ export class PokerTable {
   private raiseTo(seat: SeatRecord, to: number) {
     const increment = to - this.currentBet;
     this.putIn(seat, to - seat.bet);
+    this.lastAggressorSeat = seat.seatNumber;
 
     if (increment >= this.minRaise) {
       // A full bet/raise: it sets the next minimum and reopens raising for all.
@@ -650,9 +716,16 @@ export class PokerTable {
 
       if (this.isRoundComplete()) {
         this.collectBets();
-        const ableCount = inHand.filter((seat) => !seat.allIn).length;
-        if (this.street === 'river' || ableCount < 2) {
+        if (this.street === 'river') {
           this.finishHand('showdown');
+          return;
+        }
+        const ableCount = inHand.filter((seat) => !seat.allIn).length;
+        if (ableCount < 2) {
+          // SRS-17.8/17.9 (and SRS-6.4: the hands are revealed in the result
+          // along with the finished board).
+          this.runOutBoard();
+          this.finishHand('showdown', true);
           return;
         }
         this.startNextStreet();
@@ -673,9 +746,23 @@ export class PokerTable {
     }
   }
 
+  /** SRS-17.1-17.6: burn one, then deal the next street's community cards. */
+  private dealNextStreet() {
+    this.street = STREET_ORDER[STREET_ORDER.indexOf(this.street as Street) + 1] as Street;
+    this.drawCard();
+    const count = this.street === 'flop' ? 3 : 1;
+    for (let i = 0; i < count; i++) this.board.push(this.drawCard());
+  }
+
+  /** SRS-17.8: deal every remaining street, with burns, and no betting rounds. */
+  private runOutBoard() {
+    while (this.street !== 'river') this.dealNextStreet();
+  }
+
   /** SRS-18.2/18.7/18.8: a fresh round; action starts after the button. */
   private startNextStreet() {
-    this.street = STREET_ORDER[STREET_ORDER.indexOf(this.street as Street) + 1] as Street;
+    this.dealNextStreet();
+    this.lastAggressorSeat = null;
     this.currentBet = 0;
     this.minRaise = this.bigBlind;
     this.seats.forEach((seat) => {
@@ -768,31 +855,62 @@ export class PokerTable {
    * waiting — the caller's next updateCountdown() starts another countdown
    * if enough players are still seated with chips.
    */
-  private finishHand(reason: 'fold' | 'showdown') {
+  private finishHand(reason: 'fold' | 'showdown', ranOut = false) {
     this.collectBets();
     const pots = this.buildPots();
     const awards = new Map<SeatRecord, number>();
     const award = (seat: SeatRecord, amount: number) => awards.set(seat, (awards.get(seat) ?? 0) + amount);
+    const dealer = this.dealerSeat as number;
+    const clockwiseFromButton = (seatNumber: number) => (seatNumber - dealer - 1 + this.maxSeats) % this.maxSeats;
+    const hands = new Map<SeatRecord, { score: HandScore; name: string }>();
+    let shown: HandResult['shown'] = [];
 
     if (reason === 'fold') {
-      // SRS-17.7: the last player in the hand takes every pot.
+      // SRS-17.7: the last player in the hand takes every pot, unseen.
       const winner = this.seats.find((seat) => seat.inHand) as SeatRecord;
       award(winner, pots.reduce((sum, pot) => sum + pot.amount, 0));
     } else {
-      // Stand-in for SRS-5.6 until hands can be compared: every eligible
-      // player ties, so each pot is split (SRS-5.7) with odd chips going one
-      // at a time clockwise from the button (SRS-5.8).
-      const dealer = this.dealerSeat as number;
-      const clockwiseFromButton = (seatNumber: number) => (seatNumber - dealer - 1 + this.maxSeats) % this.maxSeats;
+      const inHand = this.seats.filter((seat) => seat.inHand);
+      inHand.forEach((seat) => hands.set(seat, evaluateHand([...seat.holeCards, ...this.board])));
+
+      // SRS-5.6/5.7/5.8: each pot to the best hand(s) among its eligible
+      // players, ties split in whole chips with odd chips going one at a
+      // time clockwise from the button.
       for (const pot of pots) {
-        const winners = pot.eligibleSeats
-          .slice()
-          .sort((a, b) => clockwiseFromButton(a) - clockwiseFromButton(b))
-          .map((seatNumber) => this.seats[seatNumber - 1] as SeatRecord);
+        const contenders = pot.eligibleSeats.map((seatNumber) => this.seats[seatNumber - 1] as SeatRecord);
+        const bestScore = contenders
+          .map((seat) => (hands.get(seat) as { score: HandScore }).score)
+          .reduce((best, score) => (compareScores(score, best) > 0 ? score : best));
+        const winners = contenders
+          .filter((seat) => compareScores((hands.get(seat) as { score: HandScore }).score, bestScore) === 0)
+          .sort((a, b) => clockwiseFromButton(a.seatNumber) - clockwiseFromButton(b.seatNumber));
         const share = Math.floor(pot.amount / winners.length);
         const oddChips = pot.amount - share * winners.length;
         winners.forEach((seat, index) => award(seat, share + (index < oddChips ? 1 : 0)));
       }
+
+      // SRS-6.5: the last bettor/raiser in the final round shows first;
+      // otherwise the first player in the hand clockwise of the button. Then
+      // clockwise from there.
+      const first =
+        this.lastAggressorSeat !== null && (this.seats[this.lastAggressorSeat - 1] as SeatRecord).inHand
+          ? this.lastAggressorSeat
+          : (inHand.slice().sort((a, b) => clockwiseFromButton(a.seatNumber) - clockwiseFromButton(b.seatNumber))[0] as SeatRecord)
+              .seatNumber;
+      shown = inHand
+        .slice()
+        .sort(
+          (a, b) =>
+            ((a.seatNumber - first + this.maxSeats) % this.maxSeats) -
+            ((b.seatNumber - first + this.maxSeats) % this.maxSeats)
+        )
+        .map((seat) => ({
+          seatNumber: seat.seatNumber,
+          playerId: seat.playerId as string,
+          username: seat.username,
+          cards: seat.holeCards.slice(),
+          handName: (hands.get(seat) as { name: string }).name,
+        }));
     }
 
     awards.forEach((amount, seat) => {
@@ -801,7 +919,15 @@ export class PokerTable {
     this.lastHandResult = {
       handNumber: this.handNumber,
       reason,
-      awards: [...awards].map(([seat, amount]) => ({ seatNumber: seat.seatNumber, username: seat.username, amount })),
+      board: this.board.slice(),
+      ranOut,
+      shown,
+      awards: [...awards].map(([seat, amount]) => ({
+        seatNumber: seat.seatNumber,
+        username: seat.username,
+        amount,
+        handName: hands.get(seat)?.name ?? null,
+      })),
     };
 
     this.seats.forEach((seat) => {
@@ -815,7 +941,10 @@ export class PokerTable {
 
     this.phase = 'waiting';
     this.street = null;
+    this.deck = [];
+    this.board = [];
     this.activeSeat = null;
+    this.lastAggressorSeat = null;
     this.smallBlindSeat = null;
     this.bigBlindSeat = null;
     this.currentBet = 0;

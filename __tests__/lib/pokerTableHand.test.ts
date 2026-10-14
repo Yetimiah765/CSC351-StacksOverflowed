@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { HAND_START_COUNTDOWN_MS, PokerTable, getBettingOptions } from '../../lib/pokerTable';
+import { createDeck } from '../../lib/pokerCards';
 
 // Seats players by seat number at a 6-seat table with 5/10 blinds. `stacks`
 // gives each seat's chips (default 1000).
@@ -19,6 +20,32 @@ const p = (seatNumber: number) => `player-${seatNumber}`;
 
 function seat(table: PokerTable, seatNumber: number) {
   return table.getState().seats[seatNumber - 1];
+}
+
+/**
+ * A deck order that deals `holes` (seat -> its two cards) to `dealOrder` (the
+ * dealt-in seats from the small blind clockwise, SRS-16.3), then burns one
+ * card before each of the flop, turn, and river (SRS-17.1-17.6) so the board
+ * comes out as `board`.
+ */
+function stackDeck(dealOrder: number[], holes: Record<number, string>, board: string): string[] {
+  const holeCards = Object.fromEntries(Object.entries(holes).map(([seatNumber, cards]) => [seatNumber, cards.split(' ')]));
+  const boardCards = board.split(' ');
+  const used = new Set([...Object.values(holeCards).flat(), ...boardCards]);
+  const spare = createDeck().filter((card) => !used.has(card));
+  const burn = () => spare.shift() as string;
+
+  return [
+    ...dealOrder.map((seatNumber) => holeCards[seatNumber][0]),
+    ...dealOrder.map((seatNumber) => holeCards[seatNumber][1]),
+    burn(),
+    ...boardCards.slice(0, 3),
+    burn(),
+    boardCards[3],
+    burn(),
+    boardCards[4],
+    ...spare,
+  ];
 }
 
 /** Plays `moves` in order, failing the test on the first rejected one. */
@@ -95,10 +122,11 @@ describe('PokerTable.startHand', () => {
 
     table.startHand((n) => {
       sizes.push(n);
-      return 1;
+      return n === 3 ? 1 : 0;
     });
 
-    expect(sizes).toEqual([3]);
+    // The first call picks among the three seated players; the rest shuffle.
+    expect(sizes[0]).toBe(3);
     expect(table.getState().dealerSeat).toBe(4);
   });
 
@@ -142,6 +170,36 @@ describe('PokerTable.startHand', () => {
 
     expect(seat(table, 3)).toMatchObject({ chipStack: 0, bet: 7, allIn: true });
     expect(table.getState().currentBet).toBe(10);
+  });
+
+  it('deals two hole cards each, one at a time from the small blind clockwise (SRS-16.2/16.3)', () => {
+    const table = tableWith([1, 3, 5]);
+    // Button 1, so the small blind is seat 3: the deal goes 3, 5, 1, 3, 5, 1.
+    table.startHand(pick(0), ['2c', '3c', '4c', '5c', '6c', '7c', ...createDeck().slice(20)]);
+
+    expect(table.getHoleCards()).toEqual([
+      { playerId: p(1), cards: ['4c', '7c'] },
+      { playerId: p(3), cards: ['2c', '5c'] },
+      { playerId: p(5), cards: ['3c', '6c'] },
+    ]);
+  });
+
+  it('shuffles a full deck with no card dealt twice (SRS-16.1/16.4)', () => {
+    const table = tableWith([1, 2, 3, 4, 5, 6]);
+    table.startHand((n) => Math.floor(Math.random() * n));
+
+    const dealt = table.getHoleCards().flatMap(({ cards }) => cards);
+    expect(dealt).toHaveLength(12);
+    expect(new Set(dealt).size).toBe(12);
+  });
+
+  it('keeps hole cards out of the public state (SRS-6.1)', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Ah Kh', 2: 'Qd Jd', 3: '9s 9c' }, '2c 7s Td 4h 3c'));
+
+    const state = JSON.stringify(table.getState());
+    for (const card of ['Ah', 'Kh', 'Qd', 'Jd', '9s', '9c']) expect(state).not.toContain(`"${card}"`);
+    expect(table.getState().seats[0]).not.toHaveProperty('holeCards');
   });
 
   it('does not deal in a player who sits down mid-hand (SRS-20.6)', () => {
@@ -328,17 +386,44 @@ describe('PokerTable betting rounds', () => {
     expect(state.seats[0].lastAction).toBeNull();
   });
 
-  it('plays through all four rounds and splits the pot at showdown (SRS-18.9, stand-in for SRS-5)', () => {
+  it('deals the flop, turn, and river after burning a card before each (SRS-17.1-17.6)', () => {
     const table = tableWith([1, 2, 3]);
-    table.startHand(pick(0));
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: '6c 7d', 2: '2c 3d', 3: '4c 5d' }, 'As Kd Qh Jc Ts'));
+
+    expect(table.getState().board).toEqual([]);
+    play(table, [
+      [1, 'call'],
+      [2, 'call'],
+      [3, 'check'],
+    ]);
+    const boards: string[][] = [];
+    for (const street of ['flop', 'turn', 'river']) {
+      expect(table.getState().street).toBe(street);
+      boards.push(table.getState().board);
+      play(table, [
+        [2, 'check'],
+        [3, 'check'],
+        [1, 'check'],
+      ]);
+    }
+
+    expect(boards).toEqual([
+      ['As', 'Kd', 'Qh'],
+      ['As', 'Kd', 'Qh', 'Jc'],
+      ['As', 'Kd', 'Qh', 'Jc', 'Ts'],
+    ]);
+  });
+
+  it('awards the pot to the best hand at showdown and reveals the hands (SRS-5.6/6.2)', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Ah Ad', 2: 'Kh Qc', 3: '8s 8c' }, 'As 7c 2d 9h Kd'));
 
     play(table, [
       [1, 'call'],
       [2, 'call'],
       [3, 'check'],
     ]);
-    for (const street of ['flop', 'turn', 'river']) {
-      expect(table.getState().street).toBe(street);
+    for (let round = 0; round < 3; round++) {
       play(table, [
         [2, 'check'],
         [3, 'check'],
@@ -348,22 +433,79 @@ describe('PokerTable betting rounds', () => {
 
     const state = table.getState();
     expect(state.phase).toBe('waiting');
-    expect(state.street).toBeNull();
-    expect(state.seats.slice(0, 3).map((s) => s.chipStack)).toEqual([1000, 1000, 1000]);
+    expect(state.board).toEqual([]);
+    expect(state.seats.slice(0, 3).map((s) => s.chipStack)).toEqual([1020, 990, 990]);
     expect(state.lastHandResult).toEqual({
       handNumber: 1,
       reason: 'showdown',
-      awards: [
-        { seatNumber: 2, username: 'P2', amount: 10 },
-        { seatNumber: 3, username: 'P3', amount: 10 },
-        { seatNumber: 1, username: 'P1', amount: 10 },
+      board: ['As', '7c', '2d', '9h', 'Kd'],
+      ranOut: false,
+      // SRS-6.5: no bet on the river, so the first player clockwise of the button shows first.
+      shown: [
+        { seatNumber: 2, playerId: p(2), username: 'P2', cards: ['Kh', 'Qc'], handName: 'Pair of Kings' },
+        { seatNumber: 3, playerId: p(3), username: 'P3', cards: ['8s', '8c'], handName: 'Pair of Eights' },
+        { seatNumber: 1, playerId: p(1), username: 'P1', cards: ['Ah', 'Ad'], handName: 'Three of a kind, Aces' },
       ],
+      awards: [{ seatNumber: 1, username: 'P1', amount: 30, handName: 'Three of a kind, Aces' }],
     });
+  });
+
+  it('shows the last river bettor first (SRS-6.5)', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Ah Ad', 2: 'Kh Qc', 3: '8s 8c' }, 'As 7c 2d 9h Kd'));
+
+    play(table, [
+      [1, 'call'],
+      [2, 'call'],
+      [3, 'check'],
+    ]);
+    for (let round = 0; round < 2; round++) {
+      play(table, [
+        [2, 'check'],
+        [3, 'check'],
+        [1, 'check'],
+      ]);
+    }
+    play(table, [
+      [2, 'check'],
+      [3, 'bet', 20],
+      [1, 'call'],
+      [2, 'call'],
+    ]);
+
+    expect(table.getState().lastHandResult?.shown.map((hand) => hand.seatNumber)).toEqual([3, 1, 2]);
+  });
+
+  it('splits a tied pot (SRS-5.7)', () => {
+    const table = tableWith([1, 2, 3]);
+    // The board is a straight nobody can beat, so all three tie.
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: '6c 7d', 2: '2c 3d', 3: '4c 5d' }, 'As Kd Qh Jc Ts'));
+
+    play(table, [
+      [1, 'call'],
+      [2, 'call'],
+      [3, 'check'],
+    ]);
+    for (let round = 0; round < 3; round++) {
+      play(table, [
+        [2, 'check'],
+        [3, 'check'],
+        [1, 'check'],
+      ]);
+    }
+
+    expect(table.getState().seats.slice(0, 3).map((s) => s.chipStack)).toEqual([1000, 1000, 1000]);
+    expect(table.getState().lastHandResult?.awards).toEqual([
+      { seatNumber: 2, username: 'P2', amount: 10, handName: 'Straight, Ace-high' },
+      { seatNumber: 3, username: 'P3', amount: 10, handName: 'Straight, Ace-high' },
+      { seatNumber: 1, username: 'P1', amount: 10, handName: 'Straight, Ace-high' },
+    ]);
   });
 
   it('gives odd chips one at a time clockwise from the button (SRS-5.8)', () => {
     const table = tableWith([1, 2, 3]);
-    table.startHand(pick(0)); // button 1
+    // Button 1; a board straight means seats 1 and 3 tie.
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: '6c 7d', 2: '2c 3d', 3: '4c 5d' }, 'As Kd Qh Jc Ts'));
 
     play(table, [
       [1, 'call'],
@@ -398,10 +540,14 @@ describe('PokerTable betting rounds', () => {
     // 90 of the raise was never called and comes back; the 25 pot (seat 1's
     // own 10 plus the 15 in blinds) is won: 1000 - 10 + 25.
     expect(state.seats[0].chipStack).toBe(1015);
+    // Nobody is shown when everyone else folds.
     expect(state.lastHandResult).toEqual({
       handNumber: 1,
       reason: 'fold',
-      awards: [{ seatNumber: 1, username: 'P1', amount: 25 }],
+      board: [],
+      ranOut: false,
+      shown: [],
+      awards: [{ seatNumber: 1, username: 'P1', amount: 25, handName: null }],
     });
   });
 
@@ -425,10 +571,10 @@ describe('PokerTable betting rounds', () => {
     expect(table.getState().street).toBe('turn');
   });
 
-  it('builds side pots for all-in players and skips to showdown when fewer than two can act (SRS-17.8/19)', () => {
+  it('runs out the board when fewer than two can act, and awards the main and side pots separately (SRS-17.8/19)', () => {
     // Button 1 (100 chips), SB 2 (300 chips), BB 3 (1000 chips).
     const table = tableWith([1, 2, 3], { 1: 100, 2: 300 });
-    table.startHand(pick(0));
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Ah Ad', 2: 'Kh Kd', 3: 'Qh Qd' }, '2c 7s 9d 4h Jc'));
 
     play(table, [
       [1, 'raise', 100], // all-in
@@ -436,19 +582,45 @@ describe('PokerTable betting rounds', () => {
       [3, 'call'],
     ]);
 
-    // Only seat 3 can still act, so no flop/turn/river betting: straight to
-    // showdown. Main pot 300 (all three), side pot 400 (seats 2 and 3).
+    // Only seat 3 can still act, so the board is run out with no more
+    // betting. Main pot 300 (all three): seat 1's aces. Side pot 400 (seats 2
+    // and 3 only): seat 2's kings beat seat 3's queens.
     const state = table.getState();
     expect(state.phase).toBe('waiting');
-    expect(state.lastHandResult?.reason).toBe('showdown');
+    expect(state.lastHandResult).toMatchObject({
+      reason: 'showdown',
+      ranOut: true,
+      board: ['2c', '7s', '9d', '4h', 'Jc'],
+    });
+    // The last raiser (seat 2) shows first (SRS-6.5).
+    expect(state.lastHandResult?.shown.map((hand) => hand.seatNumber)).toEqual([2, 3, 1]);
     expect(state.lastHandResult?.awards).toEqual(
       expect.arrayContaining([
-        { seatNumber: 1, username: 'P1', amount: 100 },
-        { seatNumber: 2, username: 'P2', amount: 300 },
-        { seatNumber: 3, username: 'P3', amount: 300 },
+        { seatNumber: 1, username: 'P1', amount: 300, handName: 'Pair of Aces' },
+        { seatNumber: 2, username: 'P2', amount: 400, handName: 'Pair of Kings' },
       ])
     );
-    expect(state.seats.slice(0, 3).map((s) => s.chipStack)).toEqual([100, 300, 1000]);
+    expect(state.seats.slice(0, 3).map((s) => s.chipStack)).toEqual([300, 400, 700]);
+  });
+
+  it('never reveals a folded hand (SRS-6.3)', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Ah Ad', 2: 'Kh Qc', 3: '8s 8c' }, 'As 7c 2d 9h Kd'));
+
+    play(table, [
+      [1, 'call'],
+      [2, 'fold'],
+      [3, 'check'],
+    ]);
+    for (let round = 0; round < 3; round++) {
+      play(table, [
+        [3, 'check'],
+        [1, 'check'],
+      ]);
+    }
+
+    expect(table.getState().lastHandResult?.shown.map((hand) => hand.seatNumber)).toEqual([3, 1]);
+    expect(JSON.stringify(table.getState())).not.toContain('"Qc"');
   });
 
   it('shows the main pot and side pot while the hand continues (SRS-19.1-19.4)', () => {

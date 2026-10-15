@@ -230,6 +230,7 @@ describe('toMyBet', () => {
       settledAt: null,
       canCancel: true,
       cancelUntil: '2026-10-15T23:15:00.000Z',
+      resultSeen: false,
       selection: 'Over 48.5',
       winningCondition: 'Combined score is more than 48.5',
       market: 'Over/Under',
@@ -285,6 +286,17 @@ describe('splitBets', () => {
 
     expect(open.map((b) => b.id)).toEqual([1, 2]);
     expect(settled.map((b) => b.id)).toEqual([4, 3]);
+  });
+
+  it('lists settled results the player has not seen yet for the pop-up, except cancellations', () => {
+    const won = toMyBet(wagerRow({ wager_id: 5, result: 'Won', payout: 185, settled_at: '2026-10-16T06:00:00Z' }));
+    const seen = toMyBet(
+      wagerRow({ wager_id: 6, result: 'Lost', payout: 0, settled_at: '2026-10-16T06:00:00Z', result_seen_at: '2026-10-16T07:00:00Z' }),
+    );
+    const cancelled = toMyBet(wagerRow({ wager_id: 7, result: 'Cancelled', payout: 100, settled_at: '2026-10-15T12:00:00Z' }));
+    const open = toMyBet(wagerRow({ wager_id: 8 }), BEFORE_KICKOFF);
+
+    expect(splitBets([won, seen, cancelled, open]).unseen.map((b) => b.id)).toEqual([5]);
   });
 });
 

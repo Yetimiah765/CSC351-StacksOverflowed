@@ -1,6 +1,7 @@
-// Pulls the latest odds and scores from The Odds API into Supabase, the same
-// work as POST /api/sports/sync but without needing the Next.js server
-// running. GitHub Actions runs this on a schedule
+// Pulls the latest odds and scores from The Odds API into Supabase, then
+// settles and pays out any wagers whose games are now decided (SRS-209,
+// SRS-210). The same work as POST /api/sports/sync, but without needing the
+// Next.js server running. GitHub Actions runs this on a schedule
 // (.github/workflows/sports-sync.yml), and it can be run by hand too.
 //
 // Run with: npm run sync:sports
@@ -10,6 +11,7 @@ import { config as loadEnv } from 'dotenv';
 import { getSupabaseClient } from '../lib/supabase';
 import { getOddsApiClient } from '../lib/oddsApi';
 import { configuredSportKeys, syncSports } from '../lib/sports/sync';
+import { settleWagers } from '../lib/sports/settle';
 
 // A standalone Node process doesn't auto-load .env files the way Next does.
 // .env.local takes precedence, matching Next's own env-loading order. In
@@ -33,9 +35,16 @@ async function main() {
   if (summary.skipped.length > 0) console.log(`Skipped (not in season): ${summary.skipped.join(', ')}`);
   if (summary.quota) console.log(`Odds API credits left this month: ${summary.quota.remaining}`);
 
-  if (summary.errors.length > 0) {
-    console.error(`${summary.errors.length} error(s):`);
-    for (const error of summary.errors) console.error(`  - ${error}`);
+  // Settle even if part of the sync failed: scores saved earlier still count.
+  const settled = await settleWagers(supabase);
+  console.log(
+    `Settled ${settled.settled} wager(s): ${settled.won} won, ${settled.lost} lost, ${settled.refunded} refunded.`,
+  );
+
+  const errors = [...summary.errors, ...settled.errors];
+  if (errors.length > 0) {
+    console.error(`${errors.length} error(s):`);
+    for (const error of errors) console.error(`  - ${error}`);
     // A non-zero exit marks the GitHub Actions run as failed so it's noticed.
     process.exitCode = 1;
   }

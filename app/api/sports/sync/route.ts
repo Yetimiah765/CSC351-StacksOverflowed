@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { getOddsApiClient } from '../../../../lib/oddsApi';
 import { syncSports } from '../../../../lib/sports/sync';
+import { settleWagers } from '../../../../lib/sports/settle';
 
 // Called by a scheduler, not by players. Requires
 // "Authorization: Bearer <SPORTS_SYNC_SECRET>" (Vercel Cron sends CRON_SECRET
@@ -28,7 +29,10 @@ export async function POST(request: Request) {
 
   try {
     const summary = await syncSports(supabase, oddsApi);
-    return Response.json(summary, { status: summary.errors.length > 0 ? 207 : 200 });
+    // SRS-209 / SRS-210: pay out wagers whose games the sync just decided.
+    const settlement = await settleWagers(supabase);
+    const errors = [...summary.errors, ...settlement.errors];
+    return Response.json({ ...summary, errors, settlement }, { status: errors.length > 0 ? 207 : 200 });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
     return Response.json({ error: message }, { status: 502 });

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EventListing, OptionSide, SportsEvent, SportsMarket, SportsOption } from '../../lib/sports/events';
 import { potentialPayout } from '../../lib/sports/payout';
 import { MIN_WAGER, canWinCoins, checkWagerAmount } from '../../lib/sports/wagers';
@@ -739,6 +739,111 @@ function MyBetsView({
   );
 }
 
+// The coins a settled wager made or lost: profit for a win, the stake for a
+// loss, nothing for a refund.
+function netChange(bet: MyBet) {
+  if (bet.result === 'Won') return (bet.payout ?? 0) - bet.amount;
+  if (bet.result === 'Lost') return -bet.amount;
+  return 0;
+}
+
+// SRS-209.1, SRS-210.2, SRS-210.4: shows the results of wagers settled since
+// the player last looked, once. Closing it marks them seen on the server.
+function ResultsModal({ bets, onClose }: { bets: MyBet[]; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const net = bets.reduce((sum, bet) => sum + netChange(bet), 0);
+  const wins = bets.filter((b) => b.result === 'Won').length;
+
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  let headline = 'Your bets are in';
+  if (wins === bets.length) headline = bets.length === 1 ? 'Your bet won!' : 'All your bets won!';
+  else if (wins === 0 && net < 0) headline = 'Tough break';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-3 sm:items-center" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="results-title"
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/60"
+      >
+        <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Bet results</p>
+        <h2 id="results-title" className="mt-2 text-2xl font-semibold">
+          {headline}
+        </h2>
+        <p
+          className={`mt-3 text-4xl font-bold tabular-nums ${net > 0 ? 'text-emerald-300' : net < 0 ? 'text-red-300' : 'text-slate-200'}`}
+        >
+          {net > 0 ? '+' : net < 0 ? '−' : ''}
+          {Math.abs(net).toLocaleString()} <span className="text-lg font-semibold">coins</span>
+        </p>
+        <p className="mt-1 text-sm text-slate-400">
+          {bets.length} {bets.length === 1 ? 'bet' : 'bets'} settled while you were away
+        </p>
+
+        <ul className="mt-5 space-y-2">
+          {bets.map((bet) => {
+            const change = netChange(bet);
+            return (
+              <li key={bet.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold">
+                      {bet.selection} <span className="font-normal text-slate-400">· {bet.market}</span>
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {bet.event.awayTeam} @ {bet.event.homeTeam}
+                      {bet.event.awayScore !== null && bet.event.homeScore !== null
+                        ? ` · ${bet.event.awayScore}–${bet.event.homeScore} final`
+                        : ''}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+                      bet.result === 'Won'
+                        ? 'border-emerald-600 bg-emerald-500/10 text-emerald-200'
+                        : bet.result === 'Lost'
+                          ? 'border-red-800 bg-red-950/60 text-red-200'
+                          : 'border-slate-600 bg-slate-800 text-slate-200'
+                    }`}
+                  >
+                    {bet.result}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-slate-300">
+                  {bet.result === 'Won'
+                    ? `+${change.toLocaleString()} profit · ${(bet.payout ?? 0).toLocaleString()} coins paid to your balance`
+                    : bet.result === 'Lost'
+                      ? `−${bet.amount.toLocaleString()} coins`
+                      : `${bet.amount.toLocaleString()} coins refunded to your balance`}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          className="mt-6 w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+        >
+          {net > 0 ? 'Nice!' : 'Got it'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function SportsBettingPage() {
   const [listing, setListing] = useState<EventListing | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -782,6 +887,22 @@ export default function SportsBettingPage() {
       setBetsError(error instanceof Error ? error.message : 'Could not load your bets.');
     }
   }, [token]);
+
+  const dismissResults = useCallback(() => {
+    const ids = myBets?.unseen.map((bet) => bet.id) ?? [];
+    setMyBets((current) => (current ? { ...current, unseen: [] } : current));
+    // Winnings were credited when the wager settled; make sure the nav bar shows them.
+    notifyBalanceChanged();
+    if (token && ids.length > 0) {
+      fetch('/api/sports/wagers/seen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ids }),
+      }).catch(() => {
+        // If this fails the pop-up shows again next visit, which is harmless.
+      });
+    }
+  }, [myBets, token]);
 
   // Bets change status as games start and finish, so refresh them with the odds.
   useEffect(() => {
@@ -1001,6 +1122,8 @@ export default function SportsBettingPage() {
           </aside>
         </div>
       </div>
+
+      {myBets && myBets.unseen.length > 0 ? <ResultsModal bets={myBets.unseen} onClose={dismissResults} /> : null}
     </main>
   );
 }

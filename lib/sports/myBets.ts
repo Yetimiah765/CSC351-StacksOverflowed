@@ -25,6 +25,8 @@ export type MyBet = {
   // its game starts (fn_cancel_wager).
   canCancel: boolean;
   cancelUntil: string;
+  // Whether the player has dismissed the results pop-up for this wager.
+  resultSeen: boolean;
   selection: string;
   winningCondition: string;
   market: string;
@@ -41,7 +43,10 @@ export type MyBet = {
   };
 };
 
-export type MyBets = { open: MyBet[]; settled: MyBet[] };
+// `unseen` is the settled wagers the results pop-up should show
+// (SRS-209.1, SRS-210.2, SRS-210.4): decided by settlement and not yet
+// dismissed. Cancelled wagers are left out, since the player cancelled them.
+export type MyBets = { open: MyBet[]; settled: MyBet[]; unseen: MyBet[] };
 
 export type WagerRow = {
   wager_id: number;
@@ -51,6 +56,7 @@ export type WagerRow = {
   result: WagerResult | null;
   payout: number | null;
   settled_at: string | null;
+  result_seen_at?: string | null;
   option: {
     option_label: string;
     winning_condition: string;
@@ -72,7 +78,7 @@ export type WagerRow = {
 };
 
 export const WAGER_SELECT = `
-  wager_id, amount, odds_at_placement, placed_at, result, payout, settled_at,
+  wager_id, amount, odds_at_placement, placed_at, result, payout, settled_at, result_seen_at,
   option:betting_options(
     option_label, winning_condition,
     market:betting_markets(
@@ -110,6 +116,7 @@ export function toMyBet(row: WagerRow, now: Date = new Date()): MyBet {
     settledAt: row.settled_at,
     canCancel: !row.result && !!event && canCancelWager(event.start_time, now),
     cancelUntil: cancelDeadline(event?.start_time ?? row.placed_at).toISOString(),
+    resultSeen: !!row.result_seen_at,
     selection: row.option?.option_label ?? 'Unknown pick',
     winningCondition: row.option?.winning_condition ?? '',
     market: market?.market_types?.display_name ?? market?.market_type_code ?? '',
@@ -128,13 +135,15 @@ export function toMyBet(row: WagerRow, now: Date = new Date()): MyBet {
 
 // Open bets first by game start (soonest first); settled bets newest first.
 export function splitBets(bets: MyBet[]): MyBets {
+  const settled = bets
+    .filter((b) => b.decision === 'Decided')
+    .sort((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? ''));
   return {
     open: bets
       .filter((b) => b.decision === 'Pending')
       .sort((a, b) => a.event.startTime.localeCompare(b.event.startTime)),
-    settled: bets
-      .filter((b) => b.decision === 'Decided')
-      .sort((a, b) => (b.settledAt ?? '').localeCompare(a.settledAt ?? '')),
+    settled,
+    unseen: settled.filter((b) => !b.resultSeen && b.result !== 'Cancelled'),
   };
 }
 

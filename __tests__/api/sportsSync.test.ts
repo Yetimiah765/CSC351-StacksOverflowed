@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   supabase: {} as unknown,
   oddsApi: {} as unknown,
   syncSports: vi.fn(),
+  settleWagers: vi.fn(),
 }));
 
 vi.mock('../../lib/supabase', () => ({ getSupabaseClient: vi.fn(() => mocks.supabase) }));
@@ -14,6 +15,10 @@ vi.mock('../../lib/sports/sync', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/sports/sync')>()),
   syncSports: mocks.syncSports,
 }));
+
+vi.mock('../../lib/sports/settle', () => ({ settleWagers: mocks.settleWagers }));
+
+const NO_SETTLEMENT = { settled: 0, won: 0, lost: 0, refunded: 0, errors: [] };
 
 import { POST } from '../../app/api/sports/sync/route';
 import { saveEvent } from '../../lib/sports/sync';
@@ -200,18 +205,32 @@ describe('POST /api/sports/sync', () => {
     expect(await response.json()).toEqual({ error: 'ODDS_API_KEY is not configured.' });
   });
 
-  it('returns the sync summary', async () => {
-    const summary = { events: 4, markets: 12, options: 24, errors: [], quota: { remaining: 490, used: 10 } };
+  it('returns the sync summary and settles decided wagers afterwards', async () => {
+    const summary = { events: 4, markets: 12, options: 24, skipped: [], errors: [], quota: { remaining: 490, used: 10 } };
+    const settlement = { settled: 2, won: 1, lost: 1, refunded: 0, errors: [] };
     mocks.syncSports.mockResolvedValue(summary);
+    mocks.settleWagers.mockResolvedValue(settlement);
 
     const response = await POST(request('Bearer secret'));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(summary);
+    expect(mocks.settleWagers).toHaveBeenCalledWith(mocks.supabase);
+    expect(await response.json()).toEqual({ ...summary, settlement });
+  });
+
+  it('returns 207 when settling a wager failed', async () => {
+    mocks.syncSports.mockResolvedValue({ events: 1, markets: 0, options: 0, skipped: [], errors: [], quota: null });
+    mocks.settleWagers.mockResolvedValue({ ...NO_SETTLEMENT, errors: ['Wager 3: timeout'] });
+
+    const response = await POST(request('Bearer secret'));
+
+    expect(response.status).toBe(207);
+    expect((await response.json()).errors).toEqual(['Wager 3: timeout']);
   });
 
   it('returns 207 when some events failed to save', async () => {
     mocks.syncSports.mockResolvedValue({ events: 1, markets: 0, options: 0, skipped: [], errors: ['boom'], quota: null });
+    mocks.settleWagers.mockResolvedValue(NO_SETTLEMENT);
     expect((await POST(request('Bearer secret'))).status).toBe(207);
   });
 

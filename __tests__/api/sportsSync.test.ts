@@ -211,7 +211,7 @@ describe('POST /api/sports/sync', () => {
   });
 
   it('returns 207 when some events failed to save', async () => {
-    mocks.syncSports.mockResolvedValue({ events: 1, markets: 0, options: 0, errors: ['boom'], quota: null });
+    mocks.syncSports.mockResolvedValue({ events: 1, markets: 0, options: 0, skipped: [], errors: ['boom'], quota: null });
     expect((await POST(request('Bearer secret'))).status).toBe(207);
   });
 
@@ -220,5 +220,56 @@ describe('POST /api/sports/sync', () => {
     const response = await POST(request('Bearer secret'));
     expect(response.status).toBe(502);
     expect(await response.json()).toEqual({ error: 'Usage quota has been reached' });
+  });
+});
+
+describe('syncSports', () => {
+  const NFL = { key: 'americanfootball_nfl', group: 'American Football', title: 'NFL', description: '', active: true, has_outrights: false };
+  const quota = (remaining: number) => ({ remaining, used: 500 - remaining });
+
+  function fakeOddsApi() {
+    return {
+      listSports: vi.fn(async () => ({ data: [NFL], quota: quota(480) })),
+      getOdds: vi.fn(async () => ({ data: [], quota: quota(477) })),
+      getScores: vi.fn(async () => ({ data: [], quota: quota(475) })),
+    };
+  }
+
+  // The route tests above replace syncSports, so load the real one here.
+  const realSync = () => vi.importActual<typeof import('../../lib/sports/sync')>('../../lib/sports/sync');
+
+  it('fetches odds and scores by default', async () => {
+    const { syncSports } = await realSync();
+    const oddsApi = fakeOddsApi();
+
+    const summary = await syncSports(fakeSupabase().client, oddsApi as never, ['americanfootball_nfl']);
+
+    expect(oddsApi.getOdds).toHaveBeenCalledWith('americanfootball_nfl');
+    expect(oddsApi.getScores).toHaveBeenCalledWith('americanfootball_nfl', 3);
+    expect(summary.quota).toEqual(quota(475));
+  });
+
+  it('skips the scores call on an odds-only run', async () => {
+    const { syncSports } = await realSync();
+    const oddsApi = fakeOddsApi();
+
+    const summary = await syncSports(fakeSupabase().client, oddsApi as never, ['americanfootball_nfl'], new Date(), {
+      includeScores: false,
+    });
+
+    expect(oddsApi.getOdds).toHaveBeenCalled();
+    expect(oddsApi.getScores).not.toHaveBeenCalled();
+    expect(summary.quota).toEqual(quota(477));
+  });
+
+  it('skips sports the API is not listing (off-season) without an error', async () => {
+    const { syncSports } = await realSync();
+    const oddsApi = fakeOddsApi();
+
+    const summary = await syncSports(fakeSupabase().client, oddsApi as never, ['americanfootball_nfl', 'basketball_nba']);
+
+    expect(summary.skipped).toEqual(['basketball_nba']);
+    expect(summary.errors).toEqual([]);
+    expect(oddsApi.getOdds).toHaveBeenCalledTimes(1);
   });
 });

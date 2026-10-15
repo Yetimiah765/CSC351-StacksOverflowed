@@ -228,6 +228,8 @@ describe('toMyBet', () => {
       result: null,
       payout: null,
       settledAt: null,
+      canCancel: true,
+      cancelUntil: '2026-10-15T23:15:00.000Z',
       selection: 'Over 48.5',
       winningCondition: 'Combined score is more than 48.5',
       market: 'Over/Under',
@@ -251,6 +253,15 @@ describe('toMyBet', () => {
     const bet = toMyBet(row, new Date('2026-10-16T01:30:00Z'));
 
     expect(bet.event).toMatchObject({ status: 'In Progress', homeScore: 14, awayScore: 10 });
+  });
+
+  it('stops offering cancel within 1 hour of the game and once settled', () => {
+    expect(toMyBet(wagerRow(), new Date('2026-10-15T23:30:00Z')).canCancel).toBe(false);
+    expect(toMyBet(wagerRow({ result: 'Cancelled', payout: 100, settled_at: '2026-10-15T12:00:00Z' }), BEFORE_KICKOFF)).toMatchObject({
+      canCancel: false,
+      decision: 'Decided',
+      result: 'Cancelled',
+    });
   });
 
   it('marks a settled bet Decided with its result and payout (SRS-211.1)', () => {

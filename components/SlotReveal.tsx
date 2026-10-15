@@ -111,7 +111,7 @@ export default function SlotReveal({
                 >
                   {strip.map((amount, itemIndex) => (
                     <div key={itemIndex} className="flex h-20 items-center justify-center text-3xl font-bold text-amber-300">
-                      {amount}
+                      {amount.toLocaleString('en-US')}
                     </div>
                   ))}
                 </div>
@@ -126,7 +126,7 @@ export default function SlotReveal({
         <div aria-live="polite" className="mt-5 flex min-h-[4.5rem] flex-col items-center justify-center">
           {done ? (
             <div className="animate-box-reveal">
-              <p className="text-4xl font-bold text-amber-300">+{reward} coins</p>
+              <p className="text-4xl font-bold text-amber-300">+{reward.toLocaleString('en-US')} coins</p>
               <p className="mt-1 text-sm text-slate-300">Added to your balance.</p>
             </div>
           ) : null}

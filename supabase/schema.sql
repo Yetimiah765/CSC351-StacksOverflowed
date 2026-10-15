@@ -328,11 +328,15 @@ CREATE TABLE daily_login_box_claims (
     claim_id            SERIAL       PRIMARY KEY,
     player_id           INTEGER      NOT NULL
                         REFERENCES players(player_id) ON DELETE CASCADE,
-    -- SRS-128.5: exactly one of the four reward amounts.
-    reward_amount       INTEGER      NOT NULL
-                        CHECK (reward_amount IN (25, 50, 75, 100)),
+    reward_amount       INTEGER      NOT NULL,
     claimed_at          TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     next_available_at   TIMESTAMPTZ  NOT NULL,
+
+    -- SRS-128.5: the rewards are 250, 500, 750, and 1,000 coins. 25, 50, 75,
+    -- and 100 were the rewards before 2026-10-15 and stay allowed so those
+    -- earlier claims remain valid.
+    CONSTRAINT chk_daily_login_box_claims_reward
+        CHECK (reward_amount IN (250, 500, 750, 1000, 25, 50, 75, 100)),
 
     -- SRS-128.11: the cooldown lasts exactly 24 hours from the claim.
     CONSTRAINT chk_daily_login_box_claims_cooldown
@@ -352,7 +356,9 @@ CREATE INDEX ix_daily_login_box_claims_player
 --   * SRS-128.20: only Active accounts may open the box.
 -- The API picks the reward with a cryptographically secure random number
 -- (lib/dailyLoginBox.ts) and passes it in; this function accepts only the
--- four allowed amounts.
+-- allowed amounts. The app awards 250-1,000 coins (SRS-128.5); 25-100, the
+-- amounts before 2026-10-15, are still accepted so copies of the app that
+-- haven't pulled the change yet keep working instead of failing to open.
 CREATE OR REPLACE FUNCTION fn_open_daily_login_box(p_player_id INTEGER, p_reward INTEGER)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -363,7 +369,7 @@ DECLARE
     v_balance       BIGINT;
     v_claimed_at    TIMESTAMPTZ := CURRENT_TIMESTAMP;
 BEGIN
-    IF p_reward IS NULL OR p_reward NOT IN (25, 50, 75, 100) THEN
+    IF p_reward IS NULL OR p_reward NOT IN (250, 500, 750, 1000, 25, 50, 75, 100) THEN
         RAISE EXCEPTION 'Invalid Daily Login Box reward: %', p_reward;
     END IF;
 

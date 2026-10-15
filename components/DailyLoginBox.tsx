@@ -156,7 +156,7 @@ export default function DailyLoginBox() {
               reward === option.amount && !showSpin ? 'border-amber-400 bg-amber-400/10' : 'border-slate-800 bg-slate-950/60'
             }`}
           >
-            <p className="font-semibold text-slate-100">{option.amount} coins</p>
+            <p className="font-semibold text-slate-100">{option.amount.toLocaleString('en-US')} coins</p>
             <p className="text-xs text-slate-400">{option.percent}% chance</p>
           </li>
         ))}
@@ -164,7 +164,7 @@ export default function DailyLoginBox() {
 
       {reward !== null && !showSpin ? (
         <p className="mt-4 text-sm text-slate-300">
-          You won <span className="font-semibold text-amber-300">{reward} coins</span> today.
+          You won <span className="font-semibold text-amber-300">{reward.toLocaleString('en-US')} coins</span> today.
         </p>
       ) : null}
 

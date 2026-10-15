@@ -33,7 +33,7 @@ vi.mock('../../lib/supabase', () => ({
   })),
 }));
 
-import { POST } from '../../app/api/profile/avatar/route';
+import { DELETE, POST } from '../../app/api/profile/avatar/route';
 
 function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.select.mockClear();
@@ -96,7 +96,7 @@ describe('Avatar upload route', () => {
     expect(await response.json()).toEqual({ error: 'image file is required.' });
   });
 
-  it('rejects a non-PNG file by signature, not filename (SRS-115.1)', async () => {
+  it('rejects a non-PNG file by signature, not filename (SRS-115.1, SRS-115.2)', async () => {
     const file = new Blob([Buffer.from('not-a-png-file')], { type: 'image/jpeg' });
     const response = await POST(makeRequest(file));
     expect(response.status).toBe(400);
@@ -115,6 +115,50 @@ describe('Avatar upload route', () => {
     tables.players.defaultResult = { data: null, error: { message: 'Update failed' } };
     const file = new Blob([PNG_SIGNATURE], { type: 'image/png' });
     const response = await POST(makeRequest(file));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Update failed' });
+  });
+});
+
+function makeDeleteRequest(token: string | null = 'valid-token') {
+  return new Request('http://localhost/api/profile/avatar', {
+    method: 'DELETE',
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+}
+
+describe('Avatar remove route', () => {
+  beforeEach(() => {
+    resetTable(tables.player_sessions);
+    resetTable(tables.players);
+    tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
+  });
+
+  it("clears the player's photo, returning them to the default icon (SRS-115.5, SRS-115.6)", async () => {
+    const response = await DELETE(makeDeleteRequest());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ profilePhotoDataUrl: null });
+    expect(tables.players.update).toHaveBeenCalledWith({ profile_photo: null });
+    expect(tables.players.eq).toHaveBeenCalledWith('player_id', 1);
+  });
+
+  it('returns 401 without a token', async () => {
+    const response = await DELETE(makeDeleteRequest(null));
+    expect(response.status).toBe(401);
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 for a token with no matching session', async () => {
+    tables.player_sessions.maybeSingleResult = { data: null, error: null };
+    const response = await DELETE(makeDeleteRequest('bad-token'));
+    expect(response.status).toBe(401);
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when the database update fails', async () => {
+    tables.players.defaultResult = { data: null, error: { message: 'Update failed' } };
+    const response = await DELETE(makeDeleteRequest());
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'Update failed' });
   });

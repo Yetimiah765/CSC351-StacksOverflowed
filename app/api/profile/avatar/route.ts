@@ -1,9 +1,29 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../../lib/auth';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+async function requirePlayer(
+  request: Request
+): Promise<{ supabase: SupabaseClient; playerId: number; errorResponse: null } | { errorResponse: Response }> {
+  const token = getToken(request);
+  if (!token) return { errorResponse: Response.json({ error: 'Unauthorized' }, { status: 401 }) };
+
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    return { errorResponse: Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 }) };
+  }
+
+  const playerId = await getPlayerIdForToken(supabase, token);
+  if (playerId === null) {
+    return { errorResponse: Response.json({ error: 'Invalid or expired session.' }, { status: 401 }) };
+  }
+
+  return { supabase, playerId, errorResponse: null };
 }
 
 // SRS-115.1: PNG is verified by file signature, not filename.
@@ -11,15 +31,11 @@ const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0
 // SRS-115.3: 5 MB maximum, matching chk_players_profile_photo.
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
+// Uploads a new photo, replacing any existing one (SRS-115.4).
 export async function POST(request: Request) {
-  const token = getToken(request);
-  if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
-
-  const supabase = getSupabaseClient();
-  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
-
-  const playerId = await getPlayerIdForToken(supabase, token);
-  if (playerId === null) return Response.json({ error: 'Invalid or expired session.' }, { status: 401 });
+  const auth = await requirePlayer(request);
+  if (auth.errorResponse) return auth.errorResponse;
+  const { supabase, playerId } = auth;
 
   let formData: FormData;
   try {
@@ -55,4 +71,21 @@ export async function POST(request: Request) {
     { profilePhotoDataUrl: `data:image/png;base64,${buffer.toString('base64')}` },
     { status: 200 }
   );
+}
+
+// SRS-115.6: removing the photo clears the column, and a NULL photo shows the
+// blank default icon (SRS-115.5). Removing when there is no photo is a no-op.
+export async function DELETE(request: Request) {
+  const auth = await requirePlayer(request);
+  if (auth.errorResponse) return auth.errorResponse;
+  const { supabase, playerId } = auth;
+
+  const { error: updateError } = await supabase
+    .from('players')
+    .update({ profile_photo: null })
+    .eq('player_id', playerId);
+
+  if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
+
+  return Response.json({ profilePhotoDataUrl: null }, { status: 200 });
 }

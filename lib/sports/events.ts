@@ -37,6 +37,9 @@ export type SportsEvent = {
   status: 'Upcoming' | 'In Progress' | 'Completed' | 'Canceled' | 'Postponed';
   homeScore: number | null;
   awayScore: number | null;
+  // True while the game is shown as Completed from the clock alone and the
+  // sync hasn't brought in the final score yet.
+  resultPending: boolean;
   markets: SportsMarket[];
 };
 
@@ -92,6 +95,22 @@ const MARKET_ORDER: SportsMarket['type'][] = ['moneyline', 'point_spread', 'tota
 // Show finished games for a day so players can see recent results.
 export const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+// Long enough for a game with overtime to have ended. Past this, a game the
+// sync still lists as Upcoming or In Progress is shown as Completed.
+export const ASSUMED_GAME_LENGTH_MS = 4 * 60 * 60 * 1000;
+
+const STATUS_ORDER: SportsEvent['status'][] = ['Upcoming', 'In Progress', 'Completed'];
+
+// The stored status only changes when the sync runs, so a game can still say
+// Upcoming after it has started. Use whichever is further along: the stored
+// status or what the start time implies. Canceled and Postponed always win.
+export function effectiveStatus(stored: SportsEvent['status'], startTime: string, now: Date): SportsEvent['status'] {
+  if (stored === 'Canceled' || stored === 'Postponed') return stored;
+  const elapsed = now.getTime() - new Date(startTime).getTime();
+  const fromClock = elapsed >= ASSUMED_GAME_LENGTH_MS ? 'Completed' : elapsed >= 0 ? 'In Progress' : 'Upcoming';
+  return STATUS_ORDER.indexOf(fromClock) > STATUS_ORDER.indexOf(stored) ? fromClock : stored;
+}
+
 function optionSide(teamId: number | null, label: string, row: EventRow): OptionSide {
   if (teamId !== null && teamId === row.home_team_id) return 'home';
   if (teamId !== null && teamId === row.away_team_id) return 'away';
@@ -100,7 +119,12 @@ function optionSide(teamId: number | null, label: string, row: EventRow): Option
   return 'draw';
 }
 
-export function toSportsEvent(row: EventRow): SportsEvent {
+export function toSportsEvent(row: EventRow, now: Date = new Date()): SportsEvent {
+  const status = effectiveStatus(row.status, row.start_time, now);
+  // SRS-205.5: no betting once the game has started, even before the sync
+  // closes its markets.
+  const bettingOpen = status === 'Upcoming';
+
   // A line move closes the old market but keeps it for existing wagers, so
   // only list closed markets when no open market of that type remains.
   const openTypes = new Set(row.betting_markets.filter((m) => m.is_open).map((m) => m.market_type_code));
@@ -112,7 +136,7 @@ export function toSportsEvent(row: EventRow): SportsEvent {
       name: m.market_types?.display_name ?? m.market_type_code,
       // PostgREST returns NUMERIC columns as strings.
       line: m.line === null ? null : Number(m.line),
-      isOpen: m.is_open,
+      isOpen: m.is_open && bettingOpen,
       description: m.market_types?.description ?? '',
       rules: m.market_types?.rules_text ?? '',
       tieRules: m.market_types?.tie_rules ?? null,
@@ -139,9 +163,10 @@ export function toSportsEvent(row: EventRow): SportsEvent {
     homeTeam: row.home?.team_name ?? 'TBD',
     awayTeam: row.away?.team_name ?? 'TBD',
     startTime: row.start_time,
-    status: row.status,
+    status,
     homeScore: row.home_score,
     awayScore: row.away_score,
+    resultPending: status === 'Completed' && row.status !== 'Completed',
     markets,
   };
 }
@@ -170,5 +195,5 @@ export async function fetchEvents(supabase: SupabaseClient, now: Date = new Date
     .limit(200);
 
   if (error) throw new Error(error.message);
-  return (data as unknown as EventRow[]).map(toSportsEvent);
+  return (data as unknown as EventRow[]).map((row) => toSportsEvent(row, now));
 }

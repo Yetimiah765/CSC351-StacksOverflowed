@@ -102,14 +102,23 @@ function EventCard({
     ...(hasDraw ? [{ name: 'Draw', score: null }] : []),
   ];
   const showScore = event.status !== 'Upcoming' && event.homeScore !== null && event.awayScore !== null;
+  // Finished games stay listed for a day so players can see the result.
+  const finished = event.status === 'Completed' || event.status === 'Canceled' || event.status === 'Postponed';
 
   return (
-    <article className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 sm:p-5">
+    <article
+      className={`rounded-2xl border p-3 sm:p-5 ${
+        finished ? 'border-slate-800/60 bg-slate-900/40 opacity-60' : 'border-slate-800 bg-slate-900/80'
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
         <span>
           {event.league} &middot; {formatTime(event.startTime)}
         </span>
-        <StatusBadge status={event.status} />
+        <span className="flex items-center gap-2">
+          {event.resultPending ? <span className="text-slate-500">Final score pending</span> : null}
+          <StatusBadge status={event.status} />
+        </span>
       </div>
 
       <div className="mt-3 overflow-x-auto">

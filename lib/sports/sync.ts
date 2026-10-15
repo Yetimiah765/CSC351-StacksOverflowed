@@ -160,9 +160,10 @@ export async function syncSports(
 
     try {
       const odds = await oddsApi.getOdds(key);
-      // daysFrom=1 brings back games finished in the last day so their final
-      // scores get recorded; run the sync at least once a day.
-      const scores = await oddsApi.getScores(key, 1);
+      // daysFrom=3 (the API's maximum, and no dearer than 1) brings back games
+      // finished in the last 3 days, so a missed sync can still record final
+      // scores. Results older than that are gone for good.
+      const scores = await oddsApi.getScores(key, 3);
       summary.quota = scores.quota;
 
       for (const event of normalizeEvents(sport, odds.data, scores.data, now)) {

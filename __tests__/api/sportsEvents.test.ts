@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildListing, toSportsEvent, type EventRow, type SportsEvent } from '../../lib/sports/events';
+import { buildListing, effectiveStatus, toSportsEvent, type EventRow, type SportsEvent } from '../../lib/sports/events';
 import { potentialPayout } from '../../lib/sports/payout';
 
 const mocks = vi.hoisted(() => ({ result: { data: [] as unknown, error: null as { message: string } | null } }));
@@ -17,6 +17,9 @@ vi.mock('../../lib/supabase', () => ({
 }));
 
 import { GET } from '../../app/api/sports/events/route';
+
+// Before every fixture game's kickoff, so betting is still open.
+const BEFORE_KICKOFF = new Date('2026-10-10T12:00:00Z');
 
 const MARKET_TYPE = {
   display_name: 'Moneyline',
@@ -68,7 +71,7 @@ function row(overrides: Partial<EventRow> = {}): EventRow {
 
 describe('toSportsEvent', () => {
   it('flattens the row, converts NUMERIC strings, and orders markets', () => {
-    const event = toSportsEvent(row());
+    const event = toSportsEvent(row(), BEFORE_KICKOFF);
 
     expect(event).toMatchObject({
       id: 1,
@@ -97,6 +100,7 @@ describe('toSportsEvent', () => {
           { ...base, market_id: 102, line: '48.5', is_open: true },
         ],
       }),
+      BEFORE_KICKOFF,
     );
 
     expect(event.markets).toHaveLength(1);
@@ -113,6 +117,7 @@ describe('toSportsEvent', () => {
           { ...base, market_id: 102, line: '48.5', is_open: false },
         ],
       }),
+      BEFORE_KICKOFF,
     );
 
     expect(event.markets.map((m) => m.id)).toEqual([102]);
@@ -132,14 +137,62 @@ describe('toSportsEvent', () => {
           },
         ],
       }),
+      BEFORE_KICKOFF,
     );
 
     expect(event.markets[0].options.map((o) => o.side)).toEqual(['home', 'away', 'draw']);
   });
 });
 
+describe('effectiveStatus', () => {
+  const start = '2026-10-12T00:15:00Z';
+  const at = (iso: string) => new Date(iso);
+
+  it('follows the clock when the sync has not caught up', () => {
+    expect(effectiveStatus('Upcoming', start, at('2026-10-11T23:00:00Z'))).toBe('Upcoming');
+    expect(effectiveStatus('Upcoming', start, at('2026-10-12T01:00:00Z'))).toBe('In Progress');
+    expect(effectiveStatus('Upcoming', start, at('2026-10-12T04:15:00Z'))).toBe('Completed');
+  });
+
+  it('never moves a status backwards', () => {
+    expect(effectiveStatus('Completed', start, at('2026-10-12T01:00:00Z'))).toBe('Completed');
+    expect(effectiveStatus('In Progress', start, at('2026-10-11T23:00:00Z'))).toBe('In Progress');
+  });
+
+  it('keeps Canceled and Postponed', () => {
+    expect(effectiveStatus('Canceled', start, at('2026-10-13T00:00:00Z'))).toBe('Canceled');
+    expect(effectiveStatus('Postponed', start, at('2026-10-13T00:00:00Z'))).toBe('Postponed');
+  });
+});
+
+describe('toSportsEvent after kickoff', () => {
+  it('closes betting once the start time passes, even if the sync says Upcoming', () => {
+    const event = toSportsEvent(row(), new Date('2026-10-11T18:00:00Z'));
+
+    expect(event.status).toBe('In Progress');
+    expect(event.markets.every((m) => m.isOpen === false)).toBe(true);
+    expect(event.resultPending).toBe(false);
+  });
+
+  it('shows a long-finished game as Completed with its result pending', () => {
+    const event = toSportsEvent(row(), new Date('2026-10-12T09:00:00Z'));
+
+    expect(event.status).toBe('Completed');
+    expect(event.resultPending).toBe(true);
+  });
+
+  it('clears the pending flag once the sync records the final score', () => {
+    const event = toSportsEvent(
+      row({ status: 'Completed', home_score: 27, away_score: 24 }),
+      new Date('2026-10-12T09:00:00Z'),
+    );
+
+    expect(event).toMatchObject({ status: 'Completed', resultPending: false, homeScore: 27, awayScore: 24 });
+  });
+});
+
 describe('buildListing', () => {
-  const nfl = toSportsEvent(row());
+  const nfl = toSportsEvent(row(), BEFORE_KICKOFF);
   const nba: SportsEvent = { ...nfl, id: 2, sport: 'Basketball', league: 'NBA', leagueId: 6 };
 
   it('filters events but always lists every sport and league', () => {

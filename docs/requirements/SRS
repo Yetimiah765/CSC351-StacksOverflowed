@@ -1740,6 +1740,10 @@ Traces to: UR-205
 
 Traces to: UR-205
 
+**SRS-205.6, Cancel a wager.** The system shall allow a player to cancel one of their own active wagers until 1 hour before the related event's scheduled start time, returning the full wager amount to the player's virtual-currency balance and marking the wager as "Cancelled." The system shall not allow a wager to be cancelled within 1 hour of the event's start or after the wager has been decided.
+
+Traces to: UR-205
+
 **UR-206, SP \- Prevent Invalid Wagers**
 
 **User story:** As a player, I want the system to prevent wagers that are invalid, that I cannot afford, or that are no longer available, so that I do not accidentally place an invalid bet.

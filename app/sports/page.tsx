@@ -480,7 +480,7 @@ function BetSlip({
             <span className="font-semibold">{option.label}</span> at{' '}
             <span className="font-semibold">{formatOdds(option.decimalOdds)}</span>? Pays{' '}
             <span className="font-semibold">{payout.toLocaleString()} coins</span> if it wins. The coins come out of your
-            balance now.
+            balance now. You can cancel it for a full refund until 1 hour before the game starts.
           </p>
           <div className="mt-3 flex gap-2">
             <button
@@ -532,8 +532,16 @@ function BetOutcome({ bet }: { bet: MyBet }) {
     Won: 'border-emerald-600 bg-emerald-500/10 text-emerald-200',
     Lost: 'border-red-800 bg-red-950/60 text-red-200',
     Refunded: 'border-slate-600 bg-slate-800 text-slate-200',
+    Cancelled: 'border-slate-700 bg-slate-900 text-slate-400',
   };
   const result = bet.result!;
+  if (result === 'Cancelled') {
+    return (
+      <span className={`rounded-full border px-2.5 py-0.5 text-xs ${styles.Cancelled}`}>
+        Cancelled · {bet.amount.toLocaleString()} back
+      </span>
+    );
+  }
   const detail =
     result === 'Won'
       ? `+${((bet.payout ?? 0) - bet.amount).toLocaleString()}`
@@ -547,9 +555,40 @@ function BetOutcome({ bet }: { bet: MyBet }) {
   );
 }
 
-function BetCard({ bet }: { bet: MyBet }) {
+function BetCard({
+  bet,
+  token,
+  onCancelled,
+}: {
+  bet: MyBet;
+  token: string | null;
+  onCancelled: (balance: number) => void;
+}) {
   const { event } = bet;
   const showScore = event.status !== 'Upcoming' && event.homeScore !== null && event.awayScore !== null;
+  const [cancelStage, setCancelStage] = useState<'idle' | 'confirm' | 'cancelling'>('idle');
+  const [cancelError, setCancelError] = useState('');
+
+  async function cancelBet() {
+    if (!token) return;
+    setCancelStage('cancelling');
+    setCancelError('');
+    try {
+      const res = await fetch(`/api/sports/wagers/${bet.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        onCancelled(data.balance);
+        return;
+      }
+      setCancelError(data.error || 'Could not cancel your bet.');
+    } catch {
+      setCancelError('Could not reach the server. Your bet is still active.');
+    }
+    setCancelStage('idle');
+  }
 
   return (
     <article className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4 sm:p-5">
@@ -597,11 +636,67 @@ function BetCard({ bet }: { bet: MyBet }) {
           <dd className="tabular-nums">{(bet.decision === 'Pending' ? bet.potentialPayout : bet.payout ?? 0).toLocaleString()}</dd>
         </div>
       </dl>
+
+      {bet.decision === 'Pending' ? (
+        <div className="mt-3 border-t border-slate-800 pt-3 text-sm">
+          {!bet.canCancel ? (
+            <p className="text-xs text-slate-500">Locked in: bets can be cancelled until 1 hour before the game.</p>
+          ) : cancelStage === 'idle' ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">Can cancel until {formatDateTime(bet.cancelUntil)}</p>
+              <button
+                type="button"
+                onClick={() => setCancelStage('confirm')}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-red-700 hover:text-red-200"
+              >
+                Cancel bet
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-slate-300">
+                Cancel this bet? You&apos;ll get <span className="font-semibold">{bet.amount.toLocaleString()} coins</span> back.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={cancelBet}
+                  disabled={cancelStage === 'cancelling'}
+                  className="rounded-lg bg-red-400 px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-red-300 disabled:opacity-60"
+                >
+                  {cancelStage === 'cancelling' ? 'Cancelling…' : 'Yes, cancel it'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCancelStage('idle')}
+                  disabled={cancelStage === 'cancelling'}
+                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-60"
+                >
+                  Keep it
+                </button>
+              </div>
+            </div>
+          )}
+          {cancelError ? <p className="mt-2 text-xs text-red-300">{cancelError}</p> : null}
+        </div>
+      ) : null}
     </article>
   );
 }
 
-function MyBetsView({ bets, error, onBrowse }: { bets: MyBets | null; error: string; onBrowse: () => void }) {
+function MyBetsView({
+  bets,
+  error,
+  token,
+  onBrowse,
+  onCancelled,
+}: {
+  bets: MyBets | null;
+  error: string;
+  token: string | null;
+  onBrowse: () => void;
+  onCancelled: (balance: number) => void;
+}) {
   if (error) return <p className="rounded-xl border border-red-800 bg-red-950/60 p-4 text-sm text-red-200">{error}</p>;
   if (!bets) return <p className="text-slate-400">Loading your bets…</p>;
 
@@ -622,7 +717,7 @@ function MyBetsView({ bets, error, onBrowse }: { bets: MyBets | null; error: str
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {bets.open.map((bet) => (
-              <BetCard key={bet.id} bet={bet} />
+              <BetCard key={bet.id} bet={bet} token={token} onCancelled={onCancelled} />
             ))}
           </div>
         )}
@@ -635,7 +730,7 @@ function MyBetsView({ bets, error, onBrowse }: { bets: MyBets | null; error: str
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
             {bets.settled.map((bet) => (
-              <BetCard key={bet.id} bet={bet} />
+              <BetCard key={bet.id} bet={bet} token={token} onCancelled={onCancelled} />
             ))}
           </div>
         )}
@@ -796,7 +891,17 @@ export default function SportsBettingPage() {
 
         {view === 'bets' ? (
           <div className="mt-8">
-            <MyBetsView bets={myBets} error={betsError} onBrowse={() => setView('games')} />
+            <MyBetsView
+              bets={myBets}
+              error={betsError}
+              token={token}
+              onBrowse={() => setView('games')}
+              onCancelled={(next) => {
+                setBalance(next);
+                notifyBalanceChanged();
+                loadMyBets();
+              }}
+            />
           </div>
         ) : null}
 

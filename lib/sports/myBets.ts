@@ -4,8 +4,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { effectiveStatus, type SportsEvent } from './events';
 import { potentialPayout } from './payout';
+import { canCancelWager, cancelDeadline } from './wagers';
 
-export type WagerResult = 'Won' | 'Lost' | 'Refunded';
+export type WagerResult = 'Won' | 'Lost' | 'Refunded' | 'Cancelled';
 
 export type MyBet = {
   id: number;
@@ -20,6 +21,10 @@ export type MyBet = {
   // SRS-211.1: coins paid back when settled (0 for a loss).
   payout: number | null;
   settledAt: string | null;
+  // SRS-205.6: an open wager can be cancelled for a full refund until 1 hour before
+  // its game starts (fn_cancel_wager).
+  canCancel: boolean;
+  cancelUntil: string;
   selection: string;
   winningCondition: string;
   market: string;
@@ -103,6 +108,8 @@ export function toMyBet(row: WagerRow, now: Date = new Date()): MyBet {
     result: row.result,
     payout: row.payout === null ? null : Number(row.payout),
     settledAt: row.settled_at,
+    canCancel: !row.result && !!event && canCancelWager(event.start_time, now),
+    cancelUntil: cancelDeadline(event?.start_time ?? row.placed_at).toISOString(),
     selection: row.option?.option_label ?? 'Unknown pick',
     winningCondition: row.option?.winning_condition ?? '',
     market: market?.market_types?.display_name ?? market?.market_type_code ?? '',

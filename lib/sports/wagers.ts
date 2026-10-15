@@ -31,3 +31,18 @@ export function checkWagerAmount(input: unknown): AmountCheck {
 export function canWinCoins(amount: number, decimalOdds: number): boolean {
   return potentialPayout(amount, decimalOdds) > amount;
 }
+
+// SRS-205.6: players can cancel an open wager until this long before its
+// game starts.
+// Keep in sync with the INTERVAL '1 hour' check in fn_cancel_wager.
+export const CANCEL_CUTOFF_MS = 60 * 60 * 1000;
+
+// The last moment an open wager on a game starting at startTime can be
+// cancelled.
+export function cancelDeadline(startTime: string): Date {
+  return new Date(new Date(startTime).getTime() - CANCEL_CUTOFF_MS);
+}
+
+export function canCancelWager(startTime: string, now: Date = new Date()): boolean {
+  return now.getTime() < cancelDeadline(startTime).getTime();
+}

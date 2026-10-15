@@ -1,0 +1,47 @@
+# Keeps sports odds, game statuses, and final scores up to date by running
+# scripts/syncSports.ts on GitHub's servers, so no one's laptop has to be on.
+#
+# Needs these repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ODDS_API_KEY
+# and optionally the repository variable ODDS_API_SPORTS (defaults to NFL).
+#
+# Each run costs 5 Odds API credits per sport; the free tier is 500 a month.
+# Three runs a day for one sport is about 450 a month.
+
+name: Sports odds sync
+
+on:
+  schedule:
+    # 06:00 UTC catches the previous night's final scores, 16:00 refreshes
+    # odds before the afternoon games, 22:00 refreshes them before night games.
+    # GitHub may start scheduled runs a few minutes late.
+    - cron: '0 6,16,22 * * *'
+  # Adds a "Run workflow" button on the Actions tab for a manual sync.
+  workflow_dispatch:
+
+# Never run two syncs at once.
+concurrency:
+  group: sports-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Sync odds and scores
+        run: npm run sync:sports
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          ODDS_API_SPORTS: ${{ vars.ODDS_API_SPORTS }}

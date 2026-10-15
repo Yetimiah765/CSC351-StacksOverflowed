@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
-    "realtime": "tsx server/pokerRealtimeServer.ts"
+    "realtime": "tsx server/pokerRealtimeServer.ts",
+    "sync:sports": "tsx scripts/syncSports.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

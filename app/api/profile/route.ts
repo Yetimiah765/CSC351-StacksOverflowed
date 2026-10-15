@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../lib/auth';
 import { photoToDataUrl } from '../../../lib/playerDisplay';
+import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 function getToken(request: Request): string | null {
@@ -94,8 +95,8 @@ export async function PATCH(request: Request) {
   // SRS-114.1/114.2: at most 50 whitespace-separated words; an empty bio is
   // stored as NULL, matching chk_players_bio.
   const trimmedBio = bio.trim();
-  if (trimmedBio && trimmedBio.split(/\s+/).length > 50) {
-    return Response.json({ error: 'Bio must be 50 words or fewer.' }, { status: 400 });
+  if (countBioWords(trimmedBio) > BIO_MAX_WORDS) {
+    return Response.json({ error: `Bio must be ${BIO_MAX_WORDS} words or fewer.` }, { status: 400 });
   }
 
   const { error: updateError } = await supabase

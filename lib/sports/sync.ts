@@ -5,14 +5,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { OddsApiClient, OddsApiQuota, OddsApiSport } from '../oddsApi';
 import { normalizeEvents, type NormalizedEvent } from './normalize';
 
-export const DEFAULT_SPORT_KEYS = ['americanfootball_nfl'];
+export const DEFAULT_SPORT_KEYS = ['americanfootball_nfl', 'basketball_nba'];
 
 export type SyncSummary = {
   events: number;
   markets: number;
   options: number;
+  // Sports the API isn't listing right now (off-season); nothing was fetched.
+  skipped: string[];
   errors: string[];
   quota: OddsApiQuota | null;
+};
+
+export type SyncOptions = {
+  // Fetching scores costs 2 credits per sport. Odds-only runs skip it; at
+  // least one run a day must include scores so results land within the
+  // API's 3-day window.
+  includeScores?: boolean;
 };
 
 export function configuredSportKeys(): string[] {
@@ -145,28 +154,32 @@ export async function syncSports(
   oddsApi: OddsApiClient,
   sportKeys: string[] = configuredSportKeys(),
   now: Date = new Date(),
+  { includeScores = true }: SyncOptions = {},
 ): Promise<SyncSummary> {
-  const summary: SyncSummary = { events: 0, markets: 0, options: 0, errors: [], quota: null };
+  const summary: SyncSummary = { events: 0, markets: 0, options: 0, skipped: [], errors: [], quota: null };
 
   const { data: allSports } = await oddsApi.listSports();
   const ids = { sportIds: new Map<string, number>(), leagueIds: new Map<string, number>() };
 
   for (const key of sportKeys) {
     const sport: OddsApiSport | undefined = allSports.find((s) => s.key === key);
+    // The API only lists sports that are in season, so a missing key usually
+    // means off-season rather than a typo.
     if (!sport) {
-      summary.errors.push(`Unknown sport key: ${key}`);
+      summary.skipped.push(key);
       continue;
     }
 
     try {
       const odds = await oddsApi.getOdds(key);
+      summary.quota = odds.quota;
       // daysFrom=3 (the API's maximum, and no dearer than 1) brings back games
       // finished in the last 3 days, so a missed sync can still record final
       // scores. Results older than that are gone for good.
-      const scores = await oddsApi.getScores(key, 3);
-      summary.quota = scores.quota;
+      const scores = includeScores ? await oddsApi.getScores(key, 3) : null;
+      if (scores) summary.quota = scores.quota;
 
-      for (const event of normalizeEvents(sport, odds.data, scores.data, now)) {
+      for (const event of normalizeEvents(sport, odds.data, scores?.data ?? [], now)) {
         try {
           const counts = await saveEvent(supabase, event, ids);
           summary.events += 1;

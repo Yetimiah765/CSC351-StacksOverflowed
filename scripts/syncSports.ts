@@ -4,6 +4,7 @@
 // (.github/workflows/sports-sync.yml), and it can be run by hand too.
 //
 // Run with: npm run sync:sports
+//   Add `-- --odds-only` to skip fetching scores (saves 2 credits per sport).
 
 import { config as loadEnv } from 'dotenv';
 import { getSupabaseClient } from '../lib/supabase';
@@ -24,10 +25,12 @@ async function main() {
   if (!oddsApi) throw new Error('ODDS_API_KEY is not configured.');
 
   const sports = configuredSportKeys();
-  console.log(`Syncing ${sports.join(', ')}...`);
+  const includeScores = !process.argv.includes('--odds-only');
+  console.log(`Syncing ${includeScores ? 'odds and scores' : 'odds only'} for ${sports.join(', ')}...`);
 
-  const summary = await syncSports(supabase, oddsApi, sports);
+  const summary = await syncSports(supabase, oddsApi, sports, new Date(), { includeScores });
   console.log(`Saved ${summary.events} events, ${summary.markets} markets, ${summary.options} options.`);
+  if (summary.skipped.length > 0) console.log(`Skipped (not in season): ${summary.skipped.join(', ')}`);
   if (summary.quota) console.log(`Odds API credits left this month: ${summary.quota.remaining}`);
 
   if (summary.errors.length > 0) {

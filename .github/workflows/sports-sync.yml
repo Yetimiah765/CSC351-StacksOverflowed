@@ -5,18 +5,23 @@
 #   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ODDS_API_KEY
 # and optionally the repository variable ODDS_API_SPORTS (defaults to NFL).
 #
-# Each run costs 5 Odds API credits per sport; the free tier is 500 a month.
-# Three runs a day for one sport is about 450 a month.
+# The free Odds API tier is 500 credits a month. Odds cost 3 credits per
+# sport and scores 2, so with 2 sports (NFL + NBA) this schedule uses about
+# 16 a day, roughly 480 a month.
+#   06:00 UTC: odds + scores (catches the previous night's final scores,
+#              well inside the API's 3-day scores window)
+#   20:00 UTC: odds only (refreshes lines before the evening games)
+# Game statuses also update from the clock between syncs (lib/sports/events.ts).
 
 name: Sports odds sync
 
 on:
   schedule:
-    # 06:00 UTC catches the previous night's final scores, 16:00 refreshes
-    # odds before the afternoon games, 22:00 refreshes them before night games.
     # GitHub may start scheduled runs a few minutes late.
-    - cron: '0 6,16,22 * * *'
-  # Adds a "Run workflow" button on the Actions tab for a manual sync.
+    - cron: '0 6 * * *'
+    - cron: '0 20 * * *'
+  # Adds a "Run workflow" button on the Actions tab for a manual sync
+  # (odds and scores).
   workflow_dispatch:
 
 # Never run two syncs at once.
@@ -33,13 +38,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Node 22+ has the built-in WebSocket that supabase-js needs.
+          node-version: 22
           cache: npm
 
       - run: npm ci
 
       - name: Sync odds and scores
-        run: npm run sync:sports
+        # The 20:00 run skips scores to stay within the free credit tier.
+        run: npm run sync:sports -- ${{ github.event.schedule == '0 20 * * *' && '--odds-only' || '' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

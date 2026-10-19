@@ -20,9 +20,12 @@ interface Profile {
 }
 
 // The fields PATCH /api/profile edits, one pop-up each.
-type EditableField = 'firstName' | 'lastName' | 'bio';
+type EditableField = 'firstName' | 'lastName' | 'username' | 'bio';
 
 const NAME_HINT = 'Letters, spaces, apostrophes, and hyphens.';
+// SRS-112.4, SRS-112.6, SRS-112.7.
+const USERNAME_HINT =
+  '6-10 letters and numbers. You can change it once every 24 hours, and your old username stays reserved for 24 hours.';
 
 // The player's own profile (UR-111): photo and Log out, names, username and
 // password, the bio, cosmetics, and game statistics (SRS-111.2).
@@ -153,7 +156,7 @@ export default function ProfilePage() {
                 <div className="grid flex-1 content-start gap-4 sm:grid-cols-2">
                   <ProfileField label="First name" value={profile.firstName} onEdit={() => setEditing('firstName')} />
                   <ProfileField label="Last name" value={profile.lastName} onEdit={() => setEditing('lastName')} />
-                  <ProfileField label="Username" value={profile.username ?? ''} />
+                  <ProfileField label="Username" value={profile.username ?? ''} onEdit={() => setEditing('username')} />
                   <ProfileField label="Password" value="" secret />
                 </div>
               </div>
@@ -189,6 +192,16 @@ export default function ProfilePage() {
           initialValue={profile.lastName}
           hint={NAME_HINT}
           onSave={(value) => saveField('lastName', value)}
+          onCancel={() => setEditing(null)}
+        />
+      ) : null}
+      {editing === 'username' && profile ? (
+        <TextFieldEditor
+          title="Edit username"
+          label="Username"
+          initialValue={profile.username ?? ''}
+          hint={USERNAME_HINT}
+          onSave={(value) => saveField('username', value)}
           onCancel={() => setEditing(null)}
         />
       ) : null}

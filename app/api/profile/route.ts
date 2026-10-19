@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../lib/supabase';
-import { getPlayerIdForToken, isValidName, NAME_MAX_LENGTH } from '../../../lib/auth';
+import { getPlayerIdForToken, isValidName, isValidUsername, NAME_MAX_LENGTH } from '../../../lib/auth';
 import { photoToDataUrl } from '../../../lib/playerDisplay';
 import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -76,6 +76,60 @@ function checkName(value: unknown, label: string): { name: string; error: null }
   return { name, error: null };
 }
 
+// "in 5 hours" / "in 12 minutes", for the username cooldown message.
+function timeUntil(iso: string): string {
+  const minutes = Math.max(1, Math.ceil((new Date(iso).getTime() - Date.now()) / 60_000));
+  if (minutes < 60) return `in ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.ceil(minutes / 60);
+  return `in ${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
+// SRS-112.4 - SRS-112.8: fn_change_username checks the name is free (ignoring
+// case, including reserved names), allows one change per 24 hours, and
+// reserves the old name for 24 hours, all in one transaction. No password is
+// needed (SRS-112.5). Returns an error response, or null once changed.
+async function changeUsername(supabase: SupabaseClient, playerId: number, value: unknown) {
+  const username = typeof value === 'string' ? value.trim() : '';
+  if (!isValidUsername(username)) {
+    return Response.json(
+      { error: 'Usernames must be 6-10 characters long and contain only letters and numbers.' },
+      { status: 400 }
+    );
+  }
+
+  const { data, error } = await supabase.rpc('fn_change_username', {
+    p_player_id: playerId,
+    p_username: username,
+  });
+  if (error) return Response.json({ error: error.message }, { status: 500 });
+
+  const result = data as { status: string; next_change_at?: string };
+  switch (result.status) {
+    case 'changed':
+    case 'unchanged':
+      return null;
+    case 'taken':
+      return Response.json({ error: 'That username is already taken or reserved.' }, { status: 409 });
+    case 'cooldown':
+      return Response.json(
+        {
+          error: `You can change your username once every 24 hours. Try again ${timeUntil(result.next_change_at!)}.`,
+          nextChangeAt: result.next_change_at,
+        },
+        { status: 429 }
+      );
+    case 'not_active':
+      return Response.json({ error: 'This account is pending deletion.' }, { status: 403 });
+    case 'not_found':
+      return Response.json({ error: 'Player not found.' }, { status: 404 });
+    default:
+      return Response.json(
+        { error: 'Usernames must be 6-10 characters long and contain only letters and numbers.' },
+        { status: 400 }
+      );
+  }
+}
+
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -97,11 +151,17 @@ export async function PATCH(request: Request) {
   if (errorResponse) return errorResponse;
 
   const body = await request.json();
-  const { bio, firstName, lastName } = body as { bio?: unknown; firstName?: unknown; lastName?: unknown };
+  const { bio, firstName, lastName, username } = body as {
+    bio?: unknown;
+    firstName?: unknown;
+    lastName?: unknown;
+    username?: unknown;
+  };
 
-  // SRS-112.1: the bio and first and last names are edited here, each by its
-  // own pop-up. SRS-112.2: anything else in the body, such as a password, is
-  // ignored; passwords change only through Change Password (UR-113).
+  // SRS-112.1: the bio, first and last names, and username are edited here,
+  // each by its own pop-up. SRS-112.2: anything else in the body, such as a
+  // password, is ignored; passwords change only through Change Password
+  // (UR-113).
   const changes: { bio?: string | null; first_name?: string; last_name?: string } = {};
 
   if (bio !== undefined) {
@@ -127,13 +187,19 @@ export async function PATCH(request: Request) {
     changes.last_name = checked.name;
   }
 
-  if (Object.keys(changes).length === 0) {
+  if (Object.keys(changes).length === 0 && username === undefined) {
     return Response.json({ error: 'Nothing to update.' }, { status: 400 });
   }
 
-  const { error: updateError } = await supabase.from('players').update(changes).eq('player_id', playerId!);
+  if (username !== undefined) {
+    const usernameError = await changeUsername(supabase, playerId!, username);
+    if (usernameError) return usernameError;
+  }
 
-  if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
+  if (Object.keys(changes).length > 0) {
+    const { error: updateError } = await supabase.from('players').update(changes).eq('player_id', playerId!);
+    if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
+  }
 
   const { profile, error } = await loadProfile(supabase, playerId!);
   if (error) return Response.json({ error: error.message }, { status: 500 });

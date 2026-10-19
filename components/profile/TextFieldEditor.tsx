@@ -3,10 +3,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import EditDialog from './EditDialog';
 
-// The pop-up for a one-line profile field: first name and last name now, the
-// username next. The server checks the field's rules (SRS-112.3) and its
-// message is shown here. Save stays disabled while the box is empty or
-// unchanged.
+// The pop-up for a one-line profile field: first name, last name, and
+// username. The server checks the field's rules (SRS-112.3, SRS-112.4,
+// SRS-112.6) and its message is shown here. Save stays disabled while the
+// box is empty or unchanged.
 export default function TextFieldEditor({
   title,
   label,

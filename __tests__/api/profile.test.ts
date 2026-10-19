@@ -140,15 +140,70 @@ describe('Profile API routes', () => {
     expect(tables.players.update).toHaveBeenCalledWith({ bio: null });
   });
 
-  it('PATCH returns 400 when bio is absent', async () => {
+  it('PATCH returns 400 when there is nothing to update', async () => {
     const response = await PATCH(req('PATCH', {}));
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Nothing to update.' });
   });
 
   it('PATCH returns 400 when bio exceeds 50 words (SRS-114.1)', async () => {
     const longBio = Array.from({ length: 51 }, (_, i) => `word${i}`).join(' ');
     const response = await PATCH(req('PATCH', { bio: longBio }));
     expect(response.status).toBe(400);
+  });
+
+  it('PATCH updates the first name, trimmed, and returns the refreshed profile (SRS-112.1)', async () => {
+    tables.players.maybeSingleResult = { data: { ...playerRow, first_name: 'Jamie' }, error: null };
+
+    const response = await PATCH(req('PATCH', { firstName: '  Jamie ' }));
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ first_name: 'Jamie' });
+    expect((await response.json()).profile.firstName).toBe('Jamie');
+  });
+
+  it("PATCH accepts a last name with spaces, apostrophes, and hyphens (SRS-112.3)", async () => {
+    const response = await PATCH(req('PATCH', { lastName: "O'Neil-De La Cruz" }));
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ last_name: "O'Neil-De La Cruz" });
+  });
+
+  it.each([
+    ['a number', { firstName: 'Jam3s' }],
+    ['a special character', { lastName: 'Ortiz!' }],
+    ['a leading apostrophe', { firstName: "'James" }],
+  ])('PATCH rejects a name with %s, like registration does (SRS-112.3)', async (_, body) => {
+    const response = await PATCH(req('PATCH', body));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH rejects an empty name (SRS-112.3)', async () => {
+    const response = await PATCH(req('PATCH', { lastName: '   ' }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Last name is required.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH rejects a name longer than 50 characters', async () => {
+    const response = await PATCH(req('PATCH', { firstName: 'A'.repeat(51) }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'First name must be 50 characters or fewer.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH never changes the password (SRS-112.2)', async () => {
+    const onlyPassword = await PATCH(req('PATCH', { password: 'newPass123' }));
+    expect(onlyPassword.status).toBe(400);
+    expect(tables.players.update).not.toHaveBeenCalled();
+
+    await PATCH(req('PATCH', { bio: 'Hi', password: 'newPass123', password_hash: 'x' }));
+    expect(tables.players.update).toHaveBeenCalledWith({ bio: 'Hi' });
   });
 
   it('PATCH returns 401 without a token', async () => {

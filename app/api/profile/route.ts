@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../lib/supabase';
-import { getPlayerIdForToken } from '../../../lib/auth';
+import { getPlayerIdForToken, isValidName, NAME_MAX_LENGTH } from '../../../lib/auth';
 import { photoToDataUrl } from '../../../lib/playerDisplay';
 import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -66,6 +66,16 @@ async function requirePlayerId(request: Request, supabase: SupabaseClient) {
   return { playerId, errorResponse: null };
 }
 
+// SRS-112.3: an edited name follows the registration rules (SRS-101.2,
+// SRS-101.3) and must fit its column. Returns the trimmed name or an error.
+function checkName(value: unknown, label: string): { name: string; error: null } | { error: string } {
+  if (typeof value !== 'string' || !value.trim()) return { error: `${label} is required.` };
+  const name = value.trim();
+  if (name.length > NAME_MAX_LENGTH) return { error: `${label} must be ${NAME_MAX_LENGTH} characters or fewer.` };
+  if (!isValidName(name)) return { error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' };
+  return { name, error: null };
+}
+
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -87,22 +97,41 @@ export async function PATCH(request: Request) {
   if (errorResponse) return errorResponse;
 
   const body = await request.json();
-  const { bio } = body as { bio?: string };
+  const { bio, firstName, lastName } = body as { bio?: unknown; firstName?: unknown; lastName?: unknown };
 
-  // SRS-112.1: bio is an editable field; SRS-114.2: it may be cleared.
-  if (bio === undefined) return Response.json({ error: 'bio is required.' }, { status: 400 });
+  // SRS-112.1: the bio and first and last names are edited here, each by its
+  // own pop-up. SRS-112.2: anything else in the body, such as a password, is
+  // ignored; passwords change only through Change Password (UR-113).
+  const changes: { bio?: string | null; first_name?: string; last_name?: string } = {};
 
-  // SRS-114.1/114.2: at most 50 whitespace-separated words; an empty bio is
-  // stored as NULL, matching chk_players_bio.
-  const trimmedBio = bio.trim();
-  if (countBioWords(trimmedBio) > BIO_MAX_WORDS) {
-    return Response.json({ error: `Bio must be ${BIO_MAX_WORDS} words or fewer.` }, { status: 400 });
+  if (bio !== undefined) {
+    if (typeof bio !== 'string') return Response.json({ error: 'bio must be text.' }, { status: 400 });
+    // SRS-114.1/114.2: at most 50 whitespace-separated words; an empty bio is
+    // stored as NULL, matching chk_players_bio.
+    const trimmedBio = bio.trim();
+    if (countBioWords(trimmedBio) > BIO_MAX_WORDS) {
+      return Response.json({ error: `Bio must be ${BIO_MAX_WORDS} words or fewer.` }, { status: 400 });
+    }
+    changes.bio = trimmedBio || null;
   }
 
-  const { error: updateError } = await supabase
-    .from('players')
-    .update({ bio: trimmedBio || null })
-    .eq('player_id', playerId!);
+  if (firstName !== undefined) {
+    const checked = checkName(firstName, 'First name');
+    if (checked.error !== null) return Response.json({ error: checked.error }, { status: 400 });
+    changes.first_name = checked.name;
+  }
+
+  if (lastName !== undefined) {
+    const checked = checkName(lastName, 'Last name');
+    if (checked.error !== null) return Response.json({ error: checked.error }, { status: 400 });
+    changes.last_name = checked.name;
+  }
+
+  if (Object.keys(changes).length === 0) {
+    return Response.json({ error: 'Nothing to update.' }, { status: 400 });
+  }
+
+  const { error: updateError } = await supabase.from('players').update(changes).eq('player_id', playerId!);
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
 

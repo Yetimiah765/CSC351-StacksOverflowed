@@ -1,10 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import BioEditor from '../../components/profile/BioEditor';
 import CosmeticsSection from '../../components/profile/CosmeticsSection';
 import ProfileField from '../../components/profile/ProfileField';
+import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection from '../../components/profile/StatsSection';
 
 interface Profile {
@@ -27,9 +28,6 @@ export default function ProfilePage() {
   const [error, setError] = useState('');
 
   const [editingBio, setEditingBio] = useState(false);
-
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -85,27 +83,6 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleAvatarChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file || !token) return;
-    setUploading(true);
-    const formData = new FormData();
-    formData.append('image', file);
-    const res = await fetch('/api/profile/avatar', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: formData,
-    });
-    const data = await res.json();
-    setUploading(false);
-    if (res.ok) {
-      setProfile((previous) => (previous ? { ...previous, profilePhotoDataUrl: data.profilePhotoDataUrl } : previous));
-    } else {
-      setError(data.error || 'Failed to upload image.');
-    }
-    event.target.value = '';
-  }
-
   // SRS-105.1: end the session on the server too, so this token stops
   // working everywhere. The local token is cleared even if that request
   // fails, so the player is always logged out of this browser.
@@ -149,31 +126,13 @@ export default function ProfilePage() {
               <div className="flex flex-col gap-8 sm:flex-row">
                 {/* Photo, with Log out underneath */}
                 <div className="flex flex-col items-center gap-3 sm:w-40 sm:shrink-0">
-                  <button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={uploading}
-                    className="group relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 border-slate-700 bg-slate-800 transition hover:border-emerald-400 disabled:opacity-70"
-                    title="Change profile photo"
-                  >
-                    {profile.profilePhotoDataUrl ? (
-                      <img src={profile.profilePhotoDataUrl} alt="Your profile photo" className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="text-3xl font-semibold text-slate-300">
-                        {(profile.username ?? profile.firstName)[0]?.toUpperCase()}
-                      </span>
-                    )}
-                    <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/50 text-xs text-white opacity-0 transition group-hover:opacity-100">
-                      {uploading ? 'Uploading…' : 'Change photo'}
-                    </span>
-                  </button>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/png"
-                    className="hidden"
-                    onChange={handleAvatarChange}
+                  <ProfilePhoto
+                    photoUrl={profile.profilePhotoDataUrl}
+                    token={token}
+                    onChange={(photoUrl) =>
+                      setProfile((previous) => (previous ? { ...previous, profilePhotoDataUrl: photoUrl } : previous))
+                    }
                   />
-                  <span className="text-xs text-slate-500">PNG only, up to 5 MB</span>
                   <button
                     type="button"
                     onClick={handleLogout}

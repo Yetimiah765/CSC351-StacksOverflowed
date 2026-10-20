@@ -1947,7 +1947,7 @@ Traces to: UR-215
 
 *Traces to: UR-109, UR-301*
 
-**SRS-301.9, CL, Betting table layout.** The system shall display a betting table containing: a spot for 0; spots for the numbers 1 through 36 arranged in twelve rows of three in ascending order, so that each of the three vertical columns holds exactly the numbers of one column bet; each number spot colored with its pocket color; spots for the three dozens, the three columns, Red, Black, Odd, Even, 1–18, and 19–36; and the amount of each pending bet shown on its spot.
+**SRS-301.9, CL, Betting table layout.** The system shall display a betting table containing: a spot for 0; spots for the numbers 1 through 36 arranged in twelve groups of three in ascending order, so that each of the three lines of twelve numbers holds exactly the numbers of one column bet; each number spot colored with its pocket color; spots for the three dozens, the three columns, Red, Black, Odd, Even, 1–18, and 19–36; and the amount of each pending bet shown on its spot.
 
 *Traces to: UR-301*
 
@@ -1987,6 +1987,10 @@ Traces to: UR-215
 
 *Traces to: UR-302, UR-303*
 
+**SRS-302.8, CL, Ball animation.** During the wheel animation, the system shall show the ball traveling around the wheel rim in the opposite direction to the wheel's rotation and settling into the winning pocket when the wheel stops.
+
+*Traces to: UR-302*
+
 **UR-303, CL \- View Spin Result**
 
 ***User story:** As a roulette player, I want the game to clearly display the winning number and color, so that I immediately know whether I won.*
@@ -2002,6 +2006,14 @@ Traces to: UR-215
 **SRS-303.3, CL, Interrupted spin.** If the player refreshes the page, closes the browser tab, or loses the connection after a spin transaction has been committed but before its animation finishes, the system shall preserve the committed settlement, shall not replay the animation when the player returns to the roulette page, and shall display the player's updated balance.
 
 *Traces to: UR-303, UR-304*
+
+**SRS-303.4, CL, Winning-pocket close-up.** When the wheel stops, the system shall show an enlarged view of the wheel centered on the winning pocket, with the ball in it, for at least 1 second before returning to the full table.
+
+*Traces to: UR-303*
+
+**SRS-303.5, CL, Win celebration.** When a spin's net result is a win, the system shall display a celebration animation together with the amount won.
+
+*Traces to: UR-303*
 
 **UR-304, CL \- Automatic Bet Settlement**
 

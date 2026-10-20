@@ -3,10 +3,10 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import RouletteWheel from '../../components/roulette/RouletteWheel';
+import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import {
   CHIP_VALUES,
   MAX_TOTAL_BET,
-  betReturn,
   pocketColor,
   spotKey,
   spotLabel,
@@ -23,6 +23,15 @@ interface PendingBet {
 
 interface SettledBet extends PendingBet {
   returned: number;
+}
+
+// What POST /api/roulette/spin returns once the spin is committed.
+interface SpinResponse {
+  number: number;
+  staked: number;
+  returned: number;
+  balance: number;
+  bets: { type: string; number: number | null; amount: number; payout: number }[];
 }
 
 interface SpinOutcome {
@@ -92,7 +101,8 @@ export default function RoulettePage() {
   const [lastSpin, setLastSpin] = useState<SpinOutcome | null>(null);
   const [history, setHistory] = useState<number[]>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const spinBets = useRef<PendingBet[]>([]);
+  // The committed result, held back until the wheel stops (SRS-304.2).
+  const committed = useRef<SpinResponse | null>(null);
 
   // SRS-301.10 / SRS-108.3: only signed-in players can play; guests log in first.
   useEffect(() => {
@@ -162,7 +172,6 @@ export default function RoulettePage() {
     if (spinning || pending.length === 0 || !token) return; // SRS-302.4, SRS-302.5
     setSpinning(true);
     setMessage(null);
-    spinBets.current = pending;
 
     try {
       const res = await fetch('/api/roulette/spin', {
@@ -173,7 +182,14 @@ export default function RoulettePage() {
         }),
       });
       const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        localStorage.removeItem('player_token');
+        router.replace('/login');
+        return;
+      }
+      if (typeof data?.balance === 'number' && !res.ok) setBalance(data.balance);
       if (!res.ok || typeof data?.number !== 'number') throw new Error(data?.error);
+      committed.current = data as SpinResponse;
       setTarget(data.number);
       setSpinId((id) => id + 1);
     } catch (err) {
@@ -183,16 +199,25 @@ export default function RoulettePage() {
     }
   }
 
+  // SRS-303.1–303.2, SRS-304.2: the result, each bet's outcome, and the new
+  // balance appear together when the wheel stops, not when the reply arrives.
   function handleStopped() {
-    if (target === null) return;
-    const settled = spinBets.current.map((bet) => ({ ...bet, returned: betReturn(bet.spot, bet.amount, target) }));
+    const result = committed.current;
+    if (!result) return;
+    committed.current = null;
     setLastSpin({
-      number: target,
-      bets: settled,
-      staked: settled.reduce((sum, bet) => sum + bet.amount, 0),
-      returned: settled.reduce((sum, bet) => sum + bet.returned, 0),
+      number: result.number,
+      bets: result.bets.map(({ type, number, amount, payout }) => ({
+        spot: type === 'Number' ? { type: 'Number', number: number! } : { type: type as OutsideBetType },
+        amount,
+        returned: payout,
+      })),
+      staked: result.staked,
+      returned: result.returned,
     });
-    setHistory((prev) => [target, ...prev].slice(0, 12));
+    setBalance(result.balance);
+    notifyBalanceChanged();
+    setHistory((prev) => [result.number, ...prev].slice(0, 12));
     // SRS-305.3: settled bets leave the table.
     setBets({});
     setPlacements([]);
@@ -224,10 +249,6 @@ export default function RoulettePage() {
             <Stat label="Total bet" value={totalBet.toLocaleString()} highlight={totalBet > 0} />
           </div>
         </header>
-
-        <p className="mt-3 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
-          Practice mode: no coins are taken or paid out yet.
-        </p>
 
         <div className="mt-6 grid gap-8 lg:grid-cols-[20rem_1fr]">
           {/* Wheel and result */}

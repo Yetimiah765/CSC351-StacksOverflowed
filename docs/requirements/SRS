@@ -1886,75 +1886,243 @@ Traces to: UR-215
 
 # **8\. Roulette**
 
+## **Definitions**
+
+**Wheel:** A single-zero (European) roulette wheel with 37 pockets, numbered 0 through 36.
+
+**Pocket color:** Pocket 0 is green. Pockets 1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, and 36 are red. All other pockets from 1 through 36 are black.
+
+**Betting spot:** One of the areas on the betting table defined in SRS-301.3 on which chips may be placed.
+
+**Bet:** The total coins placed on a single betting spot for a spin; the sum of every chip placed on that spot.
+
+**Pending bet:** A bet placed on the betting table that has not yet been submitted with a Spin. No coins are deducted for a pending bet.
+
+**Spin transaction:** The single server-side transaction defined in SRS-302.2.
+
+**x:1 payout:** A winning bet with an x:1 payout returns its stake plus x times its stake.
+
 **UR-301, CL \- Place Roulette Bets**
 
 ***User story:** As a roulette player, I want to place bets on options like red/black, odd/even, or specific numbers, so that I can choose the type of risk and payout I prefer.*
 
-**SRS-301.1, Place pre-spin bets.** The system shall allow a player to place one or more bets on roulette betting options, including color, odd/even, and specific number, before a spin begins.
+**SRS-301.1, CL, Place pre-spin bets.** Before a spin begins, the system shall allow the player to place one or more pending bets on any of the betting spots defined in SRS-301.3.
 
 *Traces to: UR-301*
 
-**SRS-301.2, Reject bets after spin start.** The system shall reject any bet placement submitted after a spin has begun.
+**SRS-301.2, CL, Reject bets after spin start.** From the moment the player selects Spin until the result of that spin is displayed per SRS-303.1, the system shall disable bet placement and shall reject any request to place, change, or remove a bet.
+
+*Traces to: UR-301, UR-305*
+
+**SRS-301.3, CL, Bet types and payouts.** The system shall offer exactly the following bet types, settled at the following payouts:
+
+| Bet type | Betting spots | Wins when the winning number is | Payout |
+| :---- | :---- | :---- | :---- |
+| Straight up | One spot for each number 0–36 | The chosen number | 35:1 |
+| Red / Black | Red, Black | A red / black number | 1:1 |
+| Odd / Even | Odd, Even | An odd / even number from 1–36 | 1:1 |
+| Low / High | 1–18, 19–36 | A number in the chosen range | 1:1 |
+| Dozen | 1–12, 13–24, 25–36 | A number in the chosen dozen | 2:1 |
+| Column | 1st column (1, 4, 7, …, 34), 2nd column (2, 5, 8, …, 35), 3rd column (3, 6, 9, …, 36) | A number in the chosen column | 2:1 |
+
+*Traces to: UR-301, UR-304*
+
+**SRS-301.4, CL, Zero outcome.** When the winning number is 0, the system shall settle every bet as lost except a straight-up bet on 0.
+
+*Traces to: UR-301, UR-304*
+
+**SRS-301.5, CL, Chip denominations.** The system shall offer chips worth 5, 10, 25, 50, and 100 coins, and placing a chip on a betting spot shall add that chip's value to the pending bet on that spot.
 
 *Traces to: UR-301*
+
+**SRS-301.6, CL, Maximum total bet per spin.** The system shall reject any chip placement that would raise the total of all pending bets above 500 coins.
+
+*Traces to: UR-301*
+
+**SRS-301.7, CL, Insufficient balance for a bet.** The system shall reject any chip placement that would raise the total of all pending bets above the player's current balance, and shall display an error message stating the reason.
+
+*Traces to: UR-109, UR-301*
+
+**SRS-301.8, CL, No deduction for pending bets.** The system shall not deduct coins from the player's balance for a pending bet, and shall display on the roulette page the player's balance minus the total of all pending bets as the amount available to bet.
+
+*Traces to: UR-109, UR-301*
+
+**SRS-301.9, CL, Betting table layout.** The system shall display a betting table containing: a spot for 0; spots for the numbers 1 through 36 arranged in twelve rows of three in ascending order, so that each of the three vertical columns holds exactly the numbers of one column bet; each number spot colored with its pocket color; spots for the three dozens, the three columns, Red, Black, Odd, Even, 1–18, and 19–36; and the amount of each pending bet shown on its spot.
+
+*Traces to: UR-301*
+
+**SRS-301.10, CL, Roulette access restriction.** The system shall allow only authenticated players with active accounts to place bets or spin, shall redirect guests per SRS-108.3, and shall reject spin requests from accounts pending deletion per SRS-106.8.
+
+*Traces to: UR-103, UR-106, UR-108, UR-301*
 
 **UR-302, CL \- Spin the Roulette Wheel**
 
 ***User story:** As a roulette player, I want to spin the roulette wheel, so that I can see the outcome of my bets.*
 
-**SRS-302.1, Generate spin result.** The system shall generate a random winning number and color when the player selects "Spin."
+**SRS-302.1, CL, Generate spin result.** When the player selects Spin, the system shall select one winning number from 0 through 36 on the server, giving each number a probability of exactly 1/37, using a cryptographically secure random number generator. The system shall determine the winning color from the winning number per the pocket-color definition and shall not select it separately.
 
 *Traces to: UR-302*
+
+**SRS-302.2, CL, Atomic spin transaction.** When the player selects Spin, the system shall, as one transaction and before the client displays any part of the result: validate the submitted bets against SRS-301.3, SRS-301.5, SRS-301.6, and the player's current balance; deduct the total of the bets from the player's balance; generate the winning number per SRS-302.1; settle every bet per SRS-304.1; and record the spin per SRS-304.3. If any part of the transaction fails, none of these changes shall be committed.
+
+*Traces to: UR-302, UR-304*
+
+**SRS-302.3, CL, Server-determined result.** The system shall not accept a winning number, winning color, or payout amount from the player's client.
+
+*Traces to: UR-302*
+
+**SRS-302.4, CL, Spin requires a bet.** The system shall disable the Spin control while the player has no pending bets, and shall reject a spin request that contains no bets.
+
+*Traces to: UR-302*
+
+**SRS-302.5, CL, Duplicate spin prevention.** The system shall disable the Spin control from the moment the player selects Spin until that spin's result is displayed, and shall reject a spin request received while the same player's previous spin transaction is still being processed, so that one Spin selection produces at most one spin transaction.
+
+*Traces to: UR-302*
+
+**SRS-302.6, CL, Failed spin.** If a spin fails before its spin transaction is committed, the system shall display an error message, leave the player's balance unchanged, and keep the player's pending bets on the table.
+
+*Traces to: UR-302*
+
+**SRS-302.7, CL, Wheel animation.** After the spin transaction has been committed, the system shall display a wheel animation that stops on the winning number no later than 1.5 seconds after the player's client receives the result.
+
+*Traces to: UR-302, UR-303*
 
 **UR-303, CL \- View Spin Result**
 
 ***User story:** As a roulette player, I want the game to clearly display the winning number and color, so that I immediately know whether I won.*
 
-**SRS-303.1, Display winning number and color.** The system shall display the winning number and its corresponding color immediately after a spin completes.
+**SRS-303.1, CL, Display winning number and color.** When the wheel animation stops, the system shall display the winning number and its pocket color.
 
 *Traces to: UR-303*
+
+**SRS-303.2, CL, Display bet outcomes.** Together with the winning number, the system shall mark each bet of that spin as won or lost and display the total amount returned and the net coins won or lost for the spin.
+
+*Traces to: UR-303, UR-304*
+
+**SRS-303.3, CL, Interrupted spin.** If the player refreshes the page, closes the browser tab, or loses the connection after a spin transaction has been committed but before its animation finishes, the system shall preserve the committed settlement, shall not replay the animation when the player returns to the roulette page, and shall display the player's updated balance.
+
+*Traces to: UR-303, UR-304*
 
 **UR-304, CL \- Automatic Bet Settlement**
 
 ***User story:** As a roulette player, I want the game to automatically calculate my winnings or losses, so that my currency balance updates without extra steps.*
 
-**SRS-304.1, Auto-settle placed bets.** The system shall calculate winnings or losses for every placed bet based on the spin result and shall update the player's balance automatically, without requiring further player action.
+**SRS-304.1, CL, Auto-settle placed bets.** Within the spin transaction, the system shall settle every bet of the spin without requiring further player action: a winning bet shall return its stake plus its stake multiplied by its payout from SRS-301.3, a losing bet shall return nothing, and the sum of all returns shall be credited to the player's balance.
 
 *Traces to: UR-304*
+
+**SRS-304.2, CL, Balance display update.** The system shall update the balance displayed to the player when the spin's result is displayed per SRS-303.1, not before, and without requiring a page reload.
+
+*Traces to: UR-109, UR-304*
+
+**SRS-304.3, CL, Spin record.** For each committed spin, the system shall record the player, each bet, the winning number, the total staked, and the total returned, for use by the roulette money-won and money-lost statistics under UR-117 and UR-118.
+
+*Traces to: UR-117, UR-118, UR-304*
 
 **UR-305, CL \- Clear All Bets**
 
 ***User story:** As a roulette player, I want a quick way to clear all my current bets, so that I can easily start a new round without manually removing each bet.*
 
-**SRS-305.1, Clear all placed bets.** The system shall remove every currently placed, unresolved bet from the table when the player selects "Clear Bets."
+**SRS-305.1, CL, Clear all pending bets.** When the player selects "Clear Bets" before a spin begins, the system shall remove every pending bet from the table. Because pending bets are never deducted (SRS-301.8), clearing them shall not change the player's balance.
 
 *Traces to: UR-305*
 
-# 
+**SRS-305.2, CL, Clear Bets disabled during a spin.** The system shall disable the Clear Bets control from the moment the player selects Spin until that spin's result is displayed.
+
+*Traces to: UR-305*
+
+**SRS-305.3, CL, Settled bets leave the table.** After a spin's result is displayed, the system shall remove that spin's settled bets from the table, so that the next spin begins with no pending bets.
+
+*Traces to: UR-305*
 
 # **9\. Slot Machine**
+
+## **Definitions**
+
+**Reel window:** Three reels side by side, each showing exactly one symbol after a spin.
+
+**Payline:** The single horizontal line across the three symbols in the reel window. The machine has exactly one payline.
+
+**Symbol probabilities:** Each reel independently shows each symbol with the following probability:
+
+| Symbol | Probability on each reel |
+| :---- | :---- |
+| Cherry | 10/32 |
+| Lemon | 8/32 |
+| Orange | 6/32 |
+| Bell | 4/32 |
+| Bar | 3/32 |
+| Seven | 1/32 |
+
+**Bet:** The coins wagered on one spin.
+
+**Spin transaction:** The single server-side transaction defined in SRS-307.2.
 
 **UR-306, CL \- Select Bet Amount**
 
 ***User story:** As a slot machine player, I want to choose my bet amount before spinning, so that I can control how much of my currency I risk each round.*
 
-**SRS-306.1, Choose bet amount before spin.** The system shall allow the player to select a bet amount from the game's available bet-amount options before a spin begins.
+**SRS-306.1, CL, Choose bet amount before spin.** Before a spin begins, the system shall allow the player to select a bet of 5, 10, 25, 50, or 100 coins, and shall select 5 coins when the slot machine page loads.
 
 *Traces to: UR-306*
+
+**SRS-306.2, CL, Reject invalid bet amount.** The system shall reject any spin request whose bet is not one of the amounts in SRS-306.1.
+
+*Traces to: UR-306*
+
+**SRS-306.3, CL, Insufficient balance for a spin.** The system shall disable the Spin control while the selected bet exceeds the player's current balance, shall reject any spin request whose bet exceeds the player's current balance, and shall display a message stating the reason.
+
+*Traces to: UR-109, UR-306*
+
+**SRS-306.4, CL, Bet locked during a spin.** The system shall disable bet selection from the moment the player selects Spin until that spin's result is displayed, and shall settle each spin using the bet submitted with that spin's request.
+
+*Traces to: UR-306*
+
+**SRS-306.5, CL, Slot machine access restriction.** The system shall allow only authenticated players with active accounts to spin, shall redirect guests per SRS-108.3, and shall reject spin requests from accounts pending deletion per SRS-106.8.
+
+*Traces to: UR-103, UR-106, UR-108, UR-306*
 
 **UR-307, CL \- Spin the Reels**
 
 ***User story:** As a slot machine player, I want to spin the reels, so that I can play the game and see whether I win.*
 
-**SRS-307.1, Generate reel result.** The system shall generate a random symbol combination across the reels when the player selects "Spin."
+**SRS-307.1, CL, Generate reel result.** When the player selects Spin, the system shall select one symbol for each reel on the server, independently for each reel and with the symbol probabilities defined above, using a cryptographically secure random number generator.
 
 *Traces to: UR-307*
+
+**SRS-307.2, CL, Atomic spin transaction.** When the player selects Spin, the system shall, as one transaction and before the client displays any part of the result: validate the bet per SRS-306.2 and SRS-306.3; deduct the bet from the player's balance; generate the reel result per SRS-307.1; calculate the payout per SRS-309.2 and SRS-309.3; credit the payout per SRS-309.1; and record the spin per SRS-309.6. If any part of the transaction fails, none of these changes shall be committed.
+
+*Traces to: UR-307, UR-309*
+
+**SRS-307.3, CL, Server-determined result.** The system shall not accept reel symbols or a payout amount from the player's client.
+
+*Traces to: UR-307*
+
+**SRS-307.4, CL, Duplicate spin prevention.** The system shall disable the Spin control from the moment the player selects Spin until that spin's result is displayed, and shall reject a spin request received while the same player's previous spin transaction is still being processed, so that one Spin selection produces at most one spin transaction.
+
+*Traces to: UR-307*
+
+**SRS-307.5, CL, Failed spin.** If a spin fails before its spin transaction is committed, the system shall display an error message and leave the player's balance unchanged.
+
+*Traces to: UR-307*
+
+**SRS-307.6, CL, Reel animation.** After the spin transaction has been committed, the system shall display the reels spinning and stopping from left to right on the generated symbols, with the last reel stopping no later than 1.5 seconds after the player's client receives the result.
+
+*Traces to: UR-307*
+
+**SRS-307.7, CL, Interrupted spin.** If the player refreshes the page, closes the browser tab, or loses the connection after a spin transaction has been committed but before its animation finishes, the system shall preserve the committed payout, shall not replay the animation when the player returns to the slot machine page, and shall display the player's updated balance.
+
+*Traces to: UR-307, UR-309*
 
 **UR-308, CL \- Highlight Winning Lines**
 
 ***User story:** As a slot machine player, I want the game to highlight any winning lines after a spin, so that I can easily understand why I won or lost.*
 
-**SRS-308.1, Highlight winning paylines.** The system shall visually highlight every payline that produced a win on the reel display after a spin that results in a win.
+**SRS-308.1, CL, Highlight winning payline.** When the last reel stops on a winning combination from SRS-309.2, the system shall visually highlight the payline and the symbols that form that combination.
+
+*Traces to: UR-308*
+
+**SRS-308.2, CL, Display spin outcome.** When the last reel stops, the system shall display the amount won together with the paytable row that produced it, or, for a spin with no winning combination, a no-win message with no payline highlighted.
 
 *Traces to: UR-308*
 
@@ -1962,9 +2130,49 @@ Traces to: UR-215
 
 ***User story:** As a slot machine player, I want my winnings to be added to my currency balance automatically, so that I don't have to manually claim rewards.*
 
-**SRS-309.1, Auto-credit winnings.** The system shall add any winnings to the player's balance automatically immediately after a winning spin, without requiring the player to manually claim the reward.
+**SRS-309.1, CL, Auto-credit winnings.** Within the spin transaction, the system shall credit the payout for a winning spin to the player's balance without requiring the player to claim it. The payout shall equal the bet multiplied by the payout multiplier of the winning combination.
 
 *Traces to: UR-309*
+
+**SRS-309.2, CL, Paytable.** The system shall pay the following combinations, read from the payline:
+
+| Combination | Payout multiplier |
+| :---- | :---- |
+| Seven, Seven, Seven | 200 |
+| Bar, Bar, Bar | 100 |
+| Bell, Bell, Bell | 50 |
+| Orange, Orange, Orange | 20 |
+| Lemon, Lemon, Lemon | 10 |
+| Cherry, Cherry, Cherry | 6 |
+| Cherry on reels 1 and 2, any other symbol on reel 3 | 4 |
+
+*Traces to: UR-308, UR-309*
+
+**SRS-309.3, CL, One payout per spin.** The system shall award at most one paytable combination per spin, and a spin matching no row of SRS-309.2 shall pay nothing.
+
+*Traces to: UR-309*
+
+**SRS-309.4, CL, Display paytable.** The system shall display the paytable from SRS-309.2 on the slot machine page before the player spins.
+
+*Traces to: UR-308, UR-309*
+
+**SRS-309.5, CL, Balance display update.** The system shall update the balance displayed to the player when the last reel stops, not before, and without requiring a page reload.
+
+*Traces to: UR-109, UR-309*
+
+**SRS-309.6, CL, Spin record.** For each committed spin, the system shall record the player, the bet, the three reel symbols, and the payout, for use by the slot machine money-won and money-lost statistics under UR-117 and UR-118.
+
+*Traces to: UR-117, UR-118, UR-309*
+
+# CL Non-Functional Requirements
+
+**SRS-NFR-301, CL, Spin processing time.** For roulette and the slot machine, the system shall commit the spin transaction and return the result to the player's client within 1 second of receiving the spin request, for at least 95% of spin requests.
+
+*Traces to: UR-302, UR-303, UR-307, UR-309*
+
+**SRS-NFR-302, CL, Spin transaction reliability.** For each committed roulette or slot machine spin, the system shall persist exactly one stake deduction, one result, one payout credit (zero coins for a losing spin), and one spin record, and shall preserve them across browser refreshes, browser-tab closures, connection interruptions, and later login sessions. An interrupted animation or a duplicate spin request shall result in zero additional deductions or credits.
+
+*Traces to: UR-302, UR-304, UR-307, UR-309*
 
 # **10\. Blackjack**
 
@@ -2098,7 +2306,7 @@ The following requirements capture system-wide or cross-cutting quality constrai
 
 The system shall propagate an updated game state (pot, board, or player action) to every connected client within 1 second of the state change occurring on the server, measured from server-side state change to client receipt.
 
-*Applies to: All real-time multiplayer game tables (poker, blackjack, roulette, slots).*
+*Applies to: All real-time multiplayer game tables (poker, blackjack). Roulette and slots are single-player; see SRS-NFR-301.*
 
 *Traces to: URD-001, URD-002, URD-003*
 
@@ -2110,13 +2318,13 @@ The system shall commit every virtual-currency balance change (debit or credit) 
 
 *Traces to: URD-007, URD-114, URD-205, URD-209, URD-304, URD-309, URD-908*
 
-**SRS-NFR-5, CN, Random Outcome Fairness.**
+**SRS-NFR-5, CL, Random Outcome Fairness.**
 
-The system shall generate every randomized game outcome (blind box rewards, roulette spins, slot reel results, card shuffles and deals) using a cryptographically secure random number generator, and the observed frequency of each outcome shall be within 0.1% of its published probability across a sample of 100,000 simulated trials.
+The system shall generate every randomized game outcome (blind box rewards, Daily Login Box rewards, roulette spins, slot reel results, card shuffles and deals) using a cryptographically secure random number generator. Over 1,000,000 simulated trials of each outcome, the observed frequency of each result shall not differ from the probability this SRS defines for it at the 0.01 significance level under a chi-square goodness-of-fit test. Card shuffles are verified per SRS-NFR-023.
 
-*Applies to: Blind box rewards, roulette, slots, poker and blackjack card dealing.*
+*Applies to: Blind box rewards, the Daily Login Box, roulette, slots, poker and blackjack card dealing.*
 
-*Traces to: URD-113, URD-115, URD-302, URD-307, URD-902*
+*Traces to: URD-016, URD-125, URD-128, URD-302, URD-307, URD-902*
 
 **SRS-NFR-6, JN, Reconnection Grace Period.**
 

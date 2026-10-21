@@ -31,8 +31,8 @@ export default function Home() {
             <div>
               <h2 className="text-xl font-semibold">Free coins every day</h2>
               <p className="mt-1 text-slate-300">
-                Spin the Daily Login Box once every 24 hours for {Math.min(...rewardAmounts)}–
-                {Math.max(...rewardAmounts)} coins.
+                Spin the Daily Login Box once every 24 hours for {Math.min(...rewardAmounts).toLocaleString('en-US')}–
+                {Math.max(...rewardAmounts).toLocaleString('en-US')} coins.
               </p>
             </div>
           </div>

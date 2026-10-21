@@ -37,7 +37,7 @@ vi.mock('../../lib/supabase', () => ({
   })),
 }));
 
-// A fixed roll of 55 picks the 50-coin reward (rolls 40-69).
+// A fixed roll of 55 picks the 500-coin reward (rolls 40-69).
 vi.mock('crypto', async (importOriginal) => ({
   ...(await importOriginal<typeof import('crypto')>()),
   randomInt: vi.fn(() => 55),
@@ -135,17 +135,17 @@ describe('Daily Login Box API route', () => {
     it('opens the box with a randomly picked reward (SRS-128.4/128.8)', async () => {
       const nextAvailableAt = new Date(Date.now() + 24 * HOUR).toISOString();
       rpc.mockResolvedValue({
-        data: { status: 'opened', reward: 50, balance: 1050, next_available_at: nextAvailableAt },
+        data: { status: 'opened', reward: 500, balance: 1500, next_available_at: nextAvailableAt },
         error: null,
       });
 
       const response = await POST(req('POST'));
       const body = await response.json();
 
-      expect(rpc).toHaveBeenCalledWith('fn_open_daily_login_box', { p_player_id: 1, p_reward: 50 });
+      expect(rpc).toHaveBeenCalledWith('fn_open_daily_login_box', { p_player_id: 1, p_reward: 500 });
       expect(response.status).toBe(200);
-      expect(body.reward).toBe(50);
-      expect(body.balance).toBe(1050);
+      expect(body.reward).toBe(500);
+      expect(body.balance).toBe(1500);
       expect(body.nextAvailableAt).toBe(nextAvailableAt);
       expect(body.msRemaining).toBeGreaterThan(24 * HOUR - 5000);
     });

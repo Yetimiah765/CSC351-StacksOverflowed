@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import BioEditor from '../../components/profile/BioEditor';
 import CosmeticsSection from '../../components/profile/CosmeticsSection';
+import PasswordEditor, { type PasswordChange } from '../../components/profile/PasswordEditor';
 import ProfileField from '../../components/profile/ProfileField';
 import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection from '../../components/profile/StatsSection';
@@ -21,6 +22,8 @@ interface Profile {
 
 // The fields PATCH /api/profile edits, one pop-up each.
 type EditableField = 'firstName' | 'lastName' | 'username' | 'bio';
+// The password has its own route (Change Password, UR-113), not PATCH.
+type Editing = EditableField | 'password';
 
 const NAME_HINT = 'Letters, spaces, apostrophes, and hyphens.';
 // SRS-112.4, SRS-112.6, SRS-112.7.
@@ -36,7 +39,10 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const [editing, setEditing] = useState<EditableField | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
+  // A one-line confirmation, e.g. after a password change, which otherwise
+  // shows nothing new on the page.
+  const [notice, setNotice] = useState('');
 
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -92,6 +98,31 @@ export default function ProfilePage() {
     }
   }
 
+  // Opening any pop-up clears the last confirmation.
+  useEffect(() => {
+    if (editing) setNotice('');
+  }, [editing]);
+
+  // Change Password (UR-113). Returns an error message for the pop-up to
+  // show, or null once changed, which also closes it.
+  async function changePassword(change: PasswordChange): Promise<string | null> {
+    if (!token) return 'You are not logged in.';
+    try {
+      const res = await fetch('/api/profile/password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(change),
+      });
+      const data = await res.json();
+      if (!res.ok) return data.error || 'Could not change your password.';
+      setEditing(null);
+      setNotice('Your password has been changed.');
+      return null;
+    } catch {
+      return 'Could not change your password. Please try again.';
+    }
+  }
+
   // SRS-105.1: end the session on the server too, so this token stops
   // working everywhere. The local token is cleared even if that request
   // fails, so the player is always logged out of this browser.
@@ -128,6 +159,11 @@ export default function ProfilePage() {
         {error ? (
           <p className="rounded-xl border border-red-800 bg-red-900/30 p-3 text-sm text-red-300">{error}</p>
         ) : null}
+        {notice ? (
+          <p role="status" className="rounded-xl border border-emerald-800 bg-emerald-900/30 p-3 text-sm text-emerald-200">
+            {notice}
+          </p>
+        ) : null}
 
         {profile ? (
           <>
@@ -157,7 +193,7 @@ export default function ProfilePage() {
                   <ProfileField label="First name" value={profile.firstName} onEdit={() => setEditing('firstName')} />
                   <ProfileField label="Last name" value={profile.lastName} onEdit={() => setEditing('lastName')} />
                   <ProfileField label="Username" value={profile.username ?? ''} onEdit={() => setEditing('username')} />
-                  <ProfileField label="Password" value="" secret />
+                  <ProfileField label="Password" value="" secret onEdit={() => setEditing('password')} />
                 </div>
               </div>
 
@@ -204,6 +240,9 @@ export default function ProfilePage() {
           onSave={(value) => saveField('username', value)}
           onCancel={() => setEditing(null)}
         />
+      ) : null}
+      {editing === 'password' ? (
+        <PasswordEditor onSave={changePassword} onCancel={() => setEditing(null)} />
       ) : null}
       {editing === 'bio' && profile ? (
         <BioEditor

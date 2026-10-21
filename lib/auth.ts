@@ -42,6 +42,11 @@ const USERNAME_PATTERN = /^[A-Za-z0-9]{6,10}$/;
 // with at least one of each.
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,}$/;
 
+// Shown when a password breaks PASSWORD_PATTERN, at registration and when
+// changing it (SRS-113.3), so both always state the same rules.
+export const PASSWORD_RULES_MESSAGE =
+  'Passwords must be at least 8 characters, contain only letters and numbers, and include at least one letter and one number.';
+
 export function isValidName(value: string): boolean {
   return NAME_PATTERN.test(value);
 }

@@ -1,5 +1,12 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
-import { hashPassword, isAtLeast21, isValidName, isValidPassword, isValidUsername } from '../../../../lib/auth';
+import {
+  hashPassword,
+  isAtLeast21,
+  isValidName,
+  isValidPassword,
+  isValidUsername,
+  PASSWORD_RULES_MESSAGE,
+} from '../../../../lib/auth';
 
 interface RegisterBody {
   firstName?: string;
@@ -38,13 +45,7 @@ export async function POST(request: Request) {
     }
 
     if (!isValidPassword(password)) {
-      return Response.json(
-        {
-          error:
-            'Passwords must be at least 8 characters, contain only letters and numbers, and include at least one letter and one number.',
-        },
-        { status: 400 }
-      );
+      return Response.json({ error: PASSWORD_RULES_MESSAGE }, { status: 400 });
     }
 
     if (!isAtLeast21(birthday)) {

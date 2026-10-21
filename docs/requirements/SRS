@@ -2252,6 +2252,30 @@ Traces to: UR-215
 
 *Traces to: UR-909*
 
+**UR-910, HC \- Double Down**
+
+***User story:** As a blackjack player, I want to double my bet in exchange for exactly one more card, so that I can win more when my first two cards are strong.*
+
+**SRS-910.1, Offer Double on the first two cards.** The system shall allow the player to select "Double" only during their turn, while their hand holds only its first two cards, and only when their available balance is at least the hand's original bet.
+
+*Traces to: UR-910*
+
+**SRS-910.2, Double the bet.** When the player selects "Double," the system shall deduct a second amount equal to the original bet from the player's balance, so that the hand's bet becomes twice the original bet.
+
+*Traces to: UR-910*
+
+**SRS-910.3, One card, then end the turn.** After the player doubles, the system shall deal exactly one additional card to the player's hand and shall then end the player's turn as for "Stand" (SRS-904.1), unless that card takes the hand over 21.
+
+*Traces to: UR-910*
+
+**SRS-910.4, Settle on the doubled bet.** The system shall declare a doubled hand's result per SRS-907.1 and shall update the player's balance per SRS-908.1 using the doubled bet.
+
+*Traces to: UR-910*
+
+**SRS-910.5, Explain Double before use.** The system shall display an information icon next to the "Double" control that, when the player hovers over, focuses, or taps it, shows a short explanation of what Double does and how many coins it costs, without performing the action.
+
+*Traces to: UR-910*
+
 # **11\. AI Suggestions**
 
 **UR-1001, HC \- AI Cost** 

@@ -13,6 +13,7 @@ function makeTableMock() {
     select: ReturnType<typeof vi.fn>;
     eq: ReturnType<typeof vi.fn>;
     ilike: ReturnType<typeof vi.fn>;
+    lte: ReturnType<typeof vi.fn>;
     insert: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     upsert: ReturnType<typeof vi.fn>;
@@ -27,6 +28,7 @@ function makeTableMock() {
     select: vi.fn(() => builder),
     eq: vi.fn(() => builder),
     ilike: vi.fn(() => builder),
+    lte: vi.fn(() => builder),
     insert: vi.fn(() => builder),
     update: vi.fn(() => builder),
     upsert: vi.fn(() => builder),
@@ -61,6 +63,7 @@ function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.select.mockClear();
   table.eq.mockClear();
   table.ilike.mockClear();
+  table.lte.mockClear();
   table.insert.mockClear();
   table.update.mockClear();
   table.upsert.mockClear();
@@ -137,6 +140,25 @@ describe('Auth API routes', () => {
 
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: 'That username is already taken or reserved.' });
+    });
+
+    it('releases an expired reservation of the name before checking it (SRS-112.8)', async () => {
+      tables.players.singleResult = {
+        data: { player_id: 7, first_name: 'Ada', last_name: 'Lovelace', birthday: '1990-01-01', balance: 1000 },
+        error: null,
+      };
+
+      const response = await registerPost(registerRequest(validRegistration));
+
+      expect(response.status).toBe(201);
+      expect(tables.usernames.delete).toHaveBeenCalled();
+      expect(tables.usernames.ilike).toHaveBeenCalledWith('username', 'newuser123');
+      expect(tables.usernames.eq).toHaveBeenCalledWith('is_current', false);
+      expect(tables.usernames.lte).toHaveBeenCalledWith('reserved_until', expect.any(String));
+      // The delete runs before the taken-or-reserved lookup.
+      expect(tables.usernames.delete.mock.invocationCallOrder[0]).toBeLessThan(
+        tables.usernames.maybeSingle.mock.invocationCallOrder[0]
+      );
     });
 
     it('rejects missing fields (SRS-101.1)', async () => {

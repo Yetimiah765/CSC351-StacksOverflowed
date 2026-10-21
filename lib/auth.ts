@@ -31,6 +31,9 @@ export function hashSessionToken(token: string): string {
 // hyphens, matching chk_players_first_name / chk_players_last_name.
 const NAME_PATTERN = /^[A-Za-z][A-Za-z' -]*$/;
 
+// players.first_name / last_name are VARCHAR(50).
+export const NAME_MAX_LENGTH = 50;
+
 // SRS-101.3 / SRS-101.4: usernames are 6-10 characters, letters and numbers
 // only, matching the CHECK on usernames.username.
 const USERNAME_PATTERN = /^[A-Za-z0-9]{6,10}$/;

@@ -56,6 +56,16 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
     }
 
+    // SRS-112.8: a previous username whose 24-hour reservation has run out
+    // is free again, so delete that reservation before checking the name. If
+    // this fails, the name just stays blocked a little longer, which is safe.
+    await supabase
+      .from('usernames')
+      .delete()
+      .ilike('username', username)
+      .eq('is_current', false)
+      .lte('reserved_until', new Date().toISOString());
+
     // SRS-101.5 / SRS-101.6: usernames are unique and reserved
     // case-insensitively, so check before creating a player row.
     const { data: existingUsername, error: lookupError } = await supabase

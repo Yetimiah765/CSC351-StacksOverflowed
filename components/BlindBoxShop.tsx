@@ -170,11 +170,12 @@ export default function BlindBoxShop() {
               · a duplicate refunds {box.duplicateRefund.toLocaleString('en-US')} coins
             </p>
 
-            <ul className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-3">
+            {/* Two rows of four (each box has 8 items); two across on narrow phones. */}
+            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
               {box.rewards.map((reward) => (
                 <li key={reward.cosmeticId} className="min-w-0">
                   <div
-                    className={`relative flex h-28 items-center justify-center rounded-xl border bg-slate-950 p-2 ${
+                    className={`relative flex h-32 items-center justify-center rounded-xl border bg-slate-950 p-2 ${
                       reward.isHolographic ? 'border-fuchsia-300/70 shadow-[0_0_14px_rgba(244,114,182,0.35)]' : 'border-slate-800'
                     }`}
                   >

@@ -92,3 +92,26 @@ export async function getPlayerIdForToken(
   if (error || !data) return null;
   return data.player_id as number;
 }
+
+export function getBearerToken(request: Request): string | null {
+  const auth = request.headers.get('Authorization');
+  return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+}
+
+/**
+ * The logged-in player's id from the request's bearer token, or a 401
+ * response for the route to return.
+ */
+export async function requirePlayerId(
+  request: Request,
+  supabase: SupabaseClient
+): Promise<{ playerId: number; errorResponse: null } | { playerId: null; errorResponse: Response }> {
+  const token = getBearerToken(request);
+  if (!token) return { playerId: null, errorResponse: Response.json({ error: 'Unauthorized' }, { status: 401 }) };
+
+  const playerId = await getPlayerIdForToken(supabase, token);
+  if (playerId === null) {
+    return { playerId: null, errorResponse: Response.json({ error: 'Invalid or expired session.' }, { status: 401 }) };
+  }
+  return { playerId, errorResponse: null };
+}

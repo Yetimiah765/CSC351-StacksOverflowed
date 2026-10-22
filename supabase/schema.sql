@@ -59,6 +59,9 @@ DROP FUNCTION IF EXISTS fn_poker_seats_rules()          CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_tables_seat_capacity() CASCADE;
 DROP FUNCTION IF EXISTS fn_open_daily_login_box(INTEGER, INTEGER) CASCADE;
 DROP FUNCTION IF EXISTS fn_change_username(INTEGER, VARCHAR) CASCADE;
+DROP FUNCTION IF EXISTS fn_players_grant_default_cosmetics() CASCADE;
+DROP FUNCTION IF EXISTS fn_buy_blind_box(INTEGER, INTEGER, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS fn_spin_roulette(INTEGER, JSONB, INTEGER) CASCADE;
 
 
 -- =============================================================================
@@ -382,7 +385,15 @@ CREATE TABLE blind_boxes (
     description     VARCHAR(500) NOT NULL,
     price           INTEGER      NOT NULL
                     CHECK (price > 0),
-    is_available    BOOLEAN      NOT NULL DEFAULT TRUE
+    is_available    BOOLEAN      NOT NULL DEFAULT TRUE,
+    -- SRS-122.3 / SRS-122.4: a limited-time (holiday) box is on sale only
+    -- from available_from until just before available_until. NULL means no
+    -- limit on that side.
+    available_from  TIMESTAMPTZ,
+    available_until TIMESTAMPTZ,
+
+    CONSTRAINT chk_blind_boxes_window
+        CHECK (available_from IS NULL OR available_until IS NULL OR available_from < available_until)
 );
 
 -- Table: blind_box_rewards
@@ -434,6 +445,250 @@ CREATE TABLE blind_box_purchases (
         CHECK ((was_duplicate AND refund_amount = CEIL(price_paid / 2.0))
                OR (NOT was_duplicate AND refund_amount = 0))
 );
+
+-- SRS-119.4 / SRS-120.3: a new account owns and wears the default card,
+-- chip and profile outline. A trigger does it in the same transaction as the
+-- players insert, so no account can exist without them.
+CREATE OR REPLACE FUNCTION fn_players_grant_default_cosmetics()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO player_cosmetics (player_id, cosmetic_id)
+    SELECT NEW.player_id, cosmetic_id FROM cosmetics WHERE is_default
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO player_equipped_cosmetics (player_id, category, cosmetic_id)
+    SELECT NEW.player_id, category, cosmetic_id FROM cosmetics WHERE is_default
+    ON CONFLICT (player_id, category) DO NOTHING;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_players_grant_default_cosmetics ON players;
+CREATE TRIGGER trg_players_grant_default_cosmetics
+    AFTER INSERT ON players
+    FOR EACH ROW
+    EXECUTE FUNCTION fn_players_grant_default_cosmetics();
+
+-- Buys and opens one blind box as one transaction (SRS-124.4 - SRS-126.5):
+--   * The player's row is locked first, so simultaneous purchases run one at
+--     a time and each sees the balance the previous one left.
+--   * Only Active accounts may buy.
+--   * SRS-122.3 / SRS-122.4: the box must be available now; a limited-time
+--     box is refused before its start or from its end time on.
+--   * SRS-124.5: a balance below the price is refused and nothing changes.
+--   * SRS-125.1 / SRS-123.1: the API picks p_pick, a uniformly random index
+--     from 0 to n - 1 (crypto.randomInt), over the box's n rewards ordered by
+--     cosmetic_id, so each reward is exactly 1/n likely. A pick that is out
+--     of range (the pool changed) returns 'stale_pick' and nothing changes.
+--   * SRS-125.2 / SRS-126.1 - SRS-126.4: a new cosmetic joins the collection;
+--     a duplicate is not stored again and refunds 50% of the price, rounded up.
+--   * SRS-124.4 / SRS-125.3: the price is deducted and the result is saved in
+--     this one call, so it completes even if the player closes the tab.
+CREATE OR REPLACE FUNCTION fn_buy_blind_box(p_player_id INTEGER, p_box_id INTEGER, p_pick INTEGER)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_status     VARCHAR(20);
+    v_balance    BIGINT;
+    v_box        blind_boxes%ROWTYPE;
+    v_count      INTEGER;
+    v_cosmetic   cosmetics%ROWTYPE;
+    v_duplicate  BOOLEAN;
+    v_refund     INTEGER := 0;
+    v_now        TIMESTAMPTZ := CURRENT_TIMESTAMP;
+BEGIN
+    SELECT account_status, balance
+      INTO v_status, v_balance
+      FROM players
+     WHERE player_id = p_player_id
+       FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('status', 'not_found');
+    END IF;
+
+    IF v_status <> 'Active' THEN
+        RETURN jsonb_build_object('status', 'not_active');
+    END IF;
+
+    SELECT * INTO v_box FROM blind_boxes WHERE box_id = p_box_id;
+
+    IF NOT FOUND
+       OR NOT v_box.is_available
+       OR (v_box.available_from IS NOT NULL AND v_now < v_box.available_from)
+       OR (v_box.available_until IS NOT NULL AND v_now >= v_box.available_until) THEN
+        RETURN jsonb_build_object('status', 'unavailable');
+    END IF;
+
+    SELECT COUNT(*) INTO v_count FROM blind_box_rewards WHERE box_id = p_box_id;
+
+    -- SRS-123.6: an empty box can't be bought.
+    IF v_count = 0 THEN
+        RETURN jsonb_build_object('status', 'unavailable');
+    END IF;
+
+    IF p_pick IS NULL OR p_pick < 0 OR p_pick >= v_count THEN
+        RETURN jsonb_build_object('status', 'stale_pick', 'reward_count', v_count);
+    END IF;
+
+    IF v_balance < v_box.price THEN
+        RETURN jsonb_build_object('status', 'insufficient_balance', 'balance', v_balance, 'price', v_box.price);
+    END IF;
+
+    SELECT c.*
+      INTO v_cosmetic
+      FROM blind_box_rewards r
+      JOIN cosmetics c ON c.cosmetic_id = r.cosmetic_id
+     WHERE r.box_id = p_box_id
+     ORDER BY c.cosmetic_id
+    OFFSET p_pick
+     LIMIT 1;
+
+    v_duplicate := EXISTS (
+        SELECT 1 FROM player_cosmetics
+         WHERE player_id = p_player_id AND cosmetic_id = v_cosmetic.cosmetic_id
+    );
+
+    IF v_duplicate THEN
+        v_refund := CEIL(v_box.price / 2.0);
+    ELSE
+        INSERT INTO player_cosmetics (player_id, cosmetic_id)
+        VALUES (p_player_id, v_cosmetic.cosmetic_id);
+    END IF;
+
+    UPDATE players
+       SET balance = balance - v_box.price + v_refund
+     WHERE player_id = p_player_id
+    RETURNING balance INTO v_balance;
+
+    INSERT INTO blind_box_purchases (player_id, box_id, cosmetic_id, price_paid, was_duplicate, refund_amount)
+    VALUES (p_player_id, p_box_id, v_cosmetic.cosmetic_id, v_box.price, v_duplicate, v_refund);
+
+    RETURN jsonb_build_object('status', 'opened',
+                              'cosmetic_id', v_cosmetic.cosmetic_id,
+                              'cosmetic_name', v_cosmetic.cosmetic_name,
+                              'category', v_cosmetic.category,
+                              'art_key', v_cosmetic.asset_path,
+                              'was_duplicate', v_duplicate,
+                              'refund', v_refund,
+                              'price', v_box.price,
+                              'balance', v_balance);
+END;
+$$;
+
+-- Only the server may call fn_buy_blind_box, for the same reason as
+-- fn_open_daily_login_box: the anon key is public. The role check lets this
+-- script still run on plain PostgreSQL, which has no anon role.
+REVOKE EXECUTE ON FUNCTION fn_buy_blind_box(INTEGER, INTEGER, INTEGER) FROM PUBLIC;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_buy_blind_box(INTEGER, INTEGER, INTEGER) FROM anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION fn_buy_blind_box(INTEGER, INTEGER, INTEGER) TO service_role';
+    END IF;
+END;
+$$;
+
+-- The catalog. asset_path is the key lib/cosmeticArt.ts draws the
+-- cosmetic from (all artwork is drawn in code; there are no image files).
+INSERT INTO cosmetics (cosmetic_name, category, is_default, asset_path) VALUES
+    ('Classic Navy',     'Card',            TRUE,  'classic-navy'),
+    ('Classic Red',      'Chip',            TRUE,  'classic-red'),
+    ('Classic Ring',     'Profile Outline', TRUE,  'classic-ring'),
+    ('Neon Horizon',     'Card',            FALSE, 'neon-horizon'),
+    ('Neon Volt',        'Chip',            FALSE, 'neon-volt'),
+    ('Neon Halo',        'Profile Outline', FALSE, 'neon-halo'),
+    ('Neon Arcade',      'Card',            FALSE, 'neon-arcade'),
+    ('Neon Pulse',       'Chip',            FALSE, 'neon-pulse'),
+    ('Neon Circuit',     'Profile Outline', FALSE, 'neon-circuit'),
+    ('Royal Crest',      'Card',            FALSE, 'royal-crest'),
+    ('Royal Sovereign',  'Chip',            FALSE, 'royal-sovereign'),
+    ('Royal Jewels',     'Profile Outline', FALSE, 'royal-jewels'),
+    ('Royal Damask',     'Card',            FALSE, 'royal-damask'),
+    ('Royal Signet',     'Chip',            FALSE, 'royal-signet'),
+    ('Golden Laurel',    'Profile Outline', FALSE, 'golden-laurel'),
+    ('Deep Anchor',      'Card',            FALSE, 'deep-anchor'),
+    ('Ocean Tide',       'Chip',            FALSE, 'ocean-tide'),
+    ('Sea Foam',         'Profile Outline', FALSE, 'sea-foam'),
+    ('Coral Reef',       'Card',            FALSE, 'coral-reef'),
+    ('Pearl Diver',      'Chip',            FALSE, 'pearl-diver'),
+    ('Riptide',          'Profile Outline', FALSE, 'riptide'),
+    ('Inferno Blaze',    'Card',            FALSE, 'inferno-blaze'),
+    ('Inferno Ember',    'Chip',            FALSE, 'inferno-ember'),
+    ('Inferno Corona',   'Profile Outline', FALSE, 'inferno-corona'),
+    ('Dragon Eye',       'Card',            FALSE, 'dragon-eye'),
+    ('Magma Core',       'Chip',            FALSE, 'magma-core'),
+    ('Phoenix',          'Profile Outline', FALSE, 'phoenix'),
+    ('Galaxy Nebula',    'Card',            FALSE, 'galaxy-nebula'),
+    ('Galaxy Orbit',     'Chip',            FALSE, 'galaxy-orbit'),
+    ('Galaxy Starlight', 'Profile Outline', FALSE, 'galaxy-starlight'),
+    ('Total Eclipse',    'Card',            FALSE, 'total-eclipse'),
+    ('Supernova',        'Chip',            FALSE, 'supernova'),
+    ('Orbitals',         'Profile Outline', FALSE, 'orbitals'),
+    ('Haunted Moon',     'Card',            FALSE, 'haunted-moon'),
+    ('Graveyard Ghost',  'Card',            FALSE, 'graveyard-ghost'),
+    ('Jack-o''-Lantern', 'Chip',            FALSE, 'jack-o-lantern'),
+    ('Bat Wing',         'Profile Outline', FALSE, 'bat-wing'),
+    ('Harvest Turkey',   'Card',            FALSE, 'harvest-turkey'),
+    ('Pumpkin Pie',      'Card',            FALSE, 'pumpkin-pie'),
+    ('Autumn Leaf',      'Chip',            FALSE, 'autumn-leaf'),
+    ('Harvest Wreath',   'Profile Outline', FALSE, 'harvest-wreath'),
+    ('Evergreen',        'Card',            FALSE, 'evergreen'),
+    ('Frosty Night',     'Card',            FALSE, 'frosty-night'),
+    ('Candy Cane',       'Chip',            FALSE, 'candy-cane'),
+    ('Holly Wreath',     'Profile Outline', FALSE, 'holly-wreath')
+ON CONFLICT (cosmetic_name) DO UPDATE SET asset_path = EXCLUDED.asset_path;
+
+-- Prices follow the number of rewards: 6 rewards = 350 coins, 4 = 500;
+-- a limited-time (holiday) box costs 1.25x, so 4 rewards = 625. Holiday
+-- windows are midnight to midnight, Eastern Time.
+INSERT INTO blind_boxes (box_name, description, price, is_available, available_from, available_until) VALUES
+    ('Neon Box',         'Synthwave sunsets, arcade light bars and circuit traces in hot pink and electric cyan.', 350, TRUE, NULL, NULL),
+    ('Royal Gold Box',   'Burgundy velvet and navy damask under gold leaf, with crowns, laurels and cut gems.',   350, TRUE, NULL, NULL),
+    ('Ocean Box',        'Deep-sea blues, coral reefs, rolling waves, pearls and a rope-wrapped anchor.',         350, TRUE, NULL, NULL),
+    ('Inferno Box',      'Flames, embers, molten rock, a dragon''s eye and a rising phoenix.',                    350, TRUE, NULL, NULL),
+    ('Galaxy Box',       'Violet nebulae, a total eclipse, a supernova and planets on their orbits.',             350, TRUE, NULL, NULL),
+    ('Halloween Box',    'A harvest moon, bats, a graveyard ghost and a grinning jack-o''-lantern.',              625, TRUE,
+        '2026-10-01 00:00 America/New_York', '2026-11-01 00:00 America/New_York'),
+    ('Thanksgiving Box', 'Falling maple leaves, wheat, a fanned-out turkey and a pumpkin pie.',                   625, TRUE,
+        '2026-11-01 00:00 America/New_York', '2026-12-01 00:00 America/New_York'),
+    ('Christmas Box',    'Evergreen and presents, a snowman under the moon, candy canes and holly.',              625, TRUE,
+        '2026-12-01 00:00 America/New_York', '2027-01-01 00:00 America/New_York')
+ON CONFLICT (box_name) DO UPDATE
+    SET description     = EXCLUDED.description,
+        price           = EXCLUDED.price,
+        available_from  = EXCLUDED.available_from,
+        available_until = EXCLUDED.available_until;
+
+-- SRS-123.5: defaults are never in a box (blind_box_rewards' foreign key
+-- on (cosmetic_id, is_default) also enforces it).
+INSERT INTO blind_box_rewards (box_id, cosmetic_id)
+SELECT b.box_id, c.cosmetic_id
+  FROM (VALUES
+    ('Neon Box', 'Neon Horizon'), ('Neon Box', 'Neon Volt'), ('Neon Box', 'Neon Halo'),
+    ('Neon Box', 'Neon Arcade'), ('Neon Box', 'Neon Pulse'), ('Neon Box', 'Neon Circuit'),
+    ('Royal Gold Box', 'Royal Crest'), ('Royal Gold Box', 'Royal Sovereign'), ('Royal Gold Box', 'Royal Jewels'),
+    ('Royal Gold Box', 'Royal Damask'), ('Royal Gold Box', 'Royal Signet'), ('Royal Gold Box', 'Golden Laurel'),
+    ('Ocean Box', 'Deep Anchor'), ('Ocean Box', 'Ocean Tide'), ('Ocean Box', 'Sea Foam'),
+    ('Ocean Box', 'Coral Reef'), ('Ocean Box', 'Pearl Diver'), ('Ocean Box', 'Riptide'),
+    ('Inferno Box', 'Inferno Blaze'), ('Inferno Box', 'Inferno Ember'), ('Inferno Box', 'Inferno Corona'),
+    ('Inferno Box', 'Dragon Eye'), ('Inferno Box', 'Magma Core'), ('Inferno Box', 'Phoenix'),
+    ('Galaxy Box', 'Galaxy Nebula'), ('Galaxy Box', 'Galaxy Orbit'), ('Galaxy Box', 'Galaxy Starlight'),
+    ('Galaxy Box', 'Total Eclipse'), ('Galaxy Box', 'Supernova'), ('Galaxy Box', 'Orbitals'),
+    ('Halloween Box', 'Haunted Moon'), ('Halloween Box', 'Graveyard Ghost'),
+    ('Halloween Box', 'Jack-o''-Lantern'), ('Halloween Box', 'Bat Wing'),
+    ('Thanksgiving Box', 'Harvest Turkey'), ('Thanksgiving Box', 'Pumpkin Pie'),
+    ('Thanksgiving Box', 'Autumn Leaf'), ('Thanksgiving Box', 'Harvest Wreath'),
+    ('Christmas Box', 'Evergreen'), ('Christmas Box', 'Frosty Night'),
+    ('Christmas Box', 'Candy Cane'), ('Christmas Box', 'Holly Wreath')
+  ) AS v (box_name, cosmetic_name)
+  JOIN blind_boxes b ON b.box_name = v.box_name
+  JOIN cosmetics c   ON c.cosmetic_name = v.cosmetic_name
+ON CONFLICT DO NOTHING;
 
 -- Table: daily_login_box_claims
 -- Reviewed by: JO (James Ortiz)
@@ -1309,25 +1564,203 @@ CREATE TABLE roulette_spins (
 
 -- Table: roulette_bets
 -- Reviewed by: CL (Cris Luperon)
--- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-301.1, SRS-304.1, SRS-305.1
+-- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-301.1, SRS-301.3, SRS-301.5, SRS-304.1, SRS-304.3
 -- Purpose: Stores each bet a player places on a roulette round and its payout once the spin is settled.
 CREATE TABLE roulette_bets (
     bet_id          SERIAL       PRIMARY KEY,
     spin_id         INTEGER      NOT NULL
                     REFERENCES roulette_spins(spin_id) ON DELETE CASCADE,
-    bet_type        VARCHAR(10)  NOT NULL
-                    CHECK (bet_type IN ('Red', 'Black', 'Odd', 'Even', 'Number')),
+    bet_type        VARCHAR(10)  NOT NULL,
     bet_number      SMALLINT     CHECK (bet_number BETWEEN 0 AND 36),
     amount          BIGINT       NOT NULL
                     CHECK (amount > 0),
-    -- NULL until settled (SRS-304.1); unsettled rows are deleted by
-    -- "Clear Bets" (SRS-305.1).
+    -- Coins the bet returned: its stake plus winnings on a win, 0 on a loss
+    -- (SRS-304.1). Pending bets live only on the page until Spin
+    -- (SRS-301.8), so fn_spin_roulette writes each row already settled.
     payout          BIGINT       CHECK (payout >= 0),
+
+    -- SRS-301.3: the bet types the table offers.
+    CONSTRAINT chk_roulette_bets_type
+        CHECK (bet_type IN ('Number', 'Red', 'Black', 'Odd', 'Even', 'Low', 'High',
+                            'Dozen1', 'Dozen2', 'Dozen3', 'Column1', 'Column2', 'Column3')),
+
+    -- SRS-301.5: every bet is a sum of 5/10/25/50/100 chips.
+    CONSTRAINT chk_roulette_bets_chip_amount
+        CHECK (amount % 5 = 0),
 
     -- Only a specific-number bet names a number.
     CONSTRAINT chk_roulette_bets_number
         CHECK ((bet_type = 'Number') = (bet_number IS NOT NULL))
 );
+
+-- Spins the wheel for one player as one transaction (SRS-302.2, SRS-NFR-302):
+-- validates the bets, deducts their total, settles each bet against the
+-- winning number, credits the returns, and records the spin and its bets.
+-- If any step fails, nothing is kept (SRS-302.6).
+--   * SRS-302.5: the player's row is locked with NOWAIT, so a second spin
+--     sent while the first is still running is rejected as 'busy' instead
+--     of queuing up behind it.
+--   * SRS-301.10: only Active accounts may spin.
+--   * SRS-302.4, SRS-301.5, SRS-301.6: at least one bet, chip-sized
+--     amounts, at most 500 coins in total, and no more than the balance.
+--   * SRS-301.3, SRS-301.4, SRS-304.1: payouts, with every outside bet
+--     losing on 0.
+-- The API picks the winning number with a cryptographically secure random
+-- number (SRS-302.1, SRS-NFR-5) and passes it in. p_bets is a JSON array of
+-- { "type": ..., "number": 0-36 (Number bets only), "amount": ... }.
+CREATE OR REPLACE FUNCTION fn_spin_roulette(p_player_id INTEGER, p_bets JSONB, p_winning_number INTEGER)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    n             INTEGER := p_winning_number;
+    v_red         BOOLEAN := p_winning_number = ANY (ARRAY[1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36]);
+    v_status      VARCHAR(20);
+    v_balance     BIGINT;
+    v_bet         JSONB;
+    v_type        TEXT;
+    v_number      INTEGER;
+    v_amount      BIGINT;
+    v_value       NUMERIC;
+    v_wins        BOOLEAN;
+    v_payout      BIGINT;
+    v_staked      NUMERIC := 0;
+    v_returned    BIGINT := 0;
+    v_spin_id     INTEGER;
+    v_settled     JSONB := '[]'::JSONB;
+BEGIN
+    IF n IS NULL OR n NOT BETWEEN 0 AND 36 THEN
+        RAISE EXCEPTION 'Invalid roulette winning number: %', p_winning_number;
+    END IF;
+
+    BEGIN
+        SELECT account_status, balance
+          INTO v_status, v_balance
+          FROM players
+         WHERE player_id = p_player_id
+           FOR UPDATE NOWAIT;
+    EXCEPTION WHEN lock_not_available THEN
+        RETURN jsonb_build_object('status', 'busy');
+    END;
+
+    IF v_status IS NULL THEN
+        RETURN jsonb_build_object('status', 'not_found');
+    END IF;
+
+    IF v_status <> 'Active' THEN
+        RETURN jsonb_build_object('status', 'not_active');
+    END IF;
+
+    -- First pass: check every bet's shape and add up the stake.
+    IF p_bets IS NULL OR jsonb_typeof(p_bets) <> 'array' OR jsonb_array_length(p_bets) = 0 THEN
+        RETURN jsonb_build_object('status', 'invalid_bets');
+    END IF;
+
+    -- Checked step by step, since SQL doesn't promise to stop at the first
+    -- true OR, and a non-numeric value must be rejected before it is cast.
+    FOR v_bet IN SELECT value FROM jsonb_array_elements(p_bets) LOOP
+        IF jsonb_typeof(v_bet) <> 'object' OR jsonb_typeof(v_bet->'amount') IS DISTINCT FROM 'number' THEN
+            RETURN jsonb_build_object('status', 'invalid_bets');
+        END IF;
+
+        v_type := v_bet->>'type';
+        v_value := (v_bet->>'amount')::NUMERIC;
+        IF v_type IS NULL
+           OR v_type NOT IN ('Number', 'Red', 'Black', 'Odd', 'Even', 'Low', 'High',
+                             'Dozen1', 'Dozen2', 'Dozen3', 'Column1', 'Column2', 'Column3')
+           OR v_value <= 0
+           OR v_value % 5 <> 0 THEN
+            RETURN jsonb_build_object('status', 'invalid_bets');
+        END IF;
+        v_staked := v_staked + v_value;
+
+        IF v_type = 'Number' THEN
+            IF jsonb_typeof(v_bet->'number') IS DISTINCT FROM 'number' THEN
+                RETURN jsonb_build_object('status', 'invalid_bets');
+            END IF;
+            v_value := (v_bet->>'number')::NUMERIC;
+            IF v_value NOT BETWEEN 0 AND 36 OR v_value % 1 <> 0 THEN
+                RETURN jsonb_build_object('status', 'invalid_bets');
+            END IF;
+        END IF;
+    END LOOP;
+
+    IF v_staked > 500 THEN
+        RETURN jsonb_build_object('status', 'over_limit');
+    END IF;
+
+    IF v_staked > v_balance THEN
+        RETURN jsonb_build_object('status', 'insufficient_balance', 'balance', v_balance);
+    END IF;
+
+    INSERT INTO roulette_spins (player_id, winning_number, spun_at)
+    VALUES (p_player_id, n, CURRENT_TIMESTAMP)
+    RETURNING spin_id INTO v_spin_id;
+
+    -- Second pass: settle and record each bet.
+    FOR v_bet IN SELECT value FROM jsonb_array_elements(p_bets) LOOP
+        v_type := v_bet->>'type';
+        v_amount := (v_bet->>'amount')::BIGINT;
+        v_number := CASE WHEN v_type = 'Number' THEN (v_bet->>'number')::INTEGER END;
+
+        v_wins := CASE v_type
+            WHEN 'Number'  THEN v_number = n
+            WHEN 'Red'     THEN v_red
+            WHEN 'Black'   THEN n > 0 AND NOT v_red
+            WHEN 'Odd'     THEN n > 0 AND n % 2 = 1
+            WHEN 'Even'    THEN n > 0 AND n % 2 = 0
+            WHEN 'Low'     THEN n BETWEEN 1 AND 18
+            WHEN 'High'    THEN n BETWEEN 19 AND 36
+            WHEN 'Dozen1'  THEN n BETWEEN 1 AND 12
+            WHEN 'Dozen2'  THEN n BETWEEN 13 AND 24
+            WHEN 'Dozen3'  THEN n BETWEEN 25 AND 36
+            WHEN 'Column1' THEN n > 0 AND n % 3 = 1
+            WHEN 'Column2' THEN n > 0 AND n % 3 = 2
+            WHEN 'Column3' THEN n > 0 AND n % 3 = 0
+        END;
+
+        -- Stake back plus 35:1, 2:1, or 1:1 (SRS-301.3).
+        v_payout := CASE
+            WHEN NOT v_wins THEN 0
+            WHEN v_type = 'Number' THEN v_amount * 36
+            WHEN v_type LIKE 'Dozen%' OR v_type LIKE 'Column%' THEN v_amount * 3
+            ELSE v_amount * 2
+        END;
+        v_returned := v_returned + v_payout;
+
+        INSERT INTO roulette_bets (spin_id, bet_type, bet_number, amount, payout)
+        VALUES (v_spin_id, v_type, v_number, v_amount, v_payout);
+
+        v_settled := v_settled || jsonb_build_object('type', v_type, 'number', v_number,
+                                                     'amount', v_amount, 'payout', v_payout);
+    END LOOP;
+
+    UPDATE players
+       SET balance = balance - v_staked::BIGINT + v_returned
+     WHERE player_id = p_player_id
+    RETURNING balance INTO v_balance;
+
+    RETURN jsonb_build_object('status', 'spun',
+                              'spin_id', v_spin_id,
+                              'winning_number', n,
+                              'staked', v_staked::BIGINT,
+                              'returned', v_returned,
+                              'balance', v_balance,
+                              'bets', v_settled);
+END;
+$$;
+
+-- Only the server may call fn_spin_roulette, for the same reason as
+-- fn_open_daily_login_box: the anon key is public.
+REVOKE EXECUTE ON FUNCTION fn_spin_roulette(INTEGER, JSONB, INTEGER) FROM PUBLIC;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_spin_roulette(INTEGER, JSONB, INTEGER) FROM anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION fn_spin_roulette(INTEGER, JSONB, INTEGER) TO service_role';
+    END IF;
+END;
+$$;
 
 
 -- =============================================================================

@@ -1,20 +1,25 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import CosmeticArt from '../cosmetics/CosmeticArt';
 import DefaultAvatar from './DefaultAvatar';
 
 // The profile photo (UR-115), or the blank icon when there is none
 // (SRS-115.5). Clicking it opens a menu: Upload new photo, which also
 // replaces an existing one (SRS-115.4), and, only when there is a photo, a
 // red Remove photo that goes back to the blank icon (SRS-115.6). Upload and
-// remove errors are shown in the menu.
+// remove errors are shown in the menu. The equipped profile outline
+// (UR-120) is drawn around the photo.
 export default function ProfilePhoto({
   photoUrl,
   token,
+  outlineArtKey = null,
   onChange,
 }: {
   photoUrl: string | null;
   token: string | null;
+  // The equipped profile outline's art key, or null while it is unknown.
+  outlineArtKey?: string | null;
   // Called with the new photo's data URL, or null once it is removed.
   onChange: (photoUrl: string | null) => void;
 }) {
@@ -94,7 +99,8 @@ export default function ProfilePhoto({
   }
 
   return (
-    <div ref={wrapperRef} className="relative">
+    // my-7 leaves room for the outline, which reaches 28px past the photo.
+    <div ref={wrapperRef} className={`relative ${outlineArtKey ? 'my-7' : ''}`}>
       <button
         type="button"
         onClick={() => (menuOpen ? closeMenu() : setMenuOpen(true))}
@@ -102,7 +108,9 @@ export default function ProfilePhoto({
         aria-expanded={menuOpen}
         aria-controls={menuId}
         title="Change profile photo"
-        className="group relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 border-slate-700 bg-slate-800 transition hover:border-emerald-400 disabled:opacity-70"
+        className={`group relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 bg-slate-800 transition hover:border-emerald-400 disabled:opacity-70 ${
+          outlineArtKey ? 'border-transparent' : 'border-slate-700'
+        }`}
       >
         {photoUrl ? (
           <img src={photoUrl} alt="Your profile photo" className="h-full w-full object-cover" />
@@ -118,10 +126,18 @@ export default function ProfilePhoto({
         </span>
       </button>
 
+      {/* The outline's drawing is 1.5x the photo (the photo fills its inner
+          two thirds), so it hangs 28px past each side. */}
+      {outlineArtKey ? (
+        <span aria-hidden="true" className="pointer-events-none absolute -inset-7 z-10">
+          <CosmeticArt artKey={outlineArtKey} avatar={false} className="h-full w-full" />
+        </span>
+      ) : null}
+
       {menuOpen ? (
         <div
           id={menuId}
-          className="absolute left-1/2 top-full z-20 mt-2 w-56 -translate-x-1/2 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl shadow-black/50"
+          className={`absolute left-1/2 top-full z-20 ${outlineArtKey ? 'mt-9' : 'mt-2'} w-56 -translate-x-1/2 rounded-2xl border border-slate-700 bg-slate-900 p-2 shadow-2xl shadow-black/50`}
         >
           <button
             type="button"

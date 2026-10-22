@@ -12,7 +12,7 @@ import DefaultAvatar from './profile/DefaultAvatar';
 // players, after the page is up, instead of in every page's first load.
 const CosmeticArt = dynamic(() => import('./cosmetics/CosmeticArt'), { ssr: false });
 
-// Rendered on every page by app/layout.tsx. It is h-14 (3.5rem) tall, which
+// Rendered on every page by app/layout.tsx. It is h-16 (4rem) tall, which
 // is why pages use `min-h-page` (see tailwind.config.js) instead of
 // `min-h-screen`.
 export default function NavBar() {
@@ -112,7 +112,7 @@ export default function NavBar() {
   const accent = signedIn && outlineArtKey ? OUTLINE_ACCENTS[outlineArtKey] : undefined;
 
   return (
-    <header className="sticky top-0 z-40 h-14 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
+    <header className="sticky top-0 z-40 h-16 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
       <nav className="mx-auto flex h-full max-w-5xl items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <NavIcon href="/" label="Home" active={pathname === '/'}>
@@ -131,7 +131,7 @@ export default function NavBar() {
           {/* SRS-120.8: bordered in the equipped outline's colors, as a
               1.5px gradient frame around the pill. */}
           <span
-            className="rounded-full p-[1.5px]"
+            className="h-12 rounded-full p-[1.5px]"
             style={
               accent
                 ? {
@@ -143,9 +143,9 @@ export default function NavBar() {
           >
             <span
               title={`Balance: ${balanceText} coins`}
-              className="flex items-center gap-2 rounded-full bg-slate-900 px-3 py-[0.3rem] text-sm font-medium text-slate-100"
+              className="flex h-full items-center gap-2 rounded-full bg-slate-900 px-4 text-base font-medium text-slate-100"
             >
-              <span aria-hidden="true" className="h-3.5 w-3.5 rounded-full bg-amber-400 ring-2 ring-amber-300/30" />
+              <span aria-hidden="true" className="h-4 w-4 rounded-full bg-amber-400 ring-2 ring-amber-300/30" />
               {balanceText}
               <span className="sr-only">coins</span>
             </span>
@@ -166,7 +166,8 @@ export default function NavBar() {
 
 // SRS-120.7: the logged-in player's photo (or the blank icon) inside their
 // equipped profile outline. The outline's drawing is 1.5x the photo, so a
-// 34px photo takes a 51px badge, which fits the 56px bar.
+// 40px photo takes a 60px badge, which fits the 64px bar; the ring itself
+// reaches about 48px across, the height of the other icons and the balance.
 function ProfileBadge({ active, avatarUrl, outlineArtKey }: { active: boolean; avatarUrl: string | null; outlineArtKey: string | null }) {
   return (
     <Link
@@ -174,10 +175,10 @@ function ProfileBadge({ active, avatarUrl, outlineArtKey }: { active: boolean; a
       aria-label="Your profile"
       title="Your profile"
       aria-current={active ? 'page' : undefined}
-      className="group relative flex h-[51px] w-[51px] items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
+      className="group relative flex h-[60px] w-[60px] items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400"
     >
       <span
-        className={`h-[34px] w-[34px] overflow-hidden rounded-full bg-slate-800 transition group-hover:brightness-125 ${
+        className={`h-10 w-10 overflow-hidden rounded-full bg-slate-800 transition group-hover:brightness-125 ${
           outlineArtKey ? '' : `border ${active ? 'border-emerald-400' : 'border-slate-700'}`
         }`}
       >
@@ -209,7 +210,7 @@ function NavIcon({
       aria-label={label}
       title={label}
       aria-current={active ? 'page' : undefined}
-      className={`flex h-10 w-10 items-center justify-center rounded-full border bg-slate-900 transition hover:border-emerald-400 hover:text-emerald-200 ${
+      className={`flex h-12 w-12 items-center justify-center rounded-full border bg-slate-900 transition hover:border-emerald-400 hover:text-emerald-200 ${
         active ? 'border-emerald-400 text-emerald-200' : 'border-slate-800 text-slate-200'
       }`}
     >
@@ -221,7 +222,7 @@ function NavIcon({
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
-        className="h-5 w-5"
+        className="h-6 w-6"
       >
         {children}
       </svg>

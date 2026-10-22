@@ -16,6 +16,8 @@ export interface Cosmetic {
   // The key lib/cosmeticArt.ts draws it from (cosmetics.asset_path).
   artKey: string;
   isDefault: boolean;
+  // SRS-123.8: one of a box's rare holographic items.
+  isHolographic: boolean;
 }
 
 export interface CosmeticRow {
@@ -24,6 +26,7 @@ export interface CosmeticRow {
   category: CosmeticCategory;
   is_default: boolean;
   asset_path: string;
+  is_holographic?: boolean;
 }
 
 export function toCosmetic(row: CosmeticRow): Cosmetic {
@@ -33,6 +36,7 @@ export function toCosmetic(row: CosmeticRow): Cosmetic {
     category: row.category,
     artKey: row.asset_path,
     isDefault: row.is_default,
+    isHolographic: row.is_holographic ?? false,
   };
 }
 
@@ -74,11 +78,22 @@ export function duplicateRefund(price: number): number {
   return Math.ceil(price / 2);
 }
 
-// SRS-123.1 / SRS-123.2: every one of a box's n rewards is 1/n likely. Shown
-// as a percent with at most one decimal, e.g. "16.7%" for 6 rewards.
-export function rewardChance(rewardCount: number): string {
-  const percent = 100 / rewardCount;
-  return `${Number.isInteger(percent) ? percent : percent.toFixed(1)}%`;
+// SRS-123.8: the roll for a box's holographic tier is a whole number from 0
+// to HOLOGRAPHIC_ROLLS - 1, compared with the box's chance in basis points.
+export const HOLOGRAPHIC_ROLLS = 10000;
+
+// SRS-123.1 / SRS-123.2 / SRS-123.8: a box's holographic items share its
+// holographic chance equally, and its regular items share the rest equally;
+// a box with no holographic items gives each of its n items 1/n. Shown as
+// percents with at most two decimals, e.g. "16.17%" and "1.5%" for 6 regular
+// and 2 holographic items at a 3% chance. null when the box has none of that kind.
+export function rewardChances(regularCount: number, holographicCount: number, holographicChanceBp: number) {
+  const holographic = holographicCount === 0 ? 0 : regularCount === 0 ? 1 : holographicChanceBp / HOLOGRAPHIC_ROLLS;
+  const percent = (p: number) => `${Number((p * 100).toFixed(2))}%`;
+  return {
+    regular: regularCount > 0 ? percent((1 - holographic) / regularCount) : null,
+    holographic: holographicCount > 0 ? percent(holographic / holographicCount) : null,
+  };
 }
 
 // SRS-122.1 / SRS-122.3: whether a box is on sale at `now`. A NULL start or

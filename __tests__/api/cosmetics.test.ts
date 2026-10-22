@@ -71,6 +71,7 @@ const RING = row(3, 'Classic Ring', 'Profile Outline', 'classic-ring', true);
 const HORIZON = row(4, 'Neon Horizon', 'Card', 'neon-horizon');
 const VOLT = row(5, 'Neon Volt', 'Chip', 'neon-volt');
 const HALO = row(6, 'Neon Halo', 'Profile Outline', 'neon-halo');
+const PRISM = { ...row(46, 'Neon Prism', 'Card', 'holo-neon'), is_holographic: true };
 
 beforeEach(() => {
   for (const table of Object.values(tables)) {
@@ -113,7 +114,7 @@ describe('GET /api/cosmetics (collection)', () => {
     expect(response.status).toBe(200);
     expect(tables.player_cosmetics.eq).toHaveBeenCalledWith('player_id', 7);
     expect(body.owned.map((c: { artKey: string }) => c.artKey)).toEqual(['classic-navy', 'classic-red', 'neon-horizon', 'neon-volt']);
-    expect(body.owned[0]).toEqual({ cosmeticId: 1, name: 'Classic Navy', category: 'Card', artKey: 'classic-navy', isDefault: true });
+    expect(body.owned[0]).toEqual({ cosmeticId: 1, name: 'Classic Navy', category: 'Card', artKey: 'classic-navy', isDefault: true, isHolographic: false });
     expect(body.equipped).toEqual({ Card: 4, Chip: 2 });
   });
 });
@@ -150,7 +151,7 @@ describe('POST /api/cosmetics/equip', () => {
 describe('GET /api/shop/boxes', () => {
   const box = (box_id: number, box_name: string, price: number, rewards: object[], from: string | null = null, until: string | null = null) => ({
     box_id, box_name, description: `${box_name} description`, price, is_available: true,
-    available_from: from, available_until: until, blind_box_rewards: rewards.map((cosmetics) => ({ cosmetics })),
+    available_from: from, available_until: until, holographic_chance_bp: 300, blind_box_rewards: rewards.map((cosmetics) => ({ cosmetics })),
   });
   const DAY = 24 * 60 * 60 * 1000;
   const iso = (offset: number) => new Date(Date.now() + offset).toISOString();
@@ -161,7 +162,7 @@ describe('GET /api/shop/boxes', () => {
         box(6, 'Halloween Box', 625, [HALO, HORIZON], iso(-DAY), iso(DAY)),
         box(7, 'Thanksgiving Box', 625, [VOLT], iso(DAY), iso(30 * DAY)),
         box(8, 'Old Box', 625, [VOLT], iso(-30 * DAY), iso(-DAY)),
-        box(1, 'Neon Box', 350, [HALO, VOLT, HORIZON]),
+        box(1, 'Neon Box', 350, [PRISM, HALO, VOLT, HORIZON]),
         box(2, 'Empty Box', 350, []),
       ],
       error: null,
@@ -177,8 +178,12 @@ describe('GET /api/shop/boxes', () => {
     expect(body.boxes.map((b: { name: string }) => b.name)).toEqual(['Neon Box', 'Halloween Box']);
     const neon = body.boxes[0];
     expect([neon.price, neon.duplicateRefund, neon.limited]).toEqual([350, 175, false]);
-    expect(neon.rewards.map((r: { artKey: string }) => r.artKey)).toEqual(['neon-horizon', 'neon-volt', 'neon-halo']);
-    expect(body.boxes[1]).toMatchObject({ price: 625, duplicateRefund: 313, limited: true });
+    // Regular items in card, chip, outline order, then the holographic ones.
+    expect(neon.rewards.map((r: { artKey: string }) => r.artKey)).toEqual(['neon-horizon', 'neon-volt', 'neon-halo', 'holo-neon']);
+    expect(neon.rewards.map((r: { isHolographic: boolean }) => r.isHolographic)).toEqual([false, false, false, true]);
+    // SRS-123.8 / SRS-123.9: one holographic item takes the whole 3%; the three regular ones share 97%.
+    expect(neon.chances).toEqual({ regular: '32.33%', holographic: '3%' });
+    expect(body.boxes[1]).toMatchObject({ price: 625, duplicateRefund: 313, limited: true, chances: { regular: '50%', holographic: null } });
     expect(neon.rewards.every((r: { owned: boolean }) => r.owned === false)).toBe(true);
   });
 
@@ -199,8 +204,11 @@ describe('POST /api/shop/buy', () => {
     was_duplicate: false, refund: 0, price: 350, balance: 650,
   };
 
+  const reward = (is_holographic: boolean) => ({ cosmetics: { is_holographic } });
+  const neonBox = { holographic_chance_bp: 300, blind_box_rewards: [...Array(6)].map(() => reward(false)).concat([reward(true), reward(true)]) };
+
   beforeEach(() => {
-    tables.blind_box_rewards.defaultResult = { error: null, count: 6 };
+    tables.blind_boxes.maybeSingleResult = { data: neonBox, error: null };
   });
 
   it('returns 401 without a token', async () => {
@@ -212,30 +220,41 @@ describe('POST /api/shop/buy', () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('refuses a box with no rewards without charging (SRS-123.6)', async () => {
-    tables.blind_box_rewards.defaultResult = { error: null, count: 0 };
-
-    const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
-
-    expect(response.status).toBe(409);
+  it('refuses a box with no rewards, or no such box, without charging (SRS-123.6)', async () => {
+    tables.blind_boxes.maybeSingleResult = { data: { holographic_chance_bp: 300, blind_box_rewards: [] }, error: null };
+    expect((await buy(req('/api/shop/buy', 'POST', { boxId: 1 }))).status).toBe(409);
+    tables.blind_boxes.maybeSingleResult = { data: null, error: null };
+    expect((await buy(req('/api/shop/buy', 'POST', { boxId: 99 }))).status).toBe(409);
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('picks a random index over the rewards and returns the new cosmetic (SRS-124.4, SRS-125.1, SRS-125.2)', async () => {
+  it('rolls for the holographic tier, then picks a regular item, and returns the new cosmetic (SRS-123.8, SRS-124.4, SRS-125.1, SRS-125.2)', async () => {
     rpc.mockResolvedValue({ data: opened, error: null });
 
     const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
 
     expect(response.status).toBe(200);
-    expect(randomInt).toHaveBeenCalledWith(6);
-    expect(rpc).toHaveBeenCalledWith('fn_buy_blind_box', { p_player_id: 7, p_box_id: 1, p_pick: 5 });
+    // The roll (9,999) is above the 300 chance, so the pick is over the 6 regular items.
+    expect(randomInt.mock.calls).toEqual([[10000], [6]]);
+    expect(rpc).toHaveBeenCalledWith('fn_buy_blind_box', { p_player_id: 7, p_box_id: 1, p_roll: 9999, p_pick: 5 });
     expect(await response.json()).toEqual({
-      cosmetic: { cosmeticId: 5, name: 'Neon Volt', category: 'Chip', artKey: 'neon-volt' },
+      cosmetic: { cosmeticId: 5, name: 'Neon Volt', category: 'Chip', artKey: 'neon-volt', isHolographic: false },
       wasDuplicate: false,
       refund: 0,
       price: 350,
       balance: 650,
     });
+  });
+
+  it('picks from the holographic items when the roll is under the chance (SRS-123.8, SRS-127.6)', async () => {
+    randomInt.mockImplementationOnce(() => 0);
+    rpc.mockResolvedValue({ data: { ...opened, cosmetic_id: 46, cosmetic_name: 'Neon Prism', category: 'Card', art_key: 'holo-neon', is_holographic: true }, error: null });
+
+    const body = await (await buy(req('/api/shop/buy', 'POST', { boxId: 1 }))).json();
+
+    expect(randomInt.mock.calls).toEqual([[10000], [2]]);
+    expect(rpc).toHaveBeenCalledWith('fn_buy_blind_box', { p_player_id: 7, p_box_id: 1, p_roll: 0, p_pick: 1 });
+    expect(body.cosmetic).toEqual({ cosmeticId: 46, name: 'Neon Prism', category: 'Card', artKey: 'holo-neon', isHolographic: true });
   });
 
   it('passes a duplicate refund through (SRS-126.3)', async () => {
@@ -246,15 +265,15 @@ describe('POST /api/shop/buy', () => {
     expect([body.wasDuplicate, body.refund, body.balance]).toEqual([true, 175, 825]);
   });
 
-  it('picks again once if the box changed size', async () => {
+  it('draws again once, from the new counts, if the box changed', async () => {
     rpc
-      .mockResolvedValueOnce({ data: { status: 'stale_pick', reward_count: 4 }, error: null })
+      .mockResolvedValueOnce({ data: { status: 'stale_pick', regular_count: 4, holographic_count: 2, reward_count: 4 }, error: null })
       .mockResolvedValueOnce({ data: opened, error: null });
 
     const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
 
     expect(response.status).toBe(200);
-    expect(rpc).toHaveBeenNthCalledWith(2, 'fn_buy_blind_box', { p_player_id: 7, p_box_id: 1, p_pick: 3 });
+    expect(rpc).toHaveBeenNthCalledWith(2, 'fn_buy_blind_box', { p_player_id: 7, p_box_id: 1, p_roll: 9999, p_pick: 3 });
   });
 
   it('explains a balance below the price (SRS-124.5)', async () => {

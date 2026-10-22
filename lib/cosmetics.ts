@@ -40,6 +40,25 @@ const CATEGORY_ORDER = new Map(COSMETIC_CATEGORIES.map(({ category }, i) => [cat
 export const byCategory = (a: Cosmetic, b: Cosmetic) =>
   (CATEGORY_ORDER.get(a.category) ?? 0) - (CATEGORY_ORDER.get(b.category) ?? 0) || a.cosmeticId - b.cosmeticId;
 
+// SRS-120.8: each profile outline's colors, for the nav bar's balance pill:
+// a border gradient (left to right) and a soft glow. Keyed by art key.
+export const OUTLINE_ACCENTS: Record<string, { colors: string[]; glow: string | null }> = {
+  'classic-ring': { colors: ['#64748b', '#475569'], glow: null },
+  'neon-halo': { colors: ['#2ef2ff', '#ff3fd2'], glow: '#ff3fd2' },
+  'neon-circuit': { colors: ['#2ef2ff', '#8b5cf6', '#ff3fd2'], glow: '#2ef2ff' },
+  'royal-jewels': { colors: ['#f8e08e', '#c9971c', '#e11d48'], glow: '#d4af37' },
+  'golden-laurel': { colors: ['#f8e08e', '#c9971c', '#8a6212'], glow: '#d4af37' },
+  'sea-foam': { colors: ['#22d3ee', '#0e7490'], glow: '#22d3ee' },
+  riptide: { colors: ['#e0f2fe', '#0369a1'], glow: '#38bdf8' },
+  'inferno-corona': { colors: ['#fde047', '#f97316', '#dc2626'], glow: '#f97316' },
+  phoenix: { colors: ['#fde047', '#f97316'], glow: '#f97316' },
+  'galaxy-starlight': { colors: ['#f472b6', '#7c3aed', '#60a5fa'], glow: '#a78bfa' },
+  orbitals: { colors: ['#c4b5fd', '#7c3aed', '#93c5fd'], glow: '#7c3aed' },
+  'bat-wing': { colors: ['#f97316', '#a855f7'], glow: '#f97316' },
+  'harvest-wreath': { colors: ['#ea580c', '#f59e0b', '#b91c1c'], glow: '#f59e0b' },
+  'holly-wreath': { colors: ['#15803d', '#facc15', '#dc2626'], glow: '#22c55e' },
+};
+
 // SRS-126.3 / SRS-126.4: a duplicate refunds half the price, rounded up.
 export function duplicateRefund(price: number): number {
   return Math.ceil(price / 2);

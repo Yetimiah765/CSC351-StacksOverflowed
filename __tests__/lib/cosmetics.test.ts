@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { COSMETIC_ART_KEYS, drawCosmetic } from '../../lib/cosmeticArt';
-import { byCategory, duplicateRefund, isBoxOnSale, rewardChance, type Cosmetic } from '../../lib/cosmetics';
+import { byCategory, duplicateRefund, isBoxOnSale, OUTLINE_ACCENTS, rewardChance, type Cosmetic } from '../../lib/cosmetics';
 
 describe('blind box rules', () => {
   it('refunds half the price on a duplicate, rounded up (SRS-126.3, SRS-126.4)', () => {
@@ -64,6 +64,13 @@ describe('cosmetic artwork', () => {
   it('can draw a profile outline as just the ring, to go around a real photo', () => {
     expect(drawCosmetic('classic-ring', 'x')).toContain('M31.2 100');
     expect(drawCosmetic('classic-ring', 'x', { avatar: false })).not.toContain('M31.2 100');
+  });
+
+  it('has nav bar colors for every profile outline, and only for outlines (SRS-120.8)', () => {
+    const outlineKeys = [...migration.matchAll(/'Profile Outline',\s+(?:TRUE|FALSE),\s+'([a-z-]+)'\)/g)].map((m) => m[1]);
+    expect(outlineKeys).toHaveLength(14);
+    expect(Object.keys(OUTLINE_ACCENTS).sort()).toEqual([...outlineKeys].sort());
+    for (const { colors } of Object.values(OUTLINE_ACCENTS)) expect(colors.length).toBeGreaterThanOrEqual(2);
   });
 
   it('returns null for an unknown art key', () => {

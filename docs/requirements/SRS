@@ -1328,6 +1328,14 @@ flowchart LR
 
 *Traces to: UR-120*
 
+**SRS-120.7, JO, Navigation-bar equipped outline.** While a player is logged in, the navigation bar shall display the player's profile photo, or the default profile icon if the player has none, inside the player's equipped profile-outline cosmetic.
+
+*Traces to: UR-109, UR-120*
+
+**SRS-120.8, JO, Navigation-bar balance styling.** While a player is logged in, the navigation bar's balance display shall be bordered in the colors of the player's equipped profile-outline cosmetic.
+
+*Traces to: UR-109, UR-120*
+
 ### UR-121, JO – View Other Players' Profiles
 
 *User story: As a player, I want to view another player's public profile by clicking their username or profile photo during gameplay, so that I can view their profile and overall gaming activity.*

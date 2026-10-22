@@ -20,13 +20,16 @@ import {
   type PokerHoleCardsRequest,
   type PokerTableBroadcast,
 } from '../../../lib/pokerRealtime';
+import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
 import {
   ConnectionPill,
   EmptyCardSlot,
+  PlayerChip,
   PlayingCard,
   PokerRoomEyebrow,
+  ProfileOutline,
   Room,
   RoomMessage,
   STAKES_STYLES,
@@ -93,6 +96,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const [acting, setActing] = useState(false);
   const [actError, setActError] = useState('');
   const [avatars, setAvatars] = useState<Record<string, string | null>>({});
+  // Each seated player's equipped card back, chip and profile outline (UR-120).
+  const [cosmetics, setCosmetics] = useState<Record<string, EquippedArt>>({});
   // The open seat the player clicked; they pick one before buying in.
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   // Empty until the table's bigBlind is known (from the first table:state),
@@ -134,18 +139,28 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
 
   // Avatars aren't carried through the table:state broadcast (a profile
   // photo as base64 can exceed Realtime's broadcast payload size limit), so
-  // each seated player's avatar is fetched separately as seats appear.
+  // each seated player's avatar is fetched separately as seats appear, along
+  // with their equipped cosmetics. Until those arrive, a seat shows the plain
+  // card backs and the table's stakes chip.
   useEffect(() => {
     if (!tableState) return;
 
     tableState.seats.forEach((seat) => {
-      if (!seat.playerId || fetchedAvatarsRef.current.has(seat.playerId)) return;
-      fetchedAvatarsRef.current.add(seat.playerId);
+      const playerId = seat.playerId;
+      if (!playerId || fetchedAvatarsRef.current.has(playerId)) return;
+      fetchedAvatarsRef.current.add(playerId);
 
-      fetch(`/api/players/${seat.playerId}/avatar`)
+      fetch(`/api/players/${playerId}/avatar`)
         .then((res) => res.json())
-        .then((data) => setAvatars((prev) => ({ ...prev, [seat.playerId as string]: data.avatarUrl ?? null })))
-        .catch(() => setAvatars((prev) => ({ ...prev, [seat.playerId as string]: null })));
+        .then((data) => setAvatars((prev) => ({ ...prev, [playerId]: data.avatarUrl ?? null })))
+        .catch(() => setAvatars((prev) => ({ ...prev, [playerId]: null })));
+
+      fetch(`/api/players/${playerId}/cosmetics`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: EquippedArt | null) => {
+          if (data) setCosmetics((prev) => ({ ...prev, [playerId]: data }));
+        })
+        .catch(() => {});
     });
   }, [tableState]);
 
@@ -354,6 +369,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const myHandName = myHoleCards && board.length >= 3 ? evaluateHand([...myHoleCards, ...board]).name : null;
   // Between hands, the last hand's showdown stays on the table until the next deal.
   const lastResult = !inHandPhase ? tableState?.lastHandResult ?? null : null;
+  const myCosmetics = cosmetics[String(profile.playerId)];
 
   return (
     <Room>
@@ -524,6 +540,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   : null;
             // The button stays on its seat between hands, like a real table.
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
+            const seatCosmetics = seat.playerId ? cosmetics[seat.playerId] : undefined;
             // Only until the seat acts: after that the bet is theirs, not just the blind.
             const blindLabel = !inHandPhase || seat.hasActed
               ? null
@@ -541,7 +558,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     style={{ left: `${50 + 28 * Math.cos(angle)}%`, top: `${50 + 24 * Math.sin(angle)}%` }}
                     className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border border-white/10 bg-black/60 py-0.5 pl-0.5 pr-2.5 shadow-lg shadow-black/50"
                   >
-                    <StakesChip stakes={config.stakes} size="h-5 w-5" />
+                    <PlayerChip artKey={seatCosmetics?.chip} stakes={config.stakes} size="h-5 w-5" />
                     <span className="text-xs font-semibold tabular-nums text-amber-100">{seat.bet}</span>
                     {blindLabel ? (
                       <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
@@ -570,53 +587,65 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     <div className="absolute -right-5 top-0 z-20 flex -space-x-2.5 sm:-right-6">
                       {seatCards.map((card, cardIndex) => (
                         <span key={cardIndex} className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}>
-                          <PlayingCard card={card} size="sm" highlight={Boolean(shown && wonLastHand)} />
+                          <PlayingCard
+                            card={card}
+                            size="sm"
+                            highlight={Boolean(shown && wonLastHand)}
+                            backArtKey={seatCosmetics?.card}
+                          />
                         </span>
                       ))}
                     </div>
                   ) : null}
-                  <button
-                    type="button"
-                    disabled={!isPickable}
-                    onClick={() => setSelectedSeat(seat.seatNumber)}
-                    aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
-                    aria-pressed={isPickable ? isSelected : undefined}
-                    className={`relative z-10 h-14 w-14 shrink-0 overflow-hidden rounded-full transition disabled:cursor-default sm:h-16 sm:w-16 ${
-                      isActive
-                        ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
-                        : seat.playerId
-                          ? isOwnSeat
-                            ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
-                            : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
-                          : isSelected
-                            ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
-                            : isPickable
-                              ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
-                              : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
-                    }`}
-                  >
-                    {seat.playerId ? (
-                      avatars[seat.playerId] ? (
-                        <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+                  {/* The equipped profile outline hangs outside the photo, so it
+                      sits beside the button rather than in its clipped circle. */}
+                  <div className="relative z-10 h-14 w-14 shrink-0 sm:h-16 sm:w-16">
+                    <button
+                      type="button"
+                      disabled={!isPickable}
+                      onClick={() => setSelectedSeat(seat.seatNumber)}
+                      aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
+                      aria-pressed={isPickable ? isSelected : undefined}
+                      className={`h-full w-full overflow-hidden rounded-full transition disabled:cursor-default ${
+                        isActive
+                          ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
+                          : seat.playerId
+                            ? seatCosmetics?.outline
+                              ? 'border-2 border-transparent bg-slate-900 shadow-lg shadow-black/60'
+                              : isOwnSeat
+                                ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
+                                : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
+                            : isSelected
+                              ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
+                              : isPickable
+                                ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
+                                : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
+                      }`}
+                    >
+                      {seat.playerId ? (
+                        avatars[seat.playerId] ? (
+                          <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
+                            {seat.username?.[0]?.toUpperCase()}
+                          </span>
+                        )
                       ) : (
-                        <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
-                          {seat.username?.[0]?.toUpperCase()}
+                        <span
+                          className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
+                            isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
+                          }`}
+                        >
+                          {isPickable ? 'Sit' : seat.seatNumber}
                         </span>
-                      )
-                    ) : (
-                      <span
-                        className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
-                          isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
-                        }`}
-                      >
-                        {isPickable ? 'Sit' : seat.seatNumber}
-                      </span>
-                    )}
-                  </button>
+                      )}
+                    </button>
+                    {seat.playerId ? <ProfileOutline artKey={seatCosmetics?.outline} /> : null}
+                  </div>
 
-                  {/* Name plate */}
+                  {/* Name plate, dropped a little to clear an outline */}
                   <div
-                    className={`-mt-2 min-w-[76px] max-w-[96px] rounded-lg border px-2 pb-1 pt-2.5 text-center shadow-lg shadow-black/50 ${
+                    className={`${seat.playerId && seatCosmetics?.outline ? 'relative z-30 mt-1.5' : '-mt-2'} min-w-[76px] max-w-[96px] rounded-lg border px-2 pb-1 pt-2.5 text-center shadow-lg shadow-black/50 ${
                       seat.playerId
                         ? isOwnSeat
                           ? 'border-emerald-300/40 bg-slate-950/95'
@@ -641,7 +670,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     </p>
                     {seat.chipStack !== null ? (
                       <p className="flex items-center justify-center gap-1 text-[11px] font-semibold tabular-nums text-amber-300">
-                        <span className="h-2 w-2 rounded-full border border-dashed border-white/70 bg-amber-500" />
+                        {seatCosmetics?.chip ? (
+                          <PlayerChip artKey={seatCosmetics.chip} stakes={config.stakes} size="h-3.5 w-3.5" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full border border-dashed border-white/70 bg-amber-500" />
+                        )}
                         {seat.chipStack}
                       </p>
                     ) : null}
@@ -678,14 +711,21 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
         <div className="mx-auto mt-8 max-w-3xl rounded-3xl border border-white/5 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-6 shadow-2xl shadow-black/50">
           <div className="flex flex-col gap-6 md:flex-row md:items-start">
             <div className="flex items-center gap-3 md:w-56 md:shrink-0">
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-emerald-300/60 bg-slate-900">
-                {profile.profilePhotoDataUrl ? (
-                  <img src={profile.profilePhotoDataUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center text-base font-semibold text-slate-300">
-                    {profile.username?.[0]?.toUpperCase()}
-                  </span>
-                )}
+              <div className={`relative h-12 w-12 shrink-0 ${myCosmetics?.outline ? 'm-3' : ''}`}>
+                <div
+                  className={`h-full w-full overflow-hidden rounded-full border-2 bg-slate-900 ${
+                    myCosmetics?.outline ? 'border-transparent' : 'border-emerald-300/60'
+                  }`}
+                >
+                  {profile.profilePhotoDataUrl ? (
+                    <img src={profile.profilePhotoDataUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-base font-semibold text-slate-300">
+                      {profile.username?.[0]?.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <ProfileOutline artKey={myCosmetics?.outline} />
               </div>
               <div className="min-w-0">
                 <p className="truncate font-semibold text-slate-100">{profile.username}</p>
@@ -846,7 +886,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         Your stack · Seat {mySeat.seatNumber}
                       </p>
                       <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
-                        <StakesChip stakes={config.stakes} size="h-7 w-7" />
+                        <PlayerChip artKey={myCosmetics?.chip} stakes={config.stakes} size="h-7 w-7" />
                         {mySeat.chipStack}
                       </p>
                     </div>

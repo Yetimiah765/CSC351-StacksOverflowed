@@ -57,6 +57,16 @@ export const OUTLINE_ACCENTS: Record<string, { colors: string[]; glow: string | 
   'bat-wing': { colors: ['#f97316', '#a855f7'], glow: '#f97316' },
   'harvest-wreath': { colors: ['#ea580c', '#f59e0b', '#b91c1c'], glow: '#f59e0b' },
   'holly-wreath': { colors: ['#15803d', '#facc15', '#dc2626'], glow: '#22c55e' },
+  'blossom-branch': { colors: ['#f9a8d4', '#be185d', '#7c2d12'], glow: '#f472b6' },
+  'daisy-chain': { colors: ['#ffffff', '#facc15', '#16a34a'], glow: '#facc15' },
+  'sun-ring': { colors: ['#fde047', '#f97316'], glow: '#f59e0b' },
+  'tropical-fronds': { colors: ['#22c55e', '#f43f5e', '#15803d'], glow: '#22c55e' },
+  'falling-leaves': { colors: ['#ea580c', '#f59e0b', '#dc2626'], glow: '#ea580c' },
+  'fairy-ring': { colors: ['#65a30d', '#dc2626', '#4d7c0f'], glow: '#65a30d' },
+  'icicle-ring': { colors: ['#e0f2fe', '#7dd3fc', '#0369a1'], glow: '#7dd3fc' },
+  'frost-ring': { colors: ['#e0f2fe', '#38bdf8'], glow: '#38bdf8' },
+  'ivy-vine': { colors: ['#22c55e', '#3f6212'], glow: '#22c55e' },
+  'songbird-branch': { colors: ['#ea580c', '#5b3a1e', '#22c55e'], glow: '#ea580c' },
 };
 
 // SRS-126.3 / SRS-126.4: a duplicate refunds half the price, rounded up.

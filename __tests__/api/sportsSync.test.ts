@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   oddsApi: {} as unknown,
   syncSports: vi.fn(),
   settleWagers: vi.fn(),
+  settleShowdowns: vi.fn(),
+  selectShowdowns: vi.fn(),
+  notifyShowdownChanged: vi.fn(),
 }));
 
 vi.mock('../../lib/supabase', () => ({ getSupabaseClient: vi.fn(() => mocks.supabase) }));
@@ -17,6 +20,11 @@ vi.mock('../../lib/sports/sync', async (importOriginal) => ({
 }));
 
 vi.mock('../../lib/sports/settle', () => ({ settleWagers: mocks.settleWagers }));
+vi.mock('../../lib/sports/showdown', () => ({
+  settleShowdowns: mocks.settleShowdowns,
+  selectShowdowns: mocks.selectShowdowns,
+}));
+vi.mock('../../lib/sports/showdownRealtime', () => ({ notifyShowdownChanged: mocks.notifyShowdownChanged }));
 
 const NO_SETTLEMENT = { settled: 0, won: 0, lost: 0, refunded: 0, errors: [] };
 
@@ -177,6 +185,8 @@ describe('POST /api/sports/sync', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.settleShowdowns.mockResolvedValue({ settled: 0, refunded: 0, errors: [] });
+    mocks.selectShowdowns.mockResolvedValue({ picked: [], errors: [] });
     vi.stubEnv('SPORTS_SYNC_SECRET', 'secret');
     vi.stubEnv('CRON_SECRET', '');
     mocks.supabase = {};
@@ -205,17 +215,27 @@ describe('POST /api/sports/sync', () => {
     expect(await response.json()).toEqual({ error: 'ODDS_API_KEY is not configured.' });
   });
 
-  it('returns the sync summary and settles decided wagers afterwards', async () => {
+  it('returns the sync summary, then settles wagers and Showdowns and picks new Showdowns', async () => {
     const summary = { events: 4, markets: 12, options: 24, skipped: [], errors: [], quota: { remaining: 490, used: 10 } };
     const settlement = { settled: 2, won: 1, lost: 1, refunded: 0, errors: [] };
     mocks.syncSports.mockResolvedValue(summary);
     mocks.settleWagers.mockResolvedValue(settlement);
+    mocks.settleShowdowns.mockResolvedValue({ settled: 1, refunded: 0, errors: [] });
+    mocks.selectShowdowns.mockResolvedValue({ picked: [{ sport: 'Basketball', eventId: 9 }], errors: [] });
 
     const response = await POST(request('Bearer secret'));
 
     expect(response.status).toBe(200);
     expect(mocks.settleWagers).toHaveBeenCalledWith(mocks.supabase);
-    expect(await response.json()).toEqual({ ...summary, settlement });
+    expect(mocks.settleShowdowns).toHaveBeenCalledWith(mocks.supabase);
+    expect(mocks.selectShowdowns).toHaveBeenCalledWith(mocks.supabase);
+    // Settling a Showdown pings open Showdown pages.
+    expect(mocks.notifyShowdownChanged).toHaveBeenCalledWith(mocks.supabase, { showdownId: null, reason: 'settled' });
+    expect(await response.json()).toEqual({
+      ...summary,
+      settlement,
+      showdowns: { settled: 1, refunded: 0, errors: [], picked: [{ sport: 'Basketball', eventId: 9 }] },
+    });
   });
 
   it('returns 207 when settling a wager failed', async () => {

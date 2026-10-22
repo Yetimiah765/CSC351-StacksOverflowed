@@ -2,6 +2,8 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { getOddsApiClient } from '../../../../lib/oddsApi';
 import { syncSports } from '../../../../lib/sports/sync';
 import { settleWagers } from '../../../../lib/sports/settle';
+import { selectShowdowns, settleShowdowns } from '../../../../lib/sports/showdown';
+import { notifyShowdownChanged } from '../../../../lib/sports/showdownRealtime';
 
 // Called by a scheduler, not by players. Requires
 // "Authorization: Bearer <SPORTS_SYNC_SECRET>" (Vercel Cron sends CRON_SECRET
@@ -31,8 +33,20 @@ export async function POST(request: Request) {
     const summary = await syncSports(supabase, oddsApi);
     // SRS-209 / SRS-210: pay out wagers whose games the sync just decided.
     const settlement = await settleWagers(supabase);
-    const errors = [...summary.errors, ...settlement.errors];
-    return Response.json({ ...summary, errors, settlement }, { status: errors.length > 0 ? 207 : 200 });
+    // SRS-212 - SRS-214: pay out finished Showdowns, then pick new ones.
+    const showdowns = await settleShowdowns(supabase);
+    const picked = await selectShowdowns(supabase);
+    if (showdowns.settled + showdowns.refunded > 0 || picked.picked.length > 0) {
+      await notifyShowdownChanged(supabase, {
+        showdownId: null,
+        reason: showdowns.settled + showdowns.refunded > 0 ? 'settled' : 'picked',
+      });
+    }
+    const errors = [...summary.errors, ...settlement.errors, ...showdowns.errors, ...picked.errors];
+    return Response.json(
+      { ...summary, errors, settlement, showdowns: { ...showdowns, picked: picked.picked } },
+      { status: errors.length > 0 ? 207 : 200 },
+    );
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Unexpected error';
     return Response.json({ error: message }, { status: 502 });

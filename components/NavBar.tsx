@@ -113,7 +113,9 @@ export default function NavBar() {
 
   return (
     <header className="sticky top-0 z-40 h-16 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-      <nav className="mx-auto flex h-full max-w-5xl items-center justify-between px-4">
+      {/* Full width: Home and the cart at the left edge, the balance and
+          profile at the right, at any window size. */}
+      <nav className="flex h-full items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-2">
           <NavIcon href="/" label="Home" active={pathname === '/'}>
             <path d="M3 11.5 12 4l9 7.5" />

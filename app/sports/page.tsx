@@ -7,9 +7,13 @@ import { potentialPayout } from '../../lib/sports/payout';
 import { MIN_WAGER, canWinCoins, checkWagerAmount } from '../../lib/sports/wagers';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import type { MyBet, MyBets, WagerResult } from '../../lib/sports/myBets';
+import type { MyShowdownEntry, MyShowdowns } from '../../lib/sports/showdown';
+import { LogoNotice, SPORT_ICONS, StatusBadge, TeamCrest, formatDateTime, startsIn } from '../../components/sports/shared';
 
 type Selection = { event: SportsEvent; market: SportsMarket; option: SportsOption };
 type SlipMessage = { kind: 'success' | 'error'; text: string } | null;
+// GET /api/sports/wagers: regular bets plus the player's Showdown entries.
+type BetsData = MyBets & { showdowns: MyShowdowns };
 
 // The sync job only refreshes the database a few times a day, so polling
 // our own API (free) once a minute is plenty.
@@ -56,75 +60,6 @@ const ROW_SIDES: Record<SportsMarket['type'], [OptionSide, OptionSide, OptionSid
   total: ['over', 'under', 'draw'],
   moneyline: ['away', 'home', 'draw'],
 };
-
-// Shown on the sport filter buttons; sports without an icon just show text.
-const SPORT_ICONS: Record<string, string> = {
-  'American Football': '🏈',
-  Basketball: '🏀',
-  Baseball: '⚾',
-  'Ice Hockey': '🏒',
-  Soccer: '⚽',
-};
-
-// "Tampa Bay Buccaneers" -> "TBB", "Dallas Cowboys" -> "DC".
-function teamInitials(name: string) {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => word[0])
-    .join('')
-    .slice(0, 3)
-    .toUpperCase();
-}
-
-// A stable color per team, so the same team always gets the same badge.
-function teamHue(name: string) {
-  let hash = 0;
-  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 360;
-  return hash;
-}
-
-function TeamBadge({ name }: { name: string }) {
-  const hue = teamHue(name);
-  return (
-    <span
-      aria-hidden="true"
-      className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full border text-[0.65rem] font-bold tracking-tight sm:flex"
-      style={{
-        backgroundColor: `hsl(${hue} 45% 22%)`,
-        borderColor: `hsl(${hue} 55% 42%)`,
-        color: `hsl(${hue} 85% 85%)`,
-      }}
-    >
-      {teamInitials(name)}
-    </span>
-  );
-}
-
-// "Starts in 2h 15m" for games in the next day; null otherwise.
-function startsIn(iso: string, now: number) {
-  const minutes = Math.round((new Date(iso).getTime() - now) / 60_000);
-  if (minutes <= 0 || minutes >= 24 * 60) return null;
-  if (minutes < 15) return 'Starting soon';
-  const hours = Math.floor(minutes / 60);
-  return `Starts in ${hours > 0 ? `${hours}h ` : ''}${minutes % 60}m`;
-}
-
-function StatusBadge({ status }: { status: SportsEvent['status'] }) {
-  const styles: Record<SportsEvent['status'], string> = {
-    Upcoming: 'border-slate-700 bg-slate-800 text-slate-300',
-    'In Progress': 'border-amber-500/50 bg-amber-500/10 text-amber-200',
-    Completed: 'border-slate-700 bg-slate-900 text-slate-400',
-    Canceled: 'border-red-800 bg-red-950/60 text-red-200',
-    Postponed: 'border-red-800 bg-red-950/60 text-red-200',
-  };
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs ${styles[status]}`}>
-      {status === 'In Progress' ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-300" /> : null}
-      {status}
-    </span>
-  );
-}
 
 function FilterChip({
   active,
@@ -217,7 +152,7 @@ function EventCard({
                 <td className="pr-2">
                   <div className="flex items-center justify-between gap-3">
                     <span className="flex items-center gap-2.5">
-                      {row.name === 'Draw' ? null : <TeamBadge name={row.name} />}
+                      {row.name === 'Draw' ? null : <TeamCrest name={row.name} className="hidden sm:flex" />}
                       <span className={`font-medium leading-tight ${row.name === 'Draw' ? 'text-slate-400' : 'text-slate-100'}`}>
                         {row.name}
                         {rowIndex === 1 ? <span className="ml-1.5 text-xs font-normal text-slate-500">home</span> : null}
@@ -516,10 +451,6 @@ function BetSlip({
   );
 }
 
-function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
-
 // SRS-208.1 / SRS-211.1: Pending while open; once decided, the result and the
 // coins it paid back (or lost).
 function BetOutcome({ bet }: { bet: MyBet }) {
@@ -684,6 +615,67 @@ function BetCard({
   );
 }
 
+// A Showdown entry's result, from the player's side.
+function showdownResult(entry: MyShowdownEntry): 'Won' | 'Lost' | 'Refunded' | null {
+  if (entry.outcome === 'Refunded') return 'Refunded';
+  if (entry.outcome === 'Settled') return entry.winningTeamId === entry.teamId ? 'Won' : 'Lost';
+  return null;
+}
+
+function ShowdownEntryCard({ entry }: { entry: MyShowdownEntry }) {
+  const team = entry.teamId === entry.home.id ? entry.home : entry.away;
+  const result = showdownResult(entry);
+  const showScore = entry.status !== 'Upcoming' && entry.homeScore !== null && entry.awayScore !== null;
+  const styles = {
+    Won: 'border-emerald-600 bg-emerald-500/10 text-emerald-200',
+    Lost: 'border-red-800 bg-red-950/60 text-red-200',
+    Refunded: 'border-slate-600 bg-slate-800 text-slate-200',
+  };
+  let detail = '';
+  if (result === 'Won') detail = `+${((entry.payout ?? 0) - entry.amount).toLocaleString()}`;
+  else if (result === 'Lost') detail = `−${entry.amount.toLocaleString()}`;
+  else if (result === 'Refunded') detail = `${entry.amount.toLocaleString()} back`;
+
+  return (
+    <article className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-slate-900 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+        <span className="flex items-center gap-2">
+          <span className="rounded-md bg-amber-400/15 px-1.5 py-0.5 font-semibold text-amber-200">The Showdown</span>
+          {entry.league ? `${entry.league} · ` : ''}
+          {formatDateTime(entry.startTime)}
+        </span>
+        <StatusBadge status={entry.status} />
+      </div>
+      <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <p className="font-medium text-slate-100">
+          {entry.away.name} @ {entry.home.name}
+        </p>
+        {showScore ? (
+          <p className="tabular-nums text-slate-200">
+            {entry.awayScore} – {entry.homeScore}
+          </p>
+        ) : null}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+        <p>
+          You backed <span className="font-semibold">{team.name}</span> with{' '}
+          <span className="font-semibold tabular-nums">{entry.amount.toLocaleString()} coins</span>
+        </p>
+        {result ? (
+          <span className={`rounded-full border px-2.5 py-0.5 text-xs ${styles[result]}`}>
+            Decided · {result} {detail}
+          </span>
+        ) : (
+          <span className="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-0.5 text-xs text-slate-300">Pending</span>
+        )}
+      </div>
+      <Link href="/sports/showdown" className="mt-3 inline-block text-sm text-amber-300 hover:underline">
+        View the Showdown →
+      </Link>
+    </article>
+  );
+}
+
 function MyBetsView({
   bets,
   error,
@@ -691,7 +683,7 @@ function MyBetsView({
   onBrowse,
   onCancelled,
 }: {
-  bets: MyBets | null;
+  bets: BetsData | null;
   error: string;
   token: string | null;
   onBrowse: () => void;
@@ -699,9 +691,21 @@ function MyBetsView({
 }) {
   if (error) return <p className="rounded-xl border border-red-800 bg-red-950/60 p-4 text-sm text-red-200">{error}</p>;
   if (!bets) return <p className="text-slate-400">Loading your bets…</p>;
+  const showdownEntries = [...bets.showdowns.open, ...bets.showdowns.settled];
 
   return (
     <div className="space-y-10">
+      {showdownEntries.length > 0 ? (
+        <section aria-label="The Showdown">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-amber-300">The Showdown ({showdownEntries.length})</h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {showdownEntries.map((entry) => (
+              <ShowdownEntryCard key={entry.entryId} entry={entry} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section aria-label="Open bets">
         <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-slate-400">Open bets ({bets.open.length})</h2>
         {bets.open.length === 0 ? (
@@ -739,20 +743,59 @@ function MyBetsView({
   );
 }
 
-// The coins a settled wager made or lost: profit for a win, the stake for a
+// One line in the results pop-up: a settled wager or Showdown entry.
+type ResultItem = {
+  key: string;
+  selection: string;
+  market: string;
+  matchup: string;
+  result: 'Won' | 'Lost' | 'Refunded';
+  amount: number;
+  payout: number;
+};
+
+function fromWager(bet: MyBet): ResultItem {
+  const score = bet.event.awayScore !== null && bet.event.homeScore !== null ? ` · ${bet.event.awayScore}–${bet.event.homeScore} final` : '';
+  return {
+    key: `w${bet.id}`,
+    selection: bet.selection,
+    market: bet.market,
+    matchup: `${bet.event.awayTeam} @ ${bet.event.homeTeam}${score}`,
+    result: bet.result === 'Won' || bet.result === 'Lost' ? bet.result : 'Refunded',
+    amount: bet.amount,
+    payout: bet.payout ?? 0,
+  };
+}
+
+function fromShowdown(entry: MyShowdownEntry): ResultItem {
+  const team = entry.teamId === entry.home.id ? entry.home : entry.away;
+  const score = entry.awayScore !== null && entry.homeScore !== null ? ` · ${entry.awayScore}–${entry.homeScore} final` : '';
+  return {
+    key: `s${entry.entryId}`,
+    selection: team.name,
+    market: 'The Showdown',
+    matchup: `${entry.away.name} @ ${entry.home.name}${score}`,
+    result: showdownResult(entry) ?? 'Refunded',
+    amount: entry.amount,
+    payout: entry.payout ?? 0,
+  };
+}
+
+// The coins a settled bet made or lost: profit for a win, the stake for a
 // loss, nothing for a refund.
-function netChange(bet: MyBet) {
-  if (bet.result === 'Won') return (bet.payout ?? 0) - bet.amount;
-  if (bet.result === 'Lost') return -bet.amount;
+function netChange(item: ResultItem) {
+  if (item.result === 'Won') return item.payout - item.amount;
+  if (item.result === 'Lost') return -item.amount;
   return 0;
 }
 
-// SRS-209.1, SRS-210.2, SRS-210.4: shows the results of wagers settled since
-// the player last looked, once. Closing it marks them seen on the server.
-function ResultsModal({ bets, onClose }: { bets: MyBet[]; onClose: () => void }) {
+// SRS-209.1, SRS-210.2, SRS-210.4, SRS-214.2: shows the results of wagers and
+// Showdown entries settled since the player last looked, once. Closing it
+// marks them seen on the server.
+function ResultsModal({ items, onClose }: { items: ResultItem[]; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
-  const net = bets.reduce((sum, bet) => sum + netChange(bet), 0);
-  const wins = bets.filter((b) => b.result === 'Won').length;
+  const net = items.reduce((sum, item) => sum + netChange(item), 0);
+  const wins = items.filter((item) => item.result === 'Won').length;
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -764,7 +807,7 @@ function ResultsModal({ bets, onClose }: { bets: MyBet[]; onClose: () => void })
   }, [onClose]);
 
   let headline = 'Your bets are in';
-  if (wins === bets.length) headline = bets.length === 1 ? 'Your bet won!' : 'All your bets won!';
+  if (wins === items.length) headline = items.length === 1 ? 'Your bet won!' : 'All your bets won!';
   else if (wins === 0 && net < 0) headline = 'Tough break';
 
   return (
@@ -787,44 +830,39 @@ function ResultsModal({ bets, onClose }: { bets: MyBet[]; onClose: () => void })
           {Math.abs(net).toLocaleString()} <span className="text-lg font-semibold">coins</span>
         </p>
         <p className="mt-1 text-sm text-slate-400">
-          {bets.length} {bets.length === 1 ? 'bet' : 'bets'} settled while you were away
+          {items.length} {items.length === 1 ? 'bet' : 'bets'} settled while you were away
         </p>
 
         <ul className="mt-5 space-y-2">
-          {bets.map((bet) => {
-            const change = netChange(bet);
+          {items.map((item) => {
+            const change = netChange(item);
             return (
-              <li key={bet.id} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <li key={item.key} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="font-semibold">
-                      {bet.selection} <span className="font-normal text-slate-400">· {bet.market}</span>
+                      {item.selection} <span className="font-normal text-slate-400">· {item.market}</span>
                     </p>
-                    <p className="text-xs text-slate-400">
-                      {bet.event.awayTeam} @ {bet.event.homeTeam}
-                      {bet.event.awayScore !== null && bet.event.homeScore !== null
-                        ? ` · ${bet.event.awayScore}–${bet.event.homeScore} final`
-                        : ''}
-                    </p>
+                    <p className="text-xs text-slate-400">{item.matchup}</p>
                   </div>
                   <span
                     className={`shrink-0 rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
-                      bet.result === 'Won'
+                      item.result === 'Won'
                         ? 'border-emerald-600 bg-emerald-500/10 text-emerald-200'
-                        : bet.result === 'Lost'
+                        : item.result === 'Lost'
                           ? 'border-red-800 bg-red-950/60 text-red-200'
                           : 'border-slate-600 bg-slate-800 text-slate-200'
                     }`}
                   >
-                    {bet.result}
+                    {item.result}
                   </span>
                 </div>
                 <p className="mt-2 text-sm text-slate-300">
-                  {bet.result === 'Won'
-                    ? `+${change.toLocaleString()} profit · ${(bet.payout ?? 0).toLocaleString()} coins paid to your balance`
-                    : bet.result === 'Lost'
-                      ? `−${bet.amount.toLocaleString()} coins`
-                      : `${bet.amount.toLocaleString()} coins refunded to your balance`}
+                  {item.result === 'Won'
+                    ? `+${change.toLocaleString()} profit · ${item.payout.toLocaleString()} coins paid to your balance`
+                    : item.result === 'Lost'
+                      ? `−${item.amount.toLocaleString()} coins`
+                      : `${item.amount.toLocaleString()} coins refunded to your balance`}
                 </p>
               </li>
             );
@@ -854,7 +892,7 @@ export default function SportsBettingPage() {
   const [balance, setBalance] = useState<number | null>(null);
   const [slipMessage, setSlipMessage] = useState<SlipMessage>(null);
   const [view, setView] = useState<'games' | 'bets'>('games');
-  const [myBets, setMyBets] = useState<MyBets | null>(null);
+  const [myBets, setMyBets] = useState<BetsData | null>(null);
   const [betsError, setBetsError] = useState('');
 
   const loadEvents = useCallback(async () => {
@@ -881,7 +919,7 @@ export default function SportsBettingPage() {
       const res = await fetch('/api/sports/wagers', { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load your bets.');
-      setMyBets(data as MyBets);
+      setMyBets(data as BetsData);
       setBetsError('');
     } catch (error) {
       setBetsError(error instanceof Error ? error.message : 'Could not load your bets.');
@@ -890,14 +928,15 @@ export default function SportsBettingPage() {
 
   const dismissResults = useCallback(() => {
     const ids = myBets?.unseen.map((bet) => bet.id) ?? [];
-    setMyBets((current) => (current ? { ...current, unseen: [] } : current));
+    const showdownEntryIds = myBets?.showdowns.unseen.map((entry) => entry.entryId) ?? [];
+    setMyBets((current) => (current ? { ...current, unseen: [], showdowns: { ...current.showdowns, unseen: [] } } : current));
     // Winnings were credited when the wager settled; make sure the nav bar shows them.
     notifyBalanceChanged();
-    if (token && ids.length > 0) {
+    if (token && ids.length + showdownEntryIds.length > 0) {
       fetch('/api/sports/wagers/seen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ids }),
+        body: JSON.stringify({ ids, showdownEntryIds }),
       }).catch(() => {
         // If this fails the pop-up shows again next visit, which is harmless.
       });
@@ -942,6 +981,7 @@ export default function SportsBettingPage() {
   );
 
   const openGames = (listing?.events ?? []).filter((e) => e.status === 'Upcoming').length;
+  const openCount = myBets ? myBets.open.length + myBets.showdowns.open.length : 0;
 
   const days = useMemo(() => {
     const events = (listing?.events ?? []).filter(
@@ -977,7 +1017,7 @@ export default function SportsBettingPage() {
             {token ? (
               <div className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-3 py-2 sm:px-4">
                 <dt className="text-xs text-slate-400">Your bets</dt>
-                <dd className="text-lg font-semibold tabular-nums">{myBets ? myBets.open.length : '…'}</dd>
+                <dd className="text-lg font-semibold tabular-nums">{myBets ? myBets.open.length + myBets.showdowns.open.length : '…'}</dd>
               </div>
             ) : null}
           </dl>
@@ -988,7 +1028,7 @@ export default function SportsBettingPage() {
             {(
               [
                 ['games', 'Games'],
-                ['bets', `My bets${myBets && myBets.open.length > 0 ? ` (${myBets.open.length})` : ''}`],
+                ['bets', `My bets${openCount > 0 ? ` (${openCount})` : ''}`],
               ] as const
             ).map(([key, label]) => (
               <button
@@ -1008,6 +1048,22 @@ export default function SportsBettingPage() {
               </button>
             ))}
           </div>
+        ) : null}
+
+        {view === 'games' ? (
+          <Link
+            href="/sports/showdown"
+            className="group mt-6 flex items-center justify-between gap-4 rounded-3xl border border-amber-400/40 bg-gradient-to-r from-amber-500/20 via-slate-900 to-slate-900 px-5 py-4 transition hover:border-amber-300"
+          >
+            <span>
+              <span className="block text-xs uppercase tracking-[0.25em] text-amber-300">New</span>
+              <span className="block text-xl font-black uppercase italic tracking-tight sm:text-2xl">The Showdown</span>
+              <span className="block text-sm text-slate-300">One featured game per sport. Pick a side, winners split the pool.</span>
+            </span>
+            <span className="text-2xl text-amber-300 transition group-hover:translate-x-1" aria-hidden="true">
+              →
+            </span>
+          </Link>
         ) : null}
 
         {view === 'bets' ? (
@@ -1123,7 +1179,11 @@ export default function SportsBettingPage() {
         </div>
       </div>
 
-      {myBets && myBets.unseen.length > 0 ? <ResultsModal bets={myBets.unseen} onClose={dismissResults} /> : null}
+      <LogoNotice />
+
+      {myBets && myBets.unseen.length + myBets.showdowns.unseen.length > 0 ? (
+        <ResultsModal items={[...myBets.showdowns.unseen.map(fromShowdown), ...myBets.unseen.map(fromWager)]} onClose={dismissResults} />
+      ) : null}
     </main>
   );
 }

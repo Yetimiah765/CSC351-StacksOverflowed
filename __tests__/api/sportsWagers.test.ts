@@ -29,12 +29,20 @@ const wagers = {
   result: { data: [] as unknown, error: null as { message: string } | null },
 };
 
+// The player's Showdown entries (none in these tests).
+const showdownEntries = {
+  select: vi.fn(() => showdownEntries),
+  eq: vi.fn(() => showdownEntries),
+  order: vi.fn(() => showdownEntries),
+  limit: vi.fn(() => Promise.resolve({ data: [], error: null })),
+};
+
 // fn_place_wager's reply; each test sets it.
 const rpc = vi.fn();
 
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(() => ({
-    from: vi.fn((table: string) => (table === 'wagers' ? wagers : sessions)),
+    from: vi.fn((table: string) => (table === 'wagers' ? wagers : table === 'public_bet_entries' ? showdownEntries : sessions)),
     rpc,
   })),
 }));
@@ -321,6 +329,7 @@ describe('GET /api/sports/wagers', () => {
     expect(wagers.eq).toHaveBeenCalledWith('player_id', 7);
     expect(body.open).toHaveLength(1);
     expect(body.settled).toEqual([]);
+    expect(body.showdowns).toEqual({ open: [], settled: [], unseen: [] });
   });
 
   it('returns 500 when the query fails', async () => {

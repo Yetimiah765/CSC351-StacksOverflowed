@@ -1398,6 +1398,18 @@ flowchart LR
 
 *Traces to: UR-122*
 
+**SRS-122.3, JO, Limited-time availability.** The system shall display a limited-time blind box, such as a holiday box, and allow it to be purchased only between its start time and end time.
+
+*Traces to: UR-122, UR-124*
+
+**SRS-122.4, JO, Expired limited-time purchase.** The system shall reject a purchase of a limited-time blind box made after its end time, without deducting currency, even if the box was displayed to the player before it ended.
+
+*Traces to: UR-122, UR-124*
+
+**SRS-122.5, JO, Limited-time cosmetics retained.** Cosmetics obtained from a limited-time blind box shall remain in the player's cosmetic collection after the box's end time.
+
+*Traces to: UR-119, UR-122*
+
 ### UR-123, JO – View Reward Probabilities
 
 *User story: As a player, I want to see the probability of receiving each cosmetic from a purchasable blind box, so that I understand the possible outcomes before spending my virtual currency.*
@@ -1414,7 +1426,7 @@ flowchart LR
 
 *Traces to: UR-123*
 
-**SRS-123.4, JO, No custom-weight cosmetic boxes.** The system shall not use event boxes or other purchasable cosmetic blind boxes with individually assigned reward weights.
+**SRS-123.4, JO, No custom-weight cosmetic boxes.** The system shall not assign individual reward weights to any purchasable cosmetic blind box, including limited-time boxes; every purchasable blind box shall use the equal probabilities in SRS-123.1.
 
 *Traces to: UR-123*
 

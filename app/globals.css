@@ -26,3 +26,73 @@ body {
     transform: translateY(var(--reel-stop));
   }
 }
+
+/* The Showdown clash (components/sports/ShowdownArena.tsx). The two team
+   logos fly in and collide (clash-in-*, clash-flash, clash-ring, clash-spark,
+   clash-shake, clash-pop), the loser is knocked back once settled
+   (clash-knockout-*), and a winning player gets confetti (clash-confetti).
+   Sparks and confetti read their direction from CSS variables. */
+/* The logos start off the arena's edge and speed up into the collision
+   (62% of 900ms = the 560ms impact), then bounce back and settle. */
+@keyframes clash-in-left {
+  0% { transform: translateX(-340%) scale(0.85); opacity: 0.2; animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.5); }
+  62% { transform: translateX(12%) scale(1.08); opacity: 1; animation-timing-function: ease-out; }
+  80% { transform: translateX(-4%) scale(0.98); }
+  100% { transform: none; }
+}
+@keyframes clash-in-right {
+  0% { transform: translateX(340%) scale(0.85); opacity: 0.2; animation-timing-function: cubic-bezier(0.55, 0, 0.9, 0.5); }
+  62% { transform: translateX(-12%) scale(1.08); opacity: 1; animation-timing-function: ease-out; }
+  80% { transform: translateX(4%) scale(0.98); }
+  100% { transform: none; }
+}
+@keyframes clash-flash {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(2.6); }
+}
+/* The ring and sparks start invisible, so nothing shows before the impact. */
+@keyframes clash-ring {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.2); }
+  10% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(3.2); }
+}
+@keyframes clash-spark {
+  0% { opacity: 0; transform: rotate(var(--spark-angle)) translateX(0) scaleX(1); }
+  10% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--spark-angle)) translateX(var(--spark-reach)) scaleX(0.3); }
+}
+@keyframes clash-shake {
+  0%, 100% { transform: none; }
+  20% { transform: translate(-5px, 2px); }
+  40% { transform: translate(5px, -2px); }
+  60% { transform: translate(-3px, 1px); }
+  80% { transform: translate(2px, -1px); }
+}
+@keyframes clash-pop {
+  0% { opacity: 0; transform: translateX(-50%) scale(0) rotate(-20deg); }
+  70% { opacity: 1; transform: translateX(-50%) scale(1.3) rotate(4deg); }
+  100% { opacity: 1; transform: translateX(-50%) scale(1) rotate(-6deg); }
+}
+@keyframes clash-knockout-left {
+  to { transform: translate(-45%, 12%) rotate(-28deg) scale(0.85); opacity: 0.35; }
+}
+@keyframes clash-knockout-right {
+  to { transform: translate(45%, 12%) rotate(28deg) scale(0.85); opacity: 0.35; }
+}
+@keyframes clash-confetti {
+  0% { opacity: 1; transform: translate(0, -20px) rotate(0deg); }
+  100% { opacity: 0; transform: translate(var(--confetti-drift), 260px) rotate(var(--confetti-spin)); }
+}
+
+/* Players who turn animations off in their system settings get the same
+   layout without the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .clash-anim {
+    animation: none !important;
+    transition: none !important;
+  }
+  .clash-fx {
+    display: none !important;
+  }
+}

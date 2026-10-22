@@ -3,6 +3,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../../lib/auth';
 import { MIN_WAGER, checkWagerAmount } from '../../../../lib/sports/wagers';
 import { fetchMyBets } from '../../../../lib/sports/myBets';
+import { fetchMyShowdowns } from '../../../../lib/sports/showdown';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -27,7 +28,8 @@ async function requirePlayerId(request: Request, supabase: SupabaseClient) {
 
 // SRS-207.1, SRS-208.1, SRS-208.2, SRS-211.1: the player's own wagers, split
 // into open (Pending) bets and settled (Decided) history, each with its
-// game's status and score.
+// game's status and score, plus their Showdown entries the same way
+// (`showdowns`).
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -36,7 +38,8 @@ export async function GET(request: Request) {
   if (errorResponse) return errorResponse;
 
   try {
-    return Response.json(await fetchMyBets(supabase, playerId!), { status: 200 });
+    const [bets, showdowns] = await Promise.all([fetchMyBets(supabase, playerId!), fetchMyShowdowns(supabase, playerId!)]);
+    return Response.json({ ...bets, showdowns }, { status: 200 });
   } catch (error: unknown) {
     console.error('Loading wagers failed:', error instanceof Error ? error.message : error);
     return Response.json({ error: 'Could not load your bets. Please try again.' }, { status: 500 });

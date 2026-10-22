@@ -42,8 +42,16 @@ const wagers = {
   }),
 };
 
+const tablesUpdated: string[] = [];
+
 vi.mock('../../lib/supabase', () => ({
-  getSupabaseClient: vi.fn(() => ({ from: vi.fn((table: string) => (table === 'wagers' ? wagers : sessions)) })),
+  getSupabaseClient: vi.fn(() => ({
+    from: vi.fn((table: string) => {
+      if (table === 'player_sessions') return sessions;
+      tablesUpdated.push(table);
+      return wagers;
+    }),
+  })),
 }));
 
 import { POST } from '../../app/api/sports/wagers/seen/route';
@@ -61,6 +69,7 @@ function markSeen(body: unknown, token: string | null = 'good-token') {
 describe('POST /api/sports/wagers/seen', () => {
   beforeEach(() => {
     wagers.calls = [];
+    tablesUpdated.length = 0;
   });
 
   it('requires a logged-in player', async () => {
@@ -73,6 +82,23 @@ describe('POST /api/sports/wagers/seen', () => {
       expect((await markSeen(body)).status).toBe(400);
     }
     expect(wagers.calls).toEqual([]);
+  });
+
+  it("marks the player's own settled Showdown entries as seen too", async () => {
+    const response = await markSeen({ showdownEntryIds: [4] });
+
+    expect(response.status).toBe(200);
+    expect(tablesUpdated).toEqual(['public_bet_entries']);
+    expect(wagers.calls.slice(1)).toEqual([
+      ['eq', 'player_id', 7],
+      ['in', 'entry_id', [4]],
+      ['not', 'payout', 'is', null],
+      ['is', 'result_seen_at', null],
+    ]);
+  });
+
+  it('rejects a malformed Showdown id list', async () => {
+    expect((await markSeen({ ids: [1], showdownEntryIds: ['x'] })).status).toBe(400);
   });
 
   it("marks only the player's own settled, unseen wagers as seen", async () => {

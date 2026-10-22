@@ -112,6 +112,11 @@ export default function CosmeticsSection({
                         <p className="mt-1 truncate text-center text-xs text-slate-300" title={cosmetic.name}>
                           {cosmetic.name}
                         </p>
+                        {cosmetic.isHolographic ? (
+                          <p className="bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text text-center text-[11px] font-semibold text-transparent">
+                            Holographic
+                          </p>
+                        ) : null}
                         {isEquipped ? <p className="text-center text-[11px] font-semibold text-emerald-300">Equipped</p> : null}
                       </li>
                     );

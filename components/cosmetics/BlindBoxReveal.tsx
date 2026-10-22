@@ -6,7 +6,7 @@ import type { Cosmetic } from '../../lib/cosmetics';
 import CosmeticArt from './CosmeticArt';
 
 export interface BoxResult {
-  cosmetic: Pick<Cosmetic, 'cosmeticId' | 'name' | 'category' | 'artKey'>;
+  cosmetic: Pick<Cosmetic, 'cosmeticId' | 'name' | 'category' | 'artKey' | 'isHolographic'>;
   wasDuplicate: boolean;
   refund: number;
 }
@@ -22,6 +22,8 @@ const RESULT_DELAY_MS = 250;
 // leaving mid-spin loses nothing, and nothing replays later (SRS-127.5).
 // onStopped runs once when the reel stops; the shop refreshes the nav bar's
 // balance then, so a duplicate refund doesn't give the result away early.
+// A holographic win gets a rainbow frame and its own line (SRS-127.6), shown
+// only once the reel has stopped so it doesn't give the result away either.
 export default function BlindBoxReveal({
   boxName,
   rewards,
@@ -70,6 +72,7 @@ export default function BlindBoxReveal({
   }, [done, onClose]);
 
   const strip = Array.from({ length: (CYCLES + 1) * rewards.length }, (_, i) => rewards[i % rewards.length]);
+  const holographic = done && result.cosmetic.isHolographic;
   const wonIndex = Math.max(0, rewards.findIndex((reward) => reward.cosmeticId === result.cosmetic.cosmeticId));
   const stopIndex = CYCLES * rewards.length + wonIndex;
 
@@ -80,7 +83,11 @@ export default function BlindBoxReveal({
       aria-label={`${boxName} reveal`}
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/90 px-6 backdrop-blur-md"
     >
-      <div className="w-full max-w-sm rounded-3xl border border-amber-400/60 bg-slate-900 p-6 text-center shadow-2xl shadow-black/50">
+      <div
+        className={`w-full max-w-sm rounded-3xl border bg-slate-900 p-6 text-center shadow-2xl ${
+          holographic ? 'border-fuchsia-300 shadow-[0_0_40px_rgba(244,114,182,0.45)]' : 'border-amber-400/60 shadow-black/50'
+        }`}
+      >
         <p className="text-xs uppercase tracking-[0.25em] text-amber-300">{boxName}</p>
 
         <div className="relative mx-auto mt-5 h-36 w-36 overflow-hidden rounded-2xl border border-slate-700 bg-slate-950">
@@ -108,6 +115,11 @@ export default function BlindBoxReveal({
         <div aria-live="polite" className="mt-5 flex min-h-[5.5rem] flex-col items-center justify-center">
           {done ? (
             <div className="animate-box-reveal">
+              {holographic ? (
+                <p className="bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text text-sm font-bold uppercase tracking-[0.3em] text-transparent">
+                  Holographic!
+                </p>
+              ) : null}
               <p className="text-2xl font-bold text-slate-100">{result.cosmetic.name}</p>
               {result.wasDuplicate ? (
                 <>

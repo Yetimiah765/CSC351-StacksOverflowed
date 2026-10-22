@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { notifyBalanceChanged } from '../lib/balanceEvents';
-import { rewardChance, type Cosmetic } from '../lib/cosmetics';
+import type { Cosmetic } from '../lib/cosmetics';
 import BlindBoxReveal, { type BoxResult } from './cosmetics/BlindBoxReveal';
 import CosmeticArt from './cosmetics/CosmeticArt';
 
@@ -15,8 +15,12 @@ interface ShopBox {
   duplicateRefund: number;
   limited: boolean;
   availableUntil: string | null;
+  // SRS-123.9: each regular item's chance and each holographic item's.
+  chances: { regular: string | null; holographic: string | null };
   rewards: (Cosmetic & { owned: boolean })[];
 }
+
+const KIND: Record<Cosmetic['category'], string> = { Card: 'Card back', Chip: 'Chip', 'Profile Outline': 'Outline' };
 
 const LOAD_FAILED = 'Could not load the blind boxes. Please refresh the page.';
 const BUY_FAILED = 'Could not buy the box. You were not charged. Please try again.';
@@ -124,8 +128,8 @@ export default function BlindBoxShop() {
       <div>
         <h2 id="blind-boxes-title" className="text-xl font-semibold">Blind boxes</h2>
         <p className="mt-1 text-sm text-slate-400">
-          Each box gives you one cosmetic at random, and every item in a box is equally likely. If you already own the
-          one you get, half the price comes back as coins.
+          Each box gives you one cosmetic at random. Every regular item in a box is equally likely, and each box also
+          has a rare holographic card and chip. If you already own the one you get, half the price comes back as coins.
         </p>
       </div>
 
@@ -153,14 +157,27 @@ export default function BlindBoxShop() {
             </div>
 
             <p className="mt-2 text-xs text-slate-400">
-              {box.rewards.length} items · each 1 in {box.rewards.length} ({rewardChance(box.rewards.length)}) · a duplicate refunds{' '}
-              {box.duplicateRefund.toLocaleString('en-US')} coins
+              {box.rewards.filter((reward) => !reward.isHolographic).length} items · {box.chances.regular} each
+              {box.chances.holographic ? (
+                <>
+                  {' · '}
+                  <span className="bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text font-semibold text-transparent">
+                    holographic
+                  </span>{' '}
+                  {box.chances.holographic} each
+                </>
+              ) : null}{' '}
+              · a duplicate refunds {box.duplicateRefund.toLocaleString('en-US')} coins
             </p>
 
             <ul className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(96px,1fr))] gap-3">
               {box.rewards.map((reward) => (
                 <li key={reward.cosmeticId} className="min-w-0">
-                  <div className="relative flex h-28 items-center justify-center rounded-xl border border-slate-800 bg-slate-950 p-2">
+                  <div
+                    className={`relative flex h-28 items-center justify-center rounded-xl border bg-slate-950 p-2 ${
+                      reward.isHolographic ? 'border-fuchsia-300/70 shadow-[0_0_14px_rgba(244,114,182,0.35)]' : 'border-slate-800'
+                    }`}
+                  >
                     <CosmeticArt artKey={reward.artKey} category={reward.category} />
                     {reward.owned ? (
                       <span className="absolute right-1.5 top-1.5 rounded-full bg-emerald-400 px-1.5 text-[10px] font-bold text-slate-950">
@@ -171,7 +188,15 @@ export default function BlindBoxShop() {
                   <p className="mt-1 truncate text-xs font-semibold text-slate-200" title={reward.name}>
                     {reward.name}
                   </p>
-                  <p className="text-[11px] text-slate-500">{reward.category === 'Profile Outline' ? 'Outline' : reward.category === 'Card' ? 'Card back' : 'Chip'}</p>
+                  {/* SRS-123.9: each item's chance. */}
+                  <p className="text-[11px] text-slate-500">
+                    {reward.isHolographic ? (
+                      <span className="bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text font-semibold text-transparent">Holographic</span>
+                    ) : (
+                      KIND[reward.category]
+                    )}{' '}
+                    · {(reward.isHolographic ? box.chances.holographic : box.chances.regular) ?? ''}
+                  </p>
                 </li>
               ))}
             </ul>

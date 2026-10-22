@@ -9,6 +9,7 @@ import ProfileField from '../../components/profile/ProfileField';
 import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
+import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
 
 interface Profile {
   playerId: number;
@@ -40,6 +41,10 @@ export default function ProfilePage() {
   const [error, setError] = useState('');
 
   const [editing, setEditing] = useState<Editing | null>(null);
+  // The player's cosmetics (UR-119, UR-120), loaded after the profile.
+  const [cosmetics, setCosmetics] = useState<{ owned: Cosmetic[]; equipped: Partial<Record<CosmeticCategory, number>> } | null>(null);
+  const [cosmeticsError, setCosmeticsError] = useState('');
+
   // A one-line confirmation, e.g. after a password change, which otherwise
   // shows nothing new on the page.
   const [notice, setNotice] = useState('');
@@ -76,6 +81,40 @@ export default function ProfilePage() {
       return;
     }
     setProfile(data.profile);
+    fetchCosmetics(playerToken);
+  }
+
+  async function fetchCosmetics(playerToken: string) {
+    try {
+      const res = await fetch('/api/cosmetics', { headers: { Authorization: `Bearer ${playerToken}` } });
+      const data = await res.json();
+      if (!res.ok) {
+        setCosmeticsError(data.error || 'Could not load your cosmetics.');
+        return;
+      }
+      setCosmetics(data);
+    } catch {
+      setCosmeticsError('Could not load your cosmetics.');
+    }
+  }
+
+  // SRS-120.4 / SRS-120.5: equips one of the player's cosmetics. Returns an
+  // error message, or null once equipped.
+  async function equipCosmetic(cosmetic: Cosmetic): Promise<string | null> {
+    if (!token) return 'You are not logged in.';
+    try {
+      const res = await fetch('/api/cosmetics/equip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ cosmeticId: cosmetic.cosmeticId }),
+      });
+      const data = await res.json();
+      if (!res.ok) return data.error || 'Could not equip that cosmetic.';
+      setCosmetics((previous) => (previous ? { ...previous, equipped: { ...previous.equipped, [data.category]: data.cosmeticId } } : previous));
+      return null;
+    } catch {
+      return 'Could not equip that cosmetic. Please try again.';
+    }
   }
 
   // Saves one field from its pop-up. Returns an error message for the pop-up
@@ -170,10 +209,13 @@ export default function ProfilePage() {
             <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
               <div className="flex flex-col gap-8 sm:flex-row">
                 {/* Photo, with Log out underneath */}
-                <div className="flex flex-col items-center gap-3 sm:w-40 sm:shrink-0">
+                <div className="flex flex-col items-center gap-3 sm:w-44 sm:shrink-0">
                   <ProfilePhoto
                     photoUrl={profile.profilePhotoDataUrl}
                     token={token}
+                    outlineArtKey={
+                      cosmetics?.owned.find((c) => c.cosmeticId === cosmetics.equipped['Profile Outline'])?.artKey ?? null
+                    }
                     onChange={(photoUrl) =>
                       setProfile((previous) => (previous ? { ...previous, profilePhotoDataUrl: photoUrl } : previous))
                     }
@@ -203,7 +245,12 @@ export default function ProfilePage() {
               </div>
             </section>
 
-            <CosmeticsSection />
+            <CosmeticsSection
+              owned={cosmetics?.owned ?? null}
+              equipped={cosmetics?.equipped ?? {}}
+              loadError={cosmeticsError}
+              onEquip={equipCosmetic}
+            />
             <StatsSection />
           </>
         ) : (

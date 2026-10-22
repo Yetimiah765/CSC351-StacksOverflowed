@@ -31,6 +31,9 @@ export function hashSessionToken(token: string): string {
 // hyphens, matching chk_players_first_name / chk_players_last_name.
 const NAME_PATTERN = /^[A-Za-z][A-Za-z' -]*$/;
 
+// players.first_name / last_name are VARCHAR(50).
+export const NAME_MAX_LENGTH = 50;
+
 // SRS-101.3 / SRS-101.4: usernames are 6-10 characters, letters and numbers
 // only, matching the CHECK on usernames.username.
 const USERNAME_PATTERN = /^[A-Za-z0-9]{6,10}$/;
@@ -38,6 +41,11 @@ const USERNAME_PATTERN = /^[A-Za-z0-9]{6,10}$/;
 // SRS-101.7: passwords are at least 8 characters, letters and numbers only,
 // with at least one of each.
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,}$/;
+
+// Shown when a password breaks PASSWORD_PATTERN, at registration and when
+// changing it (SRS-113.3), so both always state the same rules.
+export const PASSWORD_RULES_MESSAGE =
+  'Passwords must be at least 8 characters, contain only letters and numbers, and include at least one letter and one number.';
 
 export function isValidName(value: string): boolean {
   return NAME_PATTERN.test(value);

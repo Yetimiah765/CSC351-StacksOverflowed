@@ -31,9 +31,12 @@ const tables = {
   usernames: makeTableMock(),
 };
 
+const rpc = vi.fn();
+
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(() => ({
     from: vi.fn((table: keyof typeof tables) => tables[table]),
+    rpc,
   })),
 }));
 
@@ -73,6 +76,7 @@ describe('Profile API routes', () => {
     resetTable(tables.player_sessions);
     resetTable(tables.players);
     resetTable(tables.usernames);
+    rpc.mockReset();
 
     // A session row present means the bearer token resolves to player_id 1.
     tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
@@ -140,15 +144,131 @@ describe('Profile API routes', () => {
     expect(tables.players.update).toHaveBeenCalledWith({ bio: null });
   });
 
-  it('PATCH returns 400 when bio is absent', async () => {
+  it('PATCH returns 400 when there is nothing to update', async () => {
     const response = await PATCH(req('PATCH', {}));
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Nothing to update.' });
   });
 
   it('PATCH returns 400 when bio exceeds 50 words (SRS-114.1)', async () => {
     const longBio = Array.from({ length: 51 }, (_, i) => `word${i}`).join(' ');
     const response = await PATCH(req('PATCH', { bio: longBio }));
     expect(response.status).toBe(400);
+  });
+
+  it('PATCH updates the first name, trimmed, and returns the refreshed profile (SRS-112.1)', async () => {
+    tables.players.maybeSingleResult = { data: { ...playerRow, first_name: 'Jamie' }, error: null };
+
+    const response = await PATCH(req('PATCH', { firstName: '  Jamie ' }));
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ first_name: 'Jamie' });
+    expect((await response.json()).profile.firstName).toBe('Jamie');
+  });
+
+  it("PATCH accepts a last name with spaces, apostrophes, and hyphens (SRS-112.3)", async () => {
+    const response = await PATCH(req('PATCH', { lastName: "O'Neil-De La Cruz" }));
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ last_name: "O'Neil-De La Cruz" });
+  });
+
+  it.each([
+    ['a number', { firstName: 'Jam3s' }],
+    ['a special character', { lastName: 'Ortiz!' }],
+    ['a leading apostrophe', { firstName: "'James" }],
+  ])('PATCH rejects a name with %s, like registration does (SRS-112.3)', async (_, body) => {
+    const response = await PATCH(req('PATCH', body));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH rejects an empty name (SRS-112.3)', async () => {
+    const response = await PATCH(req('PATCH', { lastName: '   ' }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Last name is required.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH rejects a name longer than 50 characters', async () => {
+    const response = await PATCH(req('PATCH', { firstName: 'A'.repeat(51) }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'First name must be 50 characters or fewer.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('PATCH never changes the password (SRS-112.2)', async () => {
+    const onlyPassword = await PATCH(req('PATCH', { password: 'newPass123' }));
+    expect(onlyPassword.status).toBe(400);
+    expect(tables.players.update).not.toHaveBeenCalled();
+
+    await PATCH(req('PATCH', { bio: 'Hi', password: 'newPass123', password_hash: 'x' }));
+    expect(tables.players.update).toHaveBeenCalledWith({ bio: 'Hi' });
+  });
+
+  describe('PATCH username', () => {
+    it('changes it through fn_change_username without asking for a password (SRS-112.4, SRS-112.5)', async () => {
+      rpc.mockResolvedValue({ data: { status: 'changed', username: 'newname1' }, error: null });
+      tables.usernames.maybeSingleResult = { data: { username: 'newname1' }, error: null };
+
+      const response = await PATCH(req('PATCH', { username: ' newname1 ' }));
+
+      expect(response.status).toBe(200);
+      expect(rpc).toHaveBeenCalledWith('fn_change_username', { p_player_id: 1, p_username: 'newname1' });
+      expect(tables.players.update).not.toHaveBeenCalled();
+      expect((await response.json()).profile.username).toBe('newname1');
+    });
+
+    it.each(['short', 'toolongname1', 'has_under'])(
+      'rejects %s with the registration rules before calling the database (SRS-112.4)',
+      async (username) => {
+        const response = await PATCH(req('PATCH', { username }));
+
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({
+          error: 'Usernames must be 6-10 characters long and contain only letters and numbers.',
+        });
+        expect(rpc).not.toHaveBeenCalled();
+      }
+    );
+
+    it('reports a name that is taken or reserved (SRS-112.4, SRS-112.7)', async () => {
+      rpc.mockResolvedValue({ data: { status: 'taken' }, error: null });
+
+      const response = await PATCH(req('PATCH', { username: 'someone1' }));
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: 'That username is already taken or reserved.' });
+    });
+
+    it('says when the next change is allowed during the 24-hour limit (SRS-112.6)', async () => {
+      const nextChangeAt = new Date(Date.now() + 4.5 * 60 * 60 * 1000).toISOString();
+      rpc.mockResolvedValue({ data: { status: 'cooldown', next_change_at: nextChangeAt }, error: null });
+
+      const response = await PATCH(req('PATCH', { username: 'newname2' }));
+
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({
+        error: 'You can change your username once every 24 hours. Try again in 5 hours.',
+        nextChangeAt,
+      });
+    });
+
+    it('returns 403 for an account pending deletion', async () => {
+      rpc.mockResolvedValue({ data: { status: 'not_active' }, error: null });
+      const response = await PATCH(req('PATCH', { username: 'newname3' }));
+      expect(response.status).toBe(403);
+    });
+
+    it('returns 500 when the database call fails, e.g. before the migration is run', async () => {
+      rpc.mockResolvedValue({ data: null, error: { message: 'function fn_change_username does not exist' } });
+      const response = await PATCH(req('PATCH', { username: 'newname4' }));
+      expect(response.status).toBe(500);
+    });
   });
 
   it('PATCH returns 401 without a token', async () => {

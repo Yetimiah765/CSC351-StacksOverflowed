@@ -1,5 +1,12 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
-import { hashPassword, isAtLeast21, isValidName, isValidPassword, isValidUsername } from '../../../../lib/auth';
+import {
+  hashPassword,
+  isAtLeast21,
+  isValidName,
+  isValidPassword,
+  isValidUsername,
+  PASSWORD_RULES_MESSAGE,
+} from '../../../../lib/auth';
 
 interface RegisterBody {
   firstName?: string;
@@ -38,13 +45,7 @@ export async function POST(request: Request) {
     }
 
     if (!isValidPassword(password)) {
-      return Response.json(
-        {
-          error:
-            'Passwords must be at least 8 characters, contain only letters and numbers, and include at least one letter and one number.',
-        },
-        { status: 400 }
-      );
+      return Response.json({ error: PASSWORD_RULES_MESSAGE }, { status: 400 });
     }
 
     if (!isAtLeast21(birthday)) {
@@ -55,6 +56,16 @@ export async function POST(request: Request) {
     if (!supabase) {
       return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
     }
+
+    // SRS-112.8: a previous username whose 24-hour reservation has run out
+    // is free again, so delete that reservation before checking the name. If
+    // this fails, the name just stays blocked a little longer, which is safe.
+    await supabase
+      .from('usernames')
+      .delete()
+      .ilike('username', username)
+      .eq('is_current', false)
+      .lte('reserved_until', new Date().toISOString());
 
     // SRS-101.5 / SRS-101.6: usernames are unique and reserved
     // case-insensitively, so check before creating a player row.

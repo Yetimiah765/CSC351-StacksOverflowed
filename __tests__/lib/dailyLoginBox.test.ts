@@ -7,8 +7,8 @@ import {
 } from '../../lib/dailyLoginBox';
 
 describe('Daily Login Box rules', () => {
-  it('offers exactly 25, 50, 75, and 100 coins (SRS-128.5)', () => {
-    expect(DAILY_LOGIN_BOX_REWARDS.map((reward) => reward.amount)).toEqual([25, 50, 75, 100]);
+  it('offers exactly 250, 500, 750, and 1,000 coins (SRS-128.5)', () => {
+    expect(DAILY_LOGIN_BOX_REWARDS.map((reward) => reward.amount)).toEqual([250, 500, 750, 1000]);
   });
 
   it('has percentages that add up to 100', () => {
@@ -16,14 +16,14 @@ describe('Daily Login Box rules', () => {
   });
 
   it('maps rolls to rewards at the right boundaries', () => {
-    expect(pickDailyLoginBoxReward(0)).toBe(25);
-    expect(pickDailyLoginBoxReward(39)).toBe(25);
-    expect(pickDailyLoginBoxReward(40)).toBe(50);
-    expect(pickDailyLoginBoxReward(69)).toBe(50);
-    expect(pickDailyLoginBoxReward(70)).toBe(75);
-    expect(pickDailyLoginBoxReward(89)).toBe(75);
-    expect(pickDailyLoginBoxReward(90)).toBe(100);
-    expect(pickDailyLoginBoxReward(99)).toBe(100);
+    expect(pickDailyLoginBoxReward(0)).toBe(250);
+    expect(pickDailyLoginBoxReward(39)).toBe(250);
+    expect(pickDailyLoginBoxReward(40)).toBe(500);
+    expect(pickDailyLoginBoxReward(69)).toBe(500);
+    expect(pickDailyLoginBoxReward(70)).toBe(750);
+    expect(pickDailyLoginBoxReward(89)).toBe(750);
+    expect(pickDailyLoginBoxReward(90)).toBe(1000);
+    expect(pickDailyLoginBoxReward(99)).toBe(1000);
   });
 
   it('gives each reward exactly its share of the 100 possible rolls (SRS-128.6)', () => {
@@ -32,7 +32,7 @@ describe('Daily Login Box rules', () => {
       const reward = pickDailyLoginBoxReward(roll);
       counts[reward] = (counts[reward] ?? 0) + 1;
     }
-    expect(counts).toEqual({ 25: 40, 50: 30, 75: 20, 100: 10 });
+    expect(counts).toEqual({ 250: 40, 500: 30, 750: 20, 1000: 10 });
   });
 
   it('rejects rolls outside 0-99', () => {

@@ -58,6 +58,7 @@ DROP TABLE IF EXISTS games                     CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_seats_rules()          CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_tables_seat_capacity() CASCADE;
 DROP FUNCTION IF EXISTS fn_open_daily_login_box(INTEGER, INTEGER) CASCADE;
+DROP FUNCTION IF EXISTS fn_change_username(INTEGER, VARCHAR) CASCADE;
 DROP FUNCTION IF EXISTS fn_spin_roulette(INTEGER, JSONB, INTEGER) CASCADE;
 
 
@@ -78,7 +79,7 @@ CREATE TABLE games (
 
 -- Table: players
 -- Reviewed by: JO (James Ortiz)
--- Supports: SRS-101.1, SRS-101.2, SRS-101.3, SRS-101.10, SRS-102.1, SRS-102.2, SRS-102.3, SRS-103.2, SRS-104.5, SRS-104.6, SRS-106.3, SRS-106.6, SRS-106.7, SRS-106.8, SRS-109.1, SRS-109.2, SRS-109.3, SRS-110.1, SRS-110.5, SRS-112.1, SRS-112.3, SRS-114.1, SRS-114.2, SRS-114.4, SRS-114.5, SRS-115.1, SRS-115.2, SRS-115.3, SRS-115.4, SRS-115.6, SRS-8.1, SRS-8.2, SRS-8.3, SRS-121.4, SRS-121.5, SRS-NFR-101, SRS-NFR-102
+-- Supports: SRS-101.1, SRS-101.2, SRS-101.3, SRS-101.10, SRS-102.1, SRS-102.2, SRS-102.3, SRS-103.2, SRS-104.5, SRS-104.6, SRS-106.3, SRS-106.6, SRS-106.7, SRS-106.8, SRS-109.1, SRS-109.2, SRS-109.3, SRS-110.1, SRS-110.5, SRS-112.1, SRS-112.3, SRS-112.6, SRS-114.1, SRS-114.2, SRS-114.4, SRS-114.5, SRS-115.1, SRS-115.2, SRS-115.3, SRS-115.4, SRS-115.6, SRS-8.1, SRS-8.2, SRS-8.3, SRS-121.4, SRS-121.5, SRS-NFR-101, SRS-NFR-102
 -- Purpose: Stores each registered player's account, authentication hash, virtual-currency balance, and profile details.
 CREATE TABLE players (
     player_id               SERIAL       PRIMARY KEY,
@@ -93,6 +94,9 @@ CREATE TABLE players (
     account_status          VARCHAR(20)  NOT NULL DEFAULT 'Active'
                             CHECK (account_status IN ('Active', 'Pending Deletion')),
     created_at              TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- SRS-112.6: when the player last changed their username (NULL until
+    -- the first change); fn_change_username allows one change per 24 hours.
+    username_changed_at     TIMESTAMPTZ,
 
     -- SRS-101.2 / SRS-101.3: letters, spaces, apostrophes, hyphens only.
     CONSTRAINT chk_players_first_name
@@ -144,8 +148,8 @@ CREATE TABLE usernames (
 -- SRS-101.6 / SRS-101.7 / SRS-112.7: a username, ignoring case, can belong to
 -- only one row, whether it is in use or reserved. Deleting a reserved row
 -- (when reserved_until passes, SRS-112.8) or deleting the account
--- (SRS-106.5) releases it. A reserved row created within the last 24 hours
--- also tells the application a change was made in that window (SRS-112.6).
+-- (SRS-106.5) releases it. fn_change_username (below) and registration
+-- delete reservations that have run out before checking a name.
 CREATE UNIQUE INDEX uq_usernames_username_ci
     ON usernames (LOWER(username));
 
@@ -153,6 +157,117 @@ CREATE UNIQUE INDEX uq_usernames_username_ci
 CREATE UNIQUE INDEX uq_usernames_one_current_per_player
     ON usernames (player_id)
     WHERE is_current;
+
+-- Changes a player's username as one transaction:
+--   * The player's row is locked first, so two changes by the same player
+--     run one at a time and the second sees the first's cooldown.
+--   * SRS-112.4: same rules as registration: 6-10 letters and numbers, unique
+--     ignoring case among current and reserved usernames.
+--   * SRS-112.5: no password is asked for; the API only needs the session.
+--   * SRS-112.6: at most one change in any 24 hours.
+--   * SRS-112.7: the previous username stays reserved for 24 hours.
+--   * SRS-112.8: reservations that have run out are deleted first, so their
+--     usernames can be taken again.
+-- Changing only the capitals (tester1 -> Tester1) counts as the day's change,
+-- but reserves nothing, since the name is the same ignoring case.
+CREATE OR REPLACE FUNCTION fn_change_username(p_player_id INTEGER, p_username VARCHAR)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_status      VARCHAR(20);
+    v_changed_at  TIMESTAMPTZ;
+    v_current     VARCHAR(10);
+    v_now         TIMESTAMPTZ := CURRENT_TIMESTAMP;
+BEGIN
+    IF p_username IS NULL OR p_username !~ '^[A-Za-z0-9]{6,10}$' THEN
+        RETURN jsonb_build_object('status', 'invalid');
+    END IF;
+
+    SELECT account_status, username_changed_at
+      INTO v_status, v_changed_at
+      FROM players
+     WHERE player_id = p_player_id
+       FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('status', 'not_found');
+    END IF;
+
+    IF v_status <> 'Active' THEN
+        RETURN jsonb_build_object('status', 'not_active');
+    END IF;
+
+    SELECT username
+      INTO v_current
+      FROM usernames
+     WHERE player_id = p_player_id
+       AND is_current;
+
+    IF v_current = p_username THEN
+        RETURN jsonb_build_object('status', 'unchanged');
+    END IF;
+
+    IF v_changed_at > v_now - INTERVAL '24 hours' THEN
+        RETURN jsonb_build_object('status', 'cooldown',
+                                  'next_change_at', v_changed_at + INTERVAL '24 hours');
+    END IF;
+
+    DELETE FROM usernames
+     WHERE NOT is_current
+       AND reserved_until <= v_now;
+
+    IF LOWER(v_current) = LOWER(p_username) THEN
+        UPDATE usernames
+           SET username = p_username
+         WHERE player_id = p_player_id
+           AND is_current;
+    ELSE
+        IF EXISTS (SELECT 1 FROM usernames WHERE LOWER(username) = LOWER(p_username)) THEN
+            RETURN jsonb_build_object('status', 'taken');
+        END IF;
+
+        -- Another player can claim the same name between the check above and
+        -- the insert; uq_usernames_username_ci then stops the second one, and
+        -- this block's changes are undone.
+        BEGIN
+            UPDATE usernames
+               SET is_current = FALSE,
+                   reserved_until = v_now + INTERVAL '24 hours'
+             WHERE player_id = p_player_id
+               AND is_current;
+
+            INSERT INTO usernames (player_id, username, is_current)
+            VALUES (p_player_id, p_username, TRUE);
+        EXCEPTION WHEN unique_violation THEN
+            RETURN jsonb_build_object('status', 'taken');
+        END;
+    END IF;
+
+    UPDATE players
+       SET username_changed_at = v_now
+     WHERE player_id = p_player_id;
+
+    RETURN jsonb_build_object('status', 'changed',
+                              'username', p_username,
+                              'next_change_at', v_now + INTERVAL '24 hours');
+END;
+$$;
+
+-- Only the server may call fn_change_username. Supabase grants EXECUTE on new
+-- functions to its anon and authenticated roles, and the anon key is public
+-- (it ships to browsers for the poker page's Realtime connection), so those
+-- grants are removed and only the service role keeps access. The role check
+-- lets this script still run on plain PostgreSQL, which has no anon role.
+REVOKE EXECUTE ON FUNCTION fn_change_username(INTEGER, VARCHAR) FROM PUBLIC;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_change_username(INTEGER, VARCHAR) FROM anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION fn_change_username(INTEGER, VARCHAR) TO service_role';
+    END IF;
+END;
+$$;
 
 -- Table: player_sessions
 -- Reviewed by: JO (James Ortiz)
@@ -329,11 +444,15 @@ CREATE TABLE daily_login_box_claims (
     claim_id            SERIAL       PRIMARY KEY,
     player_id           INTEGER      NOT NULL
                         REFERENCES players(player_id) ON DELETE CASCADE,
-    -- SRS-128.5: exactly one of the four reward amounts.
-    reward_amount       INTEGER      NOT NULL
-                        CHECK (reward_amount IN (25, 50, 75, 100)),
+    reward_amount       INTEGER      NOT NULL,
     claimed_at          TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     next_available_at   TIMESTAMPTZ  NOT NULL,
+
+    -- SRS-128.5: the rewards are 250, 500, 750, and 1,000 coins. 25, 50, 75,
+    -- and 100 were the rewards before 2026-10-15 and stay allowed so those
+    -- earlier claims remain valid.
+    CONSTRAINT chk_daily_login_box_claims_reward
+        CHECK (reward_amount IN (250, 500, 750, 1000, 25, 50, 75, 100)),
 
     -- SRS-128.11: the cooldown lasts exactly 24 hours from the claim.
     CONSTRAINT chk_daily_login_box_claims_cooldown
@@ -353,7 +472,9 @@ CREATE INDEX ix_daily_login_box_claims_player
 --   * SRS-128.20: only Active accounts may open the box.
 -- The API picks the reward with a cryptographically secure random number
 -- (lib/dailyLoginBox.ts) and passes it in; this function accepts only the
--- four allowed amounts.
+-- allowed amounts. The app awards 250-1,000 coins (SRS-128.5); 25-100, the
+-- amounts before 2026-10-15, are still accepted so copies of the app that
+-- haven't pulled the change yet keep working instead of failing to open.
 CREATE OR REPLACE FUNCTION fn_open_daily_login_box(p_player_id INTEGER, p_reward INTEGER)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -364,7 +485,7 @@ DECLARE
     v_balance       BIGINT;
     v_claimed_at    TIMESTAMPTZ := CURRENT_TIMESTAMP;
 BEGIN
-    IF p_reward IS NULL OR p_reward NOT IN (25, 50, 75, 100) THEN
+    IF p_reward IS NULL OR p_reward NOT IN (250, 500, 750, 1000, 25, 50, 75, 100) THEN
         RAISE EXCEPTION 'Invalid Daily Login Box reward: %', p_reward;
     END IF;
 

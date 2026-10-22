@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { notifyAppearanceChanged } from '../../lib/balanceEvents';
 import CosmeticArt from '../cosmetics/CosmeticArt';
 import DefaultAvatar from './DefaultAvatar';
 
@@ -71,6 +72,7 @@ export default function ProfilePhoto({
         return false;
       }
       onChange(data.profilePhotoDataUrl);
+      notifyAppearanceChanged();
       return true;
     } catch {
       setError(`${failure} Please try again.`);

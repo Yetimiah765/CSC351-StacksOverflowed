@@ -21,6 +21,7 @@ function makeTableMock() {
 const tables = {
   player_sessions: makeTableMock(),
   players: makeTableMock(),
+  player_equipped_cosmetics: makeTableMock(),
 };
 
 vi.mock('../../lib/supabase', () => ({
@@ -52,6 +53,7 @@ describe('Balance API route', () => {
     } as never);
     resetTable(tables.player_sessions);
     resetTable(tables.players);
+    resetTable(tables.player_equipped_cosmetics);
   });
 
   it("returns the logged-in player's balance (SRS-109.1)", async () => {
@@ -61,9 +63,31 @@ describe('Balance API route', () => {
     const response = await GET(req());
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ balance: 1250 });
+    expect(await response.json()).toEqual({ balance: 1250, playerId: 1, outlineArtKey: null });
     expect(tables.players.select).toHaveBeenCalledWith('balance');
     expect(tables.players.eq).toHaveBeenCalledWith('player_id', 1);
+  });
+
+  it("includes the equipped profile outline for the nav bar (SRS-120.7, SRS-120.8)", async () => {
+    tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
+    tables.players.maybeSingleResult = { data: { balance: 1250 }, error: null };
+    tables.player_equipped_cosmetics.maybeSingleResult = { data: { cosmetics: { asset_path: 'golden-laurel' } }, error: null };
+
+    const response = await GET(req());
+
+    expect(await response.json()).toEqual({ balance: 1250, playerId: 1, outlineArtKey: 'golden-laurel' });
+    expect(tables.player_equipped_cosmetics.eq).toHaveBeenCalledWith('category', 'Profile Outline');
+  });
+
+  it('still returns the balance if the outline lookup fails', async () => {
+    tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
+    tables.players.maybeSingleResult = { data: { balance: 1250 }, error: null };
+    tables.player_equipped_cosmetics.maybeSingleResult = { data: null, error: { message: 'boom' } };
+
+    const response = await GET(req());
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).outlineArtKey).toBeNull();
   });
 
   it('returns 401 without a token', async () => {

@@ -862,6 +862,38 @@ function holoChip(name: string, main: string[], seed: number, style: HoloChipSty
   }));
 }
 
+// A holographic profile outline: a ring of iridescent foil, the set's own
+// ornaments in foil, sparkles, and the same sweeping band of light as the
+// other holographic items, masked to the foil itself so it never crosses the
+// photo or the empty space around the ring. Each set has its own foil
+// colors (the same as its holographic chip) and ornaments, so the sets don't
+// look alike.
+function holoOutline(name: string, foilColors: string[], seed: number, ornaments: (rb: string) => string, ringW = 4.2) {
+  const rb = nextId('rb'), rb2 = nextId('rb'), fo = nextId('fo'), sw = nextId('sw'), sg = nextId('sg'), mk = nextId('mk'), cls = nextId('hs'), r = rnd(seed);
+  const orn = ornaments(rb);
+  const cyc = [...foilColors, foilColors[0]];
+  const stops = cyc.map((c, i) => `<stop offset="${f(i / (cyc.length - 1))}" stop-color="${c}"/>`).join('');
+  let sparkles = '';
+  for (let i = 0; i < 8; i++) {
+    const [x, y] = pol(60, 60, 50 + r() * 8, r() * 360);
+    sparkles += spark(f(x), f(y), f(1 + r() * 1.4));
+  }
+  const ring = (stroke: string, extra = '') => `<circle cx="60" cy="60" r="45" fill="none" stroke="${stroke}" stroke-width="${ringW}" ${extra}/>`;
+  return outline({ label: `${name} holographic profile outline`,
+    defs: `<linearGradient id="${rb}" x1="0" y1="0" x2="1" y2="1">${stops}</linearGradient>` +
+      `<linearGradient id="${rb2}" x1="0" y1="0" x2=".3" y2=".22" spreadMethod="reflect">${stops}</linearGradient>` +
+      `<pattern id="${fo}" width="2.4" height="2.4" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="1" height="2.4" fill="#fff" opacity=".25"/></pattern>` +
+      `<linearGradient id="${sw}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+      glow(sg, 1) + `<mask id="${mk}" maskUnits="userSpaceOnUse" x="0" y="0" width="120" height="120">${ring('#fff')}${orn}</mask>`,
+    over: `${ring(`url(#${rb})`)}${ring(`url(#${rb2})`, 'opacity=".45" style="mix-blend-mode:screen"')}${ring(`url(#${fo})`, 'style="mix-blend-mode:overlay"')}` +
+      `<circle cx="60" cy="60" r="${f(44.5 - ringW / 2)}" fill="none" stroke="#fff" stroke-opacity=".8" stroke-width=".5"/>` +
+      `<circle cx="60" cy="60" r="${f(45.5 + ringW / 2)}" fill="none" stroke="#fff" stroke-opacity=".6" stroke-width=".5"/>` +
+      `${orn}<g filter="url(#${sg})">${sparkles}</g>` +
+      `<g mask="url(#${mk})"><style>.${cls}{animation:cosmetic-holo-outline-sweep 3.6s ease-in-out infinite}@keyframes cosmetic-holo-outline-sweep{0%{transform:translateX(-70px)}55%,100%{transform:translateX(150px)}}` +
+      `@media (prefers-reduced-motion:reduce){.${cls}{animation:none;transform:translateX(40px)}}</style>` +
+      `<g class="${cls}"><rect x="-20" y="-40" width="26" height="200" fill="url(#${sw})" transform="rotate(20 60 60)" style="mix-blend-mode:screen"/></g></g>` });
+}
+
 // ---------- every cosmetic, by art key ----------
 const ART: Record<string, () => string> = {
   // Classic (the defaults, SRS-119.4)
@@ -2362,6 +2394,136 @@ const ART: Record<string, () => string> = {
     } }),
   'holo-chip-nature': () => holoChip('Prism Sprout', ['#166534', '#052e16'], 213, { foil: ['#bbf7d0', '#4ade80', '#fde68a', '#a3e635'], edge: 'pine', ring: '#166534', inlay: '#f0fdf4', ink: '#166534' }, (rb) =>
     sprout(50, 50, 1.55, `url(#${rb})`)),
+  // One holographic profile outline per box, each with its own ornaments.
+  'holo-outline-neon': () => holoOutline('Prism Halo', ['#ff3fd2', '#2ef2ff', '#8b5cf6'], 301, (rb) => {
+    const bolt = 'M54 29L39 53H48.5L44.5 71L61 45.5H51.5Z';
+    let marks = '';
+    for (const a of [45, 135, 225, 315]) {
+      const [x, y] = pol(60, 60, 52, a);
+      marks += `<path transform="translate(${f(x)} ${f(y)}) rotate(${a}) scale(.4) translate(-50 -50)" d="${bolt}" fill="url(#${rb})" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/>`;
+    }
+    for (const a of [0, 90, 180, 270]) {
+      const [x, y] = pol(60, 60, 52, a);
+      marks += `<path transform="translate(${f(x)} ${f(y)}) rotate(${a})" d="M0 -3L2.4 0L0 3L-2.4 0Z" fill="#fff"/>`;
+    }
+    return `<circle cx="60" cy="60" r="51.6" fill="none" stroke="url(#${rb})" stroke-width="1.2" stroke-dasharray="6 3"/>${marks}`;
+  }, 3),
+  'holo-outline-royal': () => holoOutline('Prism Laurel', ['#fff3c4', '#f5c6a5', '#e9d5ff', '#f8e08e'], 302, (rb) =>
+    `${laurel(60, 60, 50.5, 196, 344, 9, `url(#${rb})`, 1.02, '#ffffff')}${laurel(60, 60, 50.5, 164, 16, 9, `url(#${rb})`, 1.02, '#ffffff')}` +
+    `${crown(60, 8.6, 0.5, `url(#${rb})`, '#ffffff')}<path d="M60 105.4L63 109L60 112.6L57 109Z" fill="url(#${rb})" stroke="#fff" stroke-width=".5"/>`),
+  'holo-outline-ocean': () => holoOutline('Opal Wave', ['#a5f3fc', '#fbcfe8', '#bbf7d0', '#ddd6fe', '#fde68a'], 303, (rb) => {
+    let wave = '', foam = '', pearls = '';
+    for (let i = 0; i <= 240; i++) {
+      const a = i * 1.5, [x, y] = pol(60, 60, 51.2 + 2.2 * Math.sin((a * 16 * Math.PI) / 180), a);
+      wave += `${i ? 'L' : 'M'}${f(x)} ${f(y)}`;
+    }
+    for (let i = 0; i < 16; i++) {
+      const a = i * 22.5 + 5.6, [x, y] = pol(60, 60, 53.4, a);
+      foam += `<circle cx="${f(x)}" cy="${f(y)}" r=".9" fill="#fff"/>`;
+      if (i % 2 === 0) {
+        const [px, py] = pol(60, 60, 57, a + 11);
+        pearls += `<circle cx="${f(px)}" cy="${f(py)}" r="1.8" fill="#fff"/><circle cx="${f(px - 0.5)}" cy="${f(py - 0.5)}" r=".75" fill="url(#${rb})"/>`;
+      }
+    }
+    return `<path d="${wave}Z" stroke="url(#${rb})" stroke-width="2.2" fill="none" stroke-linejoin="round"/><path d="${wave}Z" stroke="#fff" stroke-opacity=".6" stroke-width=".5" fill="none" transform="translate(-.3 -.3)"/>${foam}${pearls}`;
+  }),
+  'holo-outline-inferno': () => holoOutline('Prism Blaze', ['#ef4444', '#f97316', '#fde047', '#fb7185'], 304, (rb) => {
+    let flames = '';
+    for (let i = 0; i < 18; i++) flames += `<path transform="rotate(${i * 20} 60 60)" d="${flame(60, 13.6, 6.4, i % 2 ? 9 : 13)}" fill="url(#${rb})" stroke="#fff" stroke-width=".4"/>`;
+    return flames;
+  }),
+  'holo-outline-galaxy': () => holoOutline('Prism Orbit', ['#a78bfa', '#60a5fa', '#f472b6', '#e0e7ff'], 305, (rb) => {
+    const planet = (a: number, rr: number, size: number) => {
+      const [x, y] = pol(60, 60, rr, a);
+      return `<circle cx="${f(x)}" cy="${f(y)}" r="${size}" fill="url(#${rb})" stroke="#fff" stroke-width=".5"/><circle cx="${f(x - size * 0.35)}" cy="${f(y - size * 0.35)}" r="${f(size * 0.35)}" fill="#fff" opacity=".6"/>`;
+    };
+    return `<circle cx="60" cy="60" r="51.4" fill="none" stroke="url(#${rb})" stroke-width=".9" stroke-dasharray="1 1.6"/>` +
+      `<circle cx="60" cy="60" r="56" fill="none" stroke="url(#${rb})" stroke-width=".9"/>` +
+      `${planet(40, 51.4, 2.6)}${planet(200, 51.4, 2)}${planet(300, 56, 3.4)}${planet(130, 56, 2.4)}` +
+      `<ellipse cx="${f(pol(60, 60, 56, 300)[0])}" cy="${f(pol(60, 60, 56, 300)[1])}" rx="5.6" ry="1.4" fill="none" stroke="#fff" stroke-width=".5" transform="rotate(-20 ${f(pol(60, 60, 56, 300)[0])} ${f(pol(60, 60, 56, 300)[1])})"/>` +
+      `<path d="${starPath(60, 6.2, 5.4, 2, 4)}" fill="#fff"/><path d="${starPath(60, 114, 4, 1.6, 4)}" fill="#fff"/>`;
+  }, 2.6),
+  'holo-outline-halloween': () => holoOutline('Spectral Web', ['#fb923c', '#a855f7', '#84cc16'], 306, (rb) => {
+    let web = '';
+    for (let i = 0; i < 12; i++) {
+      const a0 = i * 30, [x0, y0] = pol(60, 60, 47, a0), [x1, y1] = pol(60, 60, 57, a0);
+      web += `M${f(x0)} ${f(y0)}L${f(x1)} ${f(y1)}`;
+      for (const rr of [51, 55]) {
+        const [ax, ay] = pol(60, 60, rr, a0), [bx, by] = pol(60, 60, rr, a0 + 30), [mx, my] = pol(60, 60, rr - 1.8, a0 + 15);
+        web += `M${f(ax)} ${f(ay)}Q${f(mx)} ${f(my)} ${f(bx)} ${f(by)}`;
+      }
+    }
+    return `<path d="${web}" stroke="url(#${rb})" stroke-width=".8" fill="none"/>${bat(22, 18, 0.62, `url(#${rb})`)}${bat(98, 18, 0.62, `url(#${rb})`)}${bat(60, 113, 0.5, `url(#${rb})`)}`;
+  }, 3.4),
+  'holo-outline-thanksgiving': () => holoOutline('Prism Wreath', ['#fde68a', '#f59e0b', '#ea580c', '#dc2626'], 307, (rb) => {
+    let leaves = '';
+    for (let i = 0; i < 14; i++) {
+      const a = i * (360 / 14), [x, y] = pol(60, 60, 49.6, a);
+      leaves += `<g transform="${at(x, y, 1, a + 90 + (i % 2 ? 20 : -20))}"><path d="${maple(4.8)}" fill="url(#${rb})" stroke="#fff" stroke-width=".35"/>${mapleVeins(4.8, '#ffffff', 0.7)}</g>`;
+    }
+    return leaves;
+  }),
+  'holo-outline-christmas': () => holoOutline('Aurora Wreath', ['#4ade80', '#22d3ee', '#a78bfa', '#f0abfc'], 308, (rb) => {
+    let marks = '';
+    for (let i = 0; i < 6; i++) {
+      const [x, y] = pol(60, 60, 50.4, i * 60 + 30);
+      marks += snowflake(x, y, 4.6, `url(#${rb})`, 1.1);
+      const [hx, hy] = pol(60, 60, 50.4, i * 60);
+      if (i) marks += `<g transform="${at(hx, hy, 0.55, i * 60)}"><path d="${HOLLY}" fill="url(#${rb})" transform="rotate(-35) translate(0 -5)"/><path d="${HOLLY}" fill="url(#${rb})" transform="rotate(35) translate(0 -5)"/><circle r="1.8" fill="#fff"/></g>`;
+    }
+    return `${marks}<path d="${starPath(60, 6.6, 6, 2.4, 5)}" fill="url(#${rb})" stroke="#fff" stroke-width=".5"/>`;
+  }),
+  'holo-outline-spring': () => holoOutline('Prism Garden', ['#fbcfe8', '#e9d5ff', '#bbf7d0', '#fef9c3'], 309, (rb) => {
+    let flowers = '';
+    for (let i = 0; i < 10; i++) {
+      const [x, y] = pol(60, 60, 49.6, i * 36);
+      flowers += blossom(x, y, 0.78, `url(#${rb})`, i * 23, '#ffffff');
+      const [lx, ly] = pol(60, 60, 50, i * 36 + 18);
+      flowers += `<path transform="translate(${f(lx)} ${f(ly)}) rotate(${i * 36 + 18 + 90})" d="M-4 0Q0 -2.4 4 0Q0 2.4 -4 0Z" fill="url(#${rb})" stroke="#fff" stroke-width=".3"/>`;
+    }
+    return flowers;
+  }),
+  'holo-outline-summer': () => holoOutline('Prism Tropics', ['#fde047', '#fb923c', '#22d3ee', '#f472b6'], 310, (rb) => {
+    let leaves = '';
+    for (let i = 0; i < 14; i++) {
+      const a = i * (360 / 14), [x, y] = pol(60, 60, 49.6, a);
+      let veins = '';
+      for (let k = -8; k <= 8; k += 2.6) veins += `M0 ${f(k)}L${f(-3.6 + Math.abs(k) * 0.25)} ${f(k - 2)}M0 ${f(k)}L${f(3.6 - Math.abs(k) * 0.25)} ${f(k - 2)}`;
+      leaves += `<g transform="${at(x, y, 1, a + 90 + (i % 2 ? 14 : -14))}"><path d="M0 -11Q6 -4 0 11Q-6 -4 0 -11Z" fill="url(#${rb})" stroke="#fff" stroke-width=".35"/><path d="M0 -10V10" stroke="#fff" stroke-width=".4"/><path d="${veins}" stroke="#fff" stroke-opacity=".55" stroke-width=".25"/></g>`;
+    }
+    return `${leaves}${hibiscus(20, 22, 0.8, `url(#${rb})`, '#be185d', 20)}${hibiscus(100, 98, 0.75, `url(#${rb})`, '#be185d', -30)}${hibiscus(102, 26, 0.55, `url(#${rb})`, '#be185d', 10)}`;
+  }),
+  'holo-outline-autumn': () => holoOutline('Prism Fairy Ring', ['#c2410c', '#f59e0b', '#fde68a', '#a16207'], 311, (rb) => {
+    let shrooms = '';
+    for (let i = 0; i < 8; i++) shrooms += `<g transform="rotate(${i * 45 + 22.5} 60 60)">${toadstool(60, 10.6, 0.5 + (i % 2) * 0.1, `url(#${rb})`)}</g>`;
+    return shrooms;
+  }),
+  'holo-outline-winter': () => holoOutline('Prism Icicles', ['#e0f2fe', '#a5f3fc', '#c7d2fe', '#f0f9ff'], 312, (rb) => {
+    const q = rnd(313);
+    let drips = '';
+    for (let a = 100; a <= 260; a += 8) {
+      const [x, y] = pol(60, 60, 47.4, a), w = 1.8 + q() * 1.2, h = 3 + q() * 7 * (1 - Math.abs(a - 180) / 140);
+      drips += `<path d="M${f(x - w / 2)} ${f(y - 0.6)}L${f(x)} ${f(y + h)}L${f(x + w / 2)} ${f(y - 0.6)}Z" fill="url(#${rb})" stroke="#fff" stroke-width=".25"/>`;
+    }
+    let crystals = '';
+    for (const a of [300, 0, 60]) {
+      const [x, y] = pol(60, 60, 52, a);
+      crystals += crystal(x, y, 5.6, `url(#${rb})`, 0.8);
+    }
+    return drips + crystals;
+  }),
+  'holo-outline-nature': () => holoOutline('Prism Vine', ['#bbf7d0', '#4ade80', '#fde68a', '#a3e635'], 314, (rb) => {
+    let vine = '', leaves = '';
+    for (let i = 0; i <= 120; i++) {
+      const a = i * 3, [x, y] = pol(60, 60, 50 + 2.4 * Math.sin((a * Math.PI) / 30), a);
+      vine += `${i ? 'L' : 'M'}${f(x)} ${f(y)}`;
+    }
+    for (let i = 0; i < 18; i++) {
+      const a = i * 20 + 5, out = i % 2 ? 1 : -1, [x, y] = pol(60, 60, 50 + out * 4.2, a);
+      leaves += ivy(x, y, 0.6, `url(#${rb})`, a + (out > 0 ? 0 : 180));
+    }
+    return `<path d="${vine}" stroke="url(#${rb})" stroke-width="1.4" fill="none"/>${leaves}`;
+  }, 3),
 };
 
 export const COSMETIC_ART_KEYS = Object.keys(ART);

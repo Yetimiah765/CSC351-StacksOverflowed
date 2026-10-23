@@ -71,6 +71,20 @@ export const OUTLINE_ACCENTS: Record<string, { colors: string[]; glow: string | 
   'frost-ring': { colors: ['#e0f2fe', '#38bdf8'], glow: '#38bdf8' },
   'ivy-vine': { colors: ['#22c55e', '#3f6212'], glow: '#22c55e' },
   'songbird-branch': { colors: ['#ea580c', '#5b3a1e', '#22c55e'], glow: '#ea580c' },
+  // The holographic outlines use their foil colors.
+  'holo-outline-neon': { colors: ['#ff3fd2', '#2ef2ff', '#8b5cf6'], glow: '#ff3fd2' },
+  'holo-outline-royal': { colors: ['#fff3c4', '#f5c6a5', '#e9d5ff', '#f8e08e'], glow: '#f8e08e' },
+  'holo-outline-ocean': { colors: ['#a5f3fc', '#fbcfe8', '#bbf7d0', '#ddd6fe'], glow: '#a5f3fc' },
+  'holo-outline-inferno': { colors: ['#ef4444', '#f97316', '#fde047', '#fb7185'], glow: '#f97316' },
+  'holo-outline-galaxy': { colors: ['#a78bfa', '#60a5fa', '#f472b6', '#e0e7ff'], glow: '#a78bfa' },
+  'holo-outline-halloween': { colors: ['#fb923c', '#a855f7', '#84cc16'], glow: '#a855f7' },
+  'holo-outline-thanksgiving': { colors: ['#fde68a', '#f59e0b', '#ea580c', '#dc2626'], glow: '#f59e0b' },
+  'holo-outline-christmas': { colors: ['#4ade80', '#22d3ee', '#a78bfa', '#f0abfc'], glow: '#22d3ee' },
+  'holo-outline-spring': { colors: ['#fbcfe8', '#e9d5ff', '#bbf7d0', '#fef9c3'], glow: '#f9a8d4' },
+  'holo-outline-summer': { colors: ['#fde047', '#fb923c', '#22d3ee', '#f472b6'], glow: '#fb923c' },
+  'holo-outline-autumn': { colors: ['#c2410c', '#f59e0b', '#fde68a', '#a16207'], glow: '#f59e0b' },
+  'holo-outline-winter': { colors: ['#e0f2fe', '#a5f3fc', '#c7d2fe', '#f0f9ff'], glow: '#a5f3fc' },
+  'holo-outline-nature': { colors: ['#bbf7d0', '#4ade80', '#fde68a', '#a3e635'], glow: '#4ade80' },
 };
 
 // SRS-126.3 / SRS-126.4: a duplicate refunds half the price, rounded up.

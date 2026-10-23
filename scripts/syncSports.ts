@@ -12,6 +12,8 @@ import { getSupabaseClient } from '../lib/supabase';
 import { getOddsApiClient } from '../lib/oddsApi';
 import { configuredSportKeys, syncSports } from '../lib/sports/sync';
 import { settleWagers } from '../lib/sports/settle';
+import { selectShowdowns, settleShowdowns } from '../lib/sports/showdown';
+import { notifyShowdownChanged } from '../lib/sports/showdownRealtime';
 
 // A standalone Node process doesn't auto-load .env files the way Next does.
 // .env.local takes precedence, matching Next's own env-loading order. In
@@ -41,7 +43,21 @@ async function main() {
     `Settled ${settled.settled} wager(s): ${settled.won} won, ${settled.lost} lost, ${settled.refunded} refunded.`,
   );
 
-  const errors = [...summary.errors, ...settled.errors];
+  // The Showdown (SRS-212 - SRS-214): pay out finished ones, then give each
+  // sport a new one once its last game has started.
+  const showdowns = await settleShowdowns(supabase);
+  console.log(`Settled ${showdowns.settled} Showdown(s), refunded ${showdowns.refunded}.`);
+  const picked = await selectShowdowns(supabase);
+  for (const pick of picked.picked) console.log(`New ${pick.sport} Showdown: event ${pick.eventId}`);
+  // Live update for anyone on the Showdown page.
+  if (showdowns.settled + showdowns.refunded > 0 || picked.picked.length > 0) {
+    await notifyShowdownChanged(supabase, {
+      showdownId: null,
+      reason: showdowns.settled + showdowns.refunded > 0 ? 'settled' : 'picked',
+    });
+  }
+
+  const errors = [...summary.errors, ...settled.errors, ...showdowns.errors, ...picked.errors];
   if (errors.length > 0) {
     console.error(`${errors.length} error(s):`);
     for (const error of errors) console.error(`  - ${error}`);
@@ -50,7 +66,13 @@ async function main() {
   }
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+main()
+  .catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  })
+  // Exit once the work is done: an idle HTTPS connection left open by the
+  // Realtime ping would otherwise keep Node running for another minute. The
+  // short wait lets closing connections finish first, since exiting mid-close
+  // crashes Node on Windows.
+  .finally(() => setTimeout(() => process.exit(), 250));

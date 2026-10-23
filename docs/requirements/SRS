@@ -1422,11 +1422,11 @@ flowchart LR
 
 *User story: As a player, I want to see the probability of receiving each cosmetic from a purchasable blind box, so that I understand the possible outcomes before spending my virtual currency.*
 
-**SRS-123.1, JO, Equal reward probability.** The system shall assign equal selection probability to every cosmetic contained within the same purchasable cosmetic blind box.
+**SRS-123.1, JO, Equal reward probability.** The system shall assign equal selection probability to every regular (non-holographic) cosmetic contained within the same purchasable cosmetic blind box, and equal selection probability to every holographic cosmetic in that box.
 
 *Traces to: UR-123*
 
-**SRS-123.2, JO, Probability formula.** If a purchasable cosmetic blind box contains n possible rewards, the probability of selecting each reward shall be 1/n.
+**SRS-123.2, JO, Probability formula.** If a purchasable cosmetic blind box contains n regular rewards and h holographic rewards with a combined holographic chance of p (SRS-123.8), the probability of selecting each regular reward shall be (1 − p)/n and of each holographic reward p/h. A box with no holographic rewards shall give each of its n rewards a probability of 1/n.
 
 *Traces to: UR-123*
 
@@ -1434,7 +1434,7 @@ flowchart LR
 
 *Traces to: UR-123*
 
-**SRS-123.4, JO, No custom-weight cosmetic boxes.** The system shall not assign individual reward weights to any purchasable cosmetic blind box, including limited-time boxes; every purchasable blind box shall use the equal probabilities in SRS-123.1.
+**SRS-123.4, JO, No custom-weight cosmetic boxes.** Apart from the holographic tier in SRS-123.8, the system shall not assign individual reward weights to any purchasable cosmetic blind box, including limited-time boxes; every purchasable blind box shall use the probabilities in SRS-123.2.
 
 *Traces to: UR-123*
 
@@ -1449,6 +1449,14 @@ flowchart LR
 **SRS-123.7, JO, Daily Login Box distinction.** The equal-probability requirements for purchasable cosmetic blind boxes shall not apply to the free Daily Login Box, which shall use the weighted coin-reward distribution defined under UR-128.
 
 *Traces to: UR-123, UR-128*
+
+**SRS-123.8, JO, Holographic tier.** Each purchasable cosmetic blind box shall contain one holographic card, one holographic chip, and one holographic profile outline, which together shall have a 3% probability of being selected (1% each). The box's other rewards shall share the remaining 97% equally.
+
+*Traces to: UR-123*
+
+**SRS-123.9, JO, Probability display.** The system shall display each possible reward's probability in the blind box's reward list, and shall mark which rewards are holographic.
+
+*Traces to: UR-122, UR-123*
 
 ### UR-124, JO – Purchase Blind Box
 
@@ -1486,7 +1494,7 @@ flowchart LR
 
 *User story: As a player, I want one cosmetic to be randomly selected from the purchased blind box's possible rewards, so that I can receive a cosmetic for my collection.*
 
-**SRS-125.1, JO, Random reward selection.** The system shall randomly select one cosmetic from the purchased blind box using the equal 1/n reward probabilities.
+**SRS-125.1, JO, Random reward selection.** The system shall randomly select one cosmetic from the purchased blind box using the reward probabilities in SRS-123.2 and SRS-123.8.
 
 *Traces to: UR-125*
 
@@ -1557,6 +1565,10 @@ flowchart LR
 **SRS-127.5, JO, Interrupted-result behavior.** If the player leaves before the reward result is displayed, the system shall not display a delayed result popup or replay the blind-box animation when the player later returns.
 
 *Traces to: UR-125, UR-127*
+
+**SRS-127.6, JO, Holographic result.** If the selected cosmetic is holographic and the player remains present, the system shall indicate that the cosmetic is holographic.
+
+*Traces to: UR-127*
 
 ### UR-128, JO – Daily Login Box
 

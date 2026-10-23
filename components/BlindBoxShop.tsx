@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { notifyBalanceChanged } from '../lib/balanceEvents';
-import type { Cosmetic } from '../lib/cosmetics';
+import { COSMETIC_CATEGORIES, type Cosmetic } from '../lib/cosmetics';
 import BlindBoxReveal, { type BoxResult } from './cosmetics/BlindBoxReveal';
 import CosmeticArt from './cosmetics/CosmeticArt';
 
@@ -21,6 +21,23 @@ interface ShopBox {
 }
 
 const KIND: Record<Cosmetic['category'], string> = { Card: 'Card back', Chip: 'Chip', 'Profile Outline': 'Outline' };
+
+type ShopReward = ShopBox['rewards'][number];
+
+// The reward grid's rows: one column per category (card backs, chips,
+// outlines), the regular items from the top and the holographic ones at the
+// bottom of their column. null is an empty cell, e.g. where a holiday box has
+// fewer chips and outlines than card backs.
+function rewardRows(rewards: ShopReward[]): (ShopReward | null)[][] {
+  const stack = (holographic: boolean) => {
+    const columns = COSMETIC_CATEGORIES.map(({ category }) =>
+      rewards.filter((reward) => reward.category === category && reward.isHolographic === holographic)
+    );
+    const height = Math.max(0, ...columns.map((column) => column.length));
+    return Array.from({ length: height }, (_, row) => columns.map((column) => column[row] ?? null));
+  };
+  return [...stack(false), ...stack(true)];
+}
 
 const LOAD_FAILED = 'Could not load the blind boxes. Please refresh the page.';
 const BUY_FAILED = 'Could not buy the box. You were not charged. Please try again.';
@@ -170,12 +187,12 @@ export default function BlindBoxShop() {
               · a duplicate refunds {box.duplicateRefund.toLocaleString('en-US')} coins
             </p>
 
-            {/* Three across: the regular items, then the holographic card, chip and outline as their own row. */}
-            {[box.rewards.filter((reward) => !reward.isHolographic), box.rewards.filter((reward) => reward.isHolographic)]
-              .filter((group) => group.length > 0)
-              .map((group, row) => (
-                <ul key={row} className={`grid grid-cols-3 gap-3 ${row === 0 ? 'mt-4' : 'mt-3'}`}>
-                  {group.map((reward) => (
+            {/* Card backs, chips and outlines each in their own column, holographic ones in the last row. */}
+            <ul className="mt-4 grid grid-cols-3 gap-3">
+              {rewardRows(box.rewards)
+                .flat()
+                .map((reward, cell) =>
+                  reward ? (
                     <li key={reward.cosmeticId} className="min-w-0">
                       <div
                         className={`relative flex h-28 items-center justify-center rounded-xl border bg-slate-950 p-2 sm:h-32 ${
@@ -196,15 +213,18 @@ export default function BlindBoxShop() {
                       <p className="text-[11px] text-slate-500">
                         {reward.isHolographic ? (
                           <span className="bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text font-semibold text-transparent">Holographic</span>
-                        ) : (
-                          KIND[reward.category]
-                        )}{' '}
-                        · {(reward.isHolographic ? box.chances.holographic : box.chances.regular) ?? ''}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              ))}
+      
+                  ) : (
+                            KIND[reward.category]
+                          )}{' '}
+                          · {(reward.isHolographic ? box.chances.holographic : box.chances.regular) ?? ''}
+                        </p>
+                      </li>
+                  ) : (
+                    <li key={`empty-${cell}`} aria-hidden="true" />
+                  )
+                )}
+            </ul>
 
             <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
               {signedIn ? (

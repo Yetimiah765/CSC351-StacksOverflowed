@@ -1450,7 +1450,7 @@ flowchart LR
 
 *Traces to: UR-123, UR-128*
 
-**SRS-123.8, JO, Holographic tier.** Each purchasable cosmetic blind box shall contain one holographic card and one holographic chip, which together shall have a 3% probability of being selected (1.5% each). The box's other rewards shall share the remaining 97% equally.
+**SRS-123.8, JO, Holographic tier.** Each purchasable cosmetic blind box shall contain one holographic card, one holographic chip, and one holographic profile outline, which together shall have a 3% probability of being selected (1% each). The box's other rewards shall share the remaining 97% equally.
 
 *Traces to: UR-123*
 

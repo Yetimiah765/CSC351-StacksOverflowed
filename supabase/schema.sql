@@ -842,6 +842,39 @@ SELECT b.box_id, c.cosmetic_id
   JOIN cosmetics c   ON c.cosmetic_name = v.cosmetic_name
 ON CONFLICT DO NOTHING;
 
+-- A holographic profile outline in every box, so a box's holographic card,
+-- chip and outline share its 3% tier at 1% each (SRS-123.8).
+INSERT INTO cosmetics (cosmetic_name, category, is_default, asset_path, is_holographic) VALUES
+    ('Prism Halo',       'Profile Outline', FALSE, 'holo-outline-neon',         TRUE),
+    ('Prism Laurel',     'Profile Outline', FALSE, 'holo-outline-royal',        TRUE),
+    ('Opal Wave',        'Profile Outline', FALSE, 'holo-outline-ocean',        TRUE),
+    ('Prism Blaze',      'Profile Outline', FALSE, 'holo-outline-inferno',      TRUE),
+    ('Prism Orbit',      'Profile Outline', FALSE, 'holo-outline-galaxy',       TRUE),
+    ('Spectral Web',     'Profile Outline', FALSE, 'holo-outline-halloween',    TRUE),
+    ('Prism Wreath',     'Profile Outline', FALSE, 'holo-outline-thanksgiving', TRUE),
+    ('Aurora Wreath',    'Profile Outline', FALSE, 'holo-outline-christmas',    TRUE),
+    ('Prism Garden',     'Profile Outline', FALSE, 'holo-outline-spring',       TRUE),
+    ('Prism Tropics',    'Profile Outline', FALSE, 'holo-outline-summer',       TRUE),
+    ('Prism Fairy Ring', 'Profile Outline', FALSE, 'holo-outline-autumn',       TRUE),
+    ('Prism Icicles',    'Profile Outline', FALSE, 'holo-outline-winter',       TRUE),
+    ('Prism Vine',       'Profile Outline', FALSE, 'holo-outline-nature',       TRUE)
+ON CONFLICT (cosmetic_name) DO UPDATE
+    SET asset_path     = EXCLUDED.asset_path,
+        is_holographic = EXCLUDED.is_holographic;
+
+INSERT INTO blind_box_rewards (box_id, cosmetic_id)
+SELECT b.box_id, c.cosmetic_id
+  FROM (VALUES
+    ('Neon Box', 'Prism Halo'), ('Royal Gold Box', 'Prism Laurel'), ('Ocean Box', 'Opal Wave'),
+    ('Inferno Box', 'Prism Blaze'), ('Galaxy Box', 'Prism Orbit'), ('Halloween Box', 'Spectral Web'),
+    ('Thanksgiving Box', 'Prism Wreath'), ('Christmas Box', 'Aurora Wreath'), ('Spring Box', 'Prism Garden'),
+    ('Summer Box', 'Prism Tropics'), ('Autumn Box', 'Prism Fairy Ring'), ('Winter Box', 'Prism Icicles'),
+    ('Nature Box', 'Prism Vine')
+  ) AS v (box_name, cosmetic_name)
+  JOIN blind_boxes b ON b.box_name = v.box_name
+  JOIN cosmetics c   ON c.cosmetic_name = v.cosmetic_name
+ON CONFLICT DO NOTHING;
+
 -- Table: daily_login_box_claims
 -- Reviewed by: JO (James Ortiz)
 -- Supports: SRS-110.2, SRS-110.3, SRS-110.4, SRS-128.3, SRS-128.5, SRS-128.8, SRS-128.9, SRS-128.11, SRS-128.12, SRS-128.15, SRS-128.16, SRS-128.18, SRS-128.19, SRS-NFR-108

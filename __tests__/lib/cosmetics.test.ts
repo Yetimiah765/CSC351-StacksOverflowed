@@ -12,15 +12,16 @@ describe('blind box rules', () => {
   });
 
   it('splits the odds: holographic items share 3%, regular items share the rest (SRS-123.2, SRS-123.8)', () => {
+    expect(rewardChances(6, 3, 300)).toEqual({ regular: '16.17%', holographic: '1%' });
+    expect(rewardChances(4, 3, 300)).toEqual({ regular: '24.25%', holographic: '1%' });
     expect(rewardChances(6, 2, 300)).toEqual({ regular: '16.17%', holographic: '1.5%' });
-    expect(rewardChances(4, 2, 300)).toEqual({ regular: '24.25%', holographic: '1.5%' });
     expect(rewardChances(6, 0, 300)).toEqual({ regular: '16.67%', holographic: null });
     expect(rewardChances(1, 0, 300)).toEqual({ regular: '100%', holographic: null });
     expect(rewardChances(0, 2, 300)).toEqual({ regular: null, holographic: '50%' });
   });
 
   it('adds up to 100% (SRS-123.3)', () => {
-    for (const [regular, holographic] of [[6, 2], [4, 2], [5, 1], [6, 0]]) {
+    for (const [regular, holographic] of [[6, 3], [4, 3], [6, 2], [5, 1], [6, 0]]) {
       const chance = holographic ? 0.03 : 0;
       expect(regular * ((1 - chance) / regular) + (holographic ? holographic * (chance / holographic) : 0)).toBeCloseTo(1, 10);
     }
@@ -44,7 +45,7 @@ describe('blind box rules', () => {
 
 describe('cosmetic artwork', () => {
   // Every migration that seeds cosmetics, oldest first.
-  const migration = ['2026-10-22_cosmetics_and_blind_boxes.sql', '2026-10-22_holographic_items_and_new_boxes.sql']
+  const migration = ['2026-10-22_cosmetics_and_blind_boxes.sql', '2026-10-22_holographic_items_and_new_boxes.sql', '2026-10-23_holographic_outlines.sql']
     .map((file) => readFileSync(join(__dirname, '../../supabase/migrations', file), 'utf8'))
     .join('\n');
   const seeded = [...migration.matchAll(/'(Card|Chip|Profile Outline)',\s+(?:TRUE|FALSE),\s+'([a-z-]+)'(?:,\s+(TRUE|FALSE))?\)/g)]
@@ -52,12 +53,12 @@ describe('cosmetic artwork', () => {
   const seededKeys = seeded.map((cosmetic) => cosmetic.key);
 
   it('has a drawing for every cosmetic the database seeds, and nothing extra', () => {
-    expect(seededKeys).toHaveLength(101);
+    expect(seededKeys).toHaveLength(114);
     expect([...seededKeys].sort()).toEqual([...COSMETIC_ART_KEYS].sort());
   });
 
   it('seeds the holographic drawings, and only those, as holographic (SRS-123.8)', () => {
-    expect(seeded.filter((cosmetic) => cosmetic.holographic)).toHaveLength(26);
+    expect(seeded.filter((cosmetic) => cosmetic.holographic)).toHaveLength(39);
     for (const cosmetic of seeded) expect(cosmetic.holographic).toBe(cosmetic.key.startsWith('holo-'));
   });
 
@@ -98,7 +99,7 @@ describe('cosmetic artwork', () => {
 
   it('has nav bar colors for every profile outline, and only for outlines (SRS-120.8)', () => {
     const outlineKeys = seeded.filter((cosmetic) => cosmetic.category === 'Profile Outline').map((cosmetic) => cosmetic.key);
-    expect(outlineKeys).toHaveLength(24);
+    expect(outlineKeys).toHaveLength(37);
     expect(Object.keys(OUTLINE_ACCENTS).sort()).toEqual([...outlineKeys].sort());
     for (const { colors } of Object.values(OUTLINE_ACCENTS)) expect(colors.length).toBeGreaterThanOrEqual(2);
   });

@@ -16,12 +16,12 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
     }
 
-    // SRS-104.2/104.3: a single generic message on failure avoids revealing
+    // SRS-104.2/104.4: a single generic message on failure avoids revealing
     // whether the username or the password was the wrong part.
     const invalidCredentials = () =>
       Response.json({ error: 'Invalid username or password.' }, { status: 401 });
 
-    // SRS-101.6: username lookup is case-insensitive, and only the current
+    // SRS-101.7: username lookup is case-insensitive, and only the current
     // username (not a reserved former one) can be used to log in.
     const { data: usernameRow, error: usernameError } = await supabase
       .from('usernames')
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
       return invalidCredentials();
     }
 
-    // SRS-104.5: verify against the stored hash rather than plaintext.
+    // SRS-104.6: verify against the stored hash rather than plaintext.
     const passwordMatches = await verifyPassword(password, player.password_hash);
     if (!passwordMatches) {
       return invalidCredentials();
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
     const token = generateSessionToken();
     const tokenHash = hashSessionToken(token);
 
-    // SRS-103.4/103.5: logging in replaces any existing session for this
+    // SRS-103.5: logging in replaces any existing session for this
     // player (player_sessions.player_id is UNIQUE), invalidating it.
     const { error: sessionError } = await supabase
       .from('player_sessions')

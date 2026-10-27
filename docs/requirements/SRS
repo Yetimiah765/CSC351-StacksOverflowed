@@ -768,7 +768,7 @@ flowchart LR
 
 *Traces to: UR-009, UR-012*
 
-**SRS-NFR-021, Buy-in range.** The configured minimum buy-in shall be 40 times the big blind, and the configured maximum buy-in shall be 100 times the big blind.
+**SRS-NFR-021, Buy-in range.** The configured minimum buy-in shall be 50 times the big blind, and the configured maximum buy-in shall be 200 times the big blind.
 
 *Traces to: UR-001, UR-012*
 

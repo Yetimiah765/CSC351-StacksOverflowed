@@ -96,7 +96,7 @@ export const MIN_TABLE_SEATS = 3;
 export const MAX_TABLE_SEATS = 9;
 export const DEFAULT_TABLE_SEATS = 6;
 export const DEFAULT_BIG_BLIND = 5;
-// The buy-in range is 50x-200x a table's big blind. Shared by the server
+// SRS-NFR-021: the buy-in range is 50x-200x a table's big blind. Shared by the server
 // (which enforces it) and the table page (which clamps its input to it).
 export const MIN_BUY_IN_MULTIPLIER = 50;
 export const MAX_BUY_IN_MULTIPLIER = 200;

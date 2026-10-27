@@ -4,11 +4,12 @@ import type { BlackjackState } from '../../../lib/blackjack';
 // Hands in play, kept in this server's memory and keyed by player_id, until
 // the database gets somewhere to store them (blackjack_hands has no columns
 // for cards yet). Only the server ever sees the face-down card and the deck.
-// A server restart forgets every hand in play, and the bets already taken
-// for them are lost. Kept on globalThis so a dev-server hot reload doesn't
-// wipe it.
+// A server restart forgets every hand in play; their bets are then returned
+// to the players (refundLostRounds in ./record.ts). Kept on globalThis so a
+// dev-server hot reload doesn't wipe it.
 
 export interface StoredHand {
+  /** The round's blackjack_hands row (./record.ts). */
   handId: number;
   bet: number;
   state: BlackjackState;
@@ -19,7 +20,6 @@ export interface StoredHand {
 const memory = globalThis as typeof globalThis & {
   __blackjackHands?: Map<number, StoredHand>;
   __blackjackBusy?: Set<number>;
-  __blackjackNextHandId?: number;
 };
 const hands = (memory.__blackjackHands ??= new Map<number, StoredHand>());
 // Players with a Deal or a move in flight, so two quick requests (two
@@ -36,11 +36,6 @@ export function saveHand(playerId: number, hand: StoredHand) {
 
 export function removeHand(playerId: number) {
   hands.delete(playerId);
-}
-
-export function nextHandId(): number {
-  memory.__blackjackNextHandId = (memory.__blackjackNextHandId ?? 0) + 1;
-  return memory.__blackjackNextHandId;
 }
 
 /** Marks a request as started; false if one is already running for the player. */

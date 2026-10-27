@@ -318,6 +318,8 @@ export default function BlackjackPage() {
   const [hand, setHand] = useState<BlackjackHandView | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Good news to show, like the bet of a lost hand coming back.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const chipTotal = betChips.reduce((sum, chip) => sum + chip, 0);
   const typedAmount = typed ? Number(typed) : 0;
@@ -369,18 +371,37 @@ export default function BlackjackPage() {
     loadHistory().catch(() => {});
   }, [loadHistory]);
 
-  // Pick up an unfinished hand after a refresh.
+  // A hand the server lost (e.g. in a restart) has its bets given back.
+  const showRefund = useCallback(
+    (refunded: unknown) => {
+      if (typeof refunded !== "number" || refunded <= 0) return;
+      setNotice(`A hand the server lost was cancelled, and your ${refunded.toLocaleString()} coins were returned.`);
+      setError(null);
+      notifyBalanceChanged();
+      loadHistory().catch(() => {});
+    },
+    [loadHistory]
+  );
+
+  // Shows the server's hand in play: after a refresh, and whenever the table
+  // may be out of date (the hand was played in another tab, or the server
+  // restarted and forgot it). A finished hand's results stay on the table.
   const loadHand = useCallback(async () => {
     const token = getToken();
     if (!token) return;
     const res = await fetch("/api/blackjack", { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return;
     const data = await res.json();
-    if (data.hand) setHand(data.hand);
-  }, []);
+    setHand((current) => data.hand ?? (current?.finished ? current : null));
+    showRefund(data.refunded);
+  }, [showRefund]);
 
   useEffect(() => {
     loadHand().catch(() => {});
+    // Coming back to this tab: another tab may have played the hand.
+    const onFocus = () => loadHand().catch(() => {});
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [loadHand]);
 
   // If the balance drops below the chips set for the next hand (e.g. spent
@@ -402,12 +423,13 @@ export default function BlackjackPage() {
     if (!getToken() || chipTotal < MIN_BLACKJACK_BET || busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const { res, data } = await post("/api/blackjack/deal", { bet: chipTotal });
       if (!res.ok) {
         setError(data.error ?? "Could not deal the hand. Please try again.");
-        // e.g. a hand still in play from another tab.
-        if (res.status === 409) await loadHand();
+        // e.g. a hand still in play from another tab, or a bet to return.
+        await loadHand();
         return;
       }
       setHand(data.hand);
@@ -425,6 +447,7 @@ export default function BlackjackPage() {
     if (!hand || hand.finished || busy) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const { res, data } = await post("/api/blackjack/action", {
         handId: hand.handId,
@@ -432,7 +455,17 @@ export default function BlackjackPage() {
         step: hand.step,
       });
       if (!res.ok) {
+        if (res.status === 404) {
+          // The server no longer has this hand (e.g. it restarted), so clear
+          // the table; its bets come back if they hadn't already.
+          setHand(null);
+          setError("That hand is no longer in play. Place a bet to deal a new one.");
+          showRefund(data.refunded);
+          return;
+        }
         setError(data.error ?? "Could not play that move. Please try again.");
+        // e.g. the hand moved on in another tab: show where it is now.
+        await loadHand();
         return;
       }
       setHand(data.hand);
@@ -474,6 +507,7 @@ export default function BlackjackPage() {
   function newHand() {
     setHand(null);
     setError(null);
+    setNotice(null);
   }
 
   // Keyboard shortcuts for the moves shown on the buttons.
@@ -897,6 +931,11 @@ export default function BlackjackPage() {
           {error ? (
             <p role="alert" className="mt-4 text-center text-sm text-red-400">
               {error}
+            </p>
+          ) : null}
+          {notice ? (
+            <p role="status" className="mt-4 text-center text-sm text-emerald-300">
+              {notice}
             </p>
           ) : null}
 

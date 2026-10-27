@@ -50,12 +50,15 @@ import {
 import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
+import { EMOTE_COOLDOWN_MS, canSendEmote, isEmoteId } from '../lib/emotes';
 import {
   POKER_EVENT_ACTION,
   POKER_EVENT_ACK,
+  POKER_EVENT_EMOTE,
   POKER_EVENT_STATE,
   POKER_LOBBY_CHANNEL_NAME,
   pokerTableChannelName,
+  type PokerEmotePayload,
   type PokerLobbyState,
   type PokerTableBroadcast,
 } from '../lib/pokerRealtime';
@@ -423,6 +426,30 @@ function startServer(supabase: SupabaseClient, secret: string) {
     return result;
   }
 
+  // An emote (lib/emotes.ts): a seated player's reaction, shown over their
+  // seat for everyone at the table. It changes nothing about the game, so it
+  // goes out as its own `emote` broadcast rather than in the table state.
+  // At most one per player every EMOTE_COOLDOWN_MS.
+  const lastEmoteAt = new Map<number, number>();
+  let emoteCount = 0;
+  function handleEmote(entry: TableEntry, action: RelayedAction): AckResult {
+    const { playerId, emote } = action;
+    const seatNumber = entry.table.getSeatNumber(String(playerId));
+    if (seatNumber === null) return { ok: false, error: 'Sit down to send emotes.' };
+    if (!isEmoteId(emote) || !canSendEmote(emote)) return { ok: false, error: "You don't have that emote." };
+
+    const now = Date.now();
+    if (now - (lastEmoteAt.get(playerId) ?? 0) < EMOTE_COOLDOWN_MS) {
+      return { ok: false, error: 'Wait a moment before sending another emote.' };
+    }
+    lastEmoteAt.set(playerId, now);
+
+    emoteCount += 1;
+    const payload: PokerEmotePayload = { id: emoteCount, seatNumber, playerId: String(playerId), emote };
+    entry.channel.send({ type: 'broadcast', event: POKER_EVENT_EMOTE, payload });
+    return { ok: true };
+  }
+
   // SRS-15: a betting action. The table checks it's this player's turn
   // (SRS-3.1) and that the move and amount are legal (SRS-15.9/15.10).
   async function handleAct(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
@@ -469,6 +496,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
       else if (action.action === 'rebuy') result = await handleRebuy(entry, action);
       else if (action.action === 'post-blinds') result = handlePostBlinds(entry, action, true);
       else if (action.action === 'wait-for-big-blind') result = handlePostBlinds(entry, action, false);
+      else if (action.action === 'emote') result = handleEmote(entry, action);
       else result = await handleAct(entry, action);
 
       entry.channel.send({

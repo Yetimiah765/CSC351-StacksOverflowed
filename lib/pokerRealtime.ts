@@ -25,6 +25,8 @@ export function pokerTableChannelName(tableId: string): string {
 export const POKER_EVENT_ACTION = 'action';
 export const POKER_EVENT_STATE = 'state';
 export const POKER_EVENT_ACK = 'ack';
+/** An emote a seated player sent, for everyone at the table to see. */
+export const POKER_EVENT_EMOTE = 'emote';
 
 /** Sent on a channel by any client to ask for the current state. */
 export interface PokerSyncPayload {
@@ -46,6 +48,17 @@ export interface PokerActionRequest {
   move?: BettingMove;
   /** For a 'bet' or 'raise' move: the amount the player's round contribution goes to. */
   amount?: number;
+  /** For an 'emote' action: which one (an id from lib/emotes.ts). */
+  emote?: string;
+}
+
+/** A table channel's `emote` broadcast: show `emote` over this seat. */
+export interface PokerEmotePayload {
+  /** Counts up per table, so the same emote sent twice shows twice. */
+  id: number;
+  seatNumber: number;
+  playerId: string;
+  emote: string;
 }
 
 export interface PokerAckPayload {

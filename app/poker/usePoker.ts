@@ -10,7 +10,9 @@ import { getSupabaseBrowserClient } from '../../lib/supabase';
 import {
   POKER_EVENT_ACTION,
   POKER_EVENT_ACK,
+  POKER_EVENT_EMOTE,
   POKER_EVENT_STATE,
+  type PokerEmotePayload,
   type PokerAckPayload,
   type PokerActionRequest,
   type PokerSyncPayload,
@@ -78,13 +80,17 @@ export function usePlayerProfile() {
 export function usePokerChannel<State>(
   channelName: string | null,
   enabled: boolean,
-  onState: (state: State) => void
+  onState: (state: State) => void,
+  // A table's emotes (POKER_EVENT_EMOTE); the lobby has none.
+  onEmote?: (emote: PokerEmotePayload) => void
 ) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
   const pendingRef = useRef(new Map<string, (ack: PokerAckPayload) => void>());
   const onStateRef = useRef(onState);
   onStateRef.current = onState;
+  const onEmoteRef = useRef(onEmote);
+  onEmoteRef.current = onEmote;
 
   useEffect(() => {
     if (!channelName || !enabled) return;
@@ -100,6 +106,9 @@ export function usePokerChannel<State>(
     });
 
     nextChannel.on('broadcast', { event: POKER_EVENT_STATE }, ({ payload }) => onStateRef.current(payload as State));
+    nextChannel.on('broadcast', { event: POKER_EVENT_EMOTE }, ({ payload }) =>
+      onEmoteRef.current?.(payload as PokerEmotePayload)
+    );
     nextChannel.on('broadcast', { event: POKER_EVENT_ACK }, ({ payload }: { payload: PokerAckPayload }) => {
       pendingRef.current.get(payload.requestId)?.(payload);
       pendingRef.current.delete(payload.requestId);

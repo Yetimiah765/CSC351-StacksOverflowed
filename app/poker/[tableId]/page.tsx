@@ -20,12 +20,16 @@ import { POKER_TABLES, getPokerTableConfig } from '../../../lib/pokerTables';
 import {
   pokerTableChannelName,
   type PokerHoleCardsRequest,
+  type PokerEmotePayload,
   type PokerTableBroadcast,
 } from '../../../lib/pokerRealtime';
+import { EMOTE_SHOW_MS } from '../../../lib/emotes';
+import EmoteArt from '../../../components/emotes/EmoteArt';
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
 import ActionCallout, { calloutDuration } from '../ActionCallout';
+import EmotePicker from '../EmotePicker';
 import {
   CardBackCover,
   DEAL_STAGGER_MS,
@@ -142,6 +146,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const { token, profile, setProfile, loading: profileLoading, error: profileError } = usePlayerProfile();
 
   const [tableState, setTableState] = useState<PokerTableBroadcast | null>(null);
+  // The emote showing over each seat right now, by seat number.
+  const [seatEmotes, setSeatEmotes] = useState<Record<number, PokerEmotePayload>>({});
   // This player's own hole cards for the current hand, opened by
   // POST /api/poker/hole-cards from the sealed copy in the state (SRS-6.1).
   const [myCards, setMyCards] = useState<{ handNumber: number; cards: Card[] } | null>(null);
@@ -196,6 +202,18 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     (state) => {
       setTableState(state);
       setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);
+    },
+    (emote) => {
+      setSeatEmotes((shown) => ({ ...shown, [emote.seatNumber]: emote }));
+      setTimeout(
+        () =>
+          setSeatEmotes((shown) => {
+            if (shown[emote.seatNumber]?.id !== emote.id) return shown;
+            const { [emote.seatNumber]: _gone, ...rest } = shown;
+            return rest;
+          }),
+        EMOTE_SHOW_MS
+      );
     }
   );
 
@@ -544,6 +562,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
       setLeaving(false);
       setJoinError(result.error || 'Unable to leave the table.');
     }
+  }
+
+  // An emote, for everyone at the table to see over this player's seat.
+  async function handleEmote(emote: string) {
+    if (!connected || !token) return;
+    const result = await sendAction(token, { tableId: params.tableId, action: 'emote', emote });
+    if (!result.ok && result.error) setActError(result.error);
   }
 
   async function handleAct(move: BettingMove, amount?: number) {
@@ -1050,6 +1075,21 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   </span>
                 ) : null}
 
+                {/* This seat's emote, popping up over the player's photo */}
+                {seat.playerId && seatEmotes[seat.seatNumber]?.playerId === seat.playerId ? (
+                  <span
+                    style={{ left: `${left}%`, top: `${top}%` }}
+                    className="pointer-events-none absolute z-40 -translate-x-1/2 -translate-y-[calc(100%+2.5rem)]"
+                  >
+                    <span key={seatEmotes[seat.seatNumber]?.id} className="emote-pop block">
+                      <EmoteArt
+                        emoteId={seatEmotes[seat.seatNumber]?.emote ?? ''}
+                        className={`h-24 w-24 drop-shadow-[0_6px_10px_rgba(0,0,0,0.5)] emote-move-${seatEmotes[seat.seatNumber]?.emote}`}
+                      />
+                    </span>
+                  </span>
+                ) : null}
+
                 {/* Dealer button (SRS-13.5) */}
                 {isDealer ? (
                   <span
@@ -1295,6 +1335,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             />
           ) : null}
         </div>
+
+        {/* Emotes, any time while seated */}
+        {mySeat ? (
+          <div className="absolute bottom-2 left-2 z-40 lg:bottom-4 lg:left-4">
+            <EmotePicker onSend={handleEmote} />
+          </div>
+        ) : null}
       </div>
 
         {/* Left: who you are — photo, balance, stack and Leave — and your cards */}

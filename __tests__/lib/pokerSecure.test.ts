@@ -29,6 +29,13 @@ describe('relayed action signatures', () => {
     expect(verifyRelayedAction(signed, SECRET, 'low-1', NOW + 1_000)).toEqual(action);
   });
 
+  it('signs the emote too, so it cannot be swapped for another', () => {
+    const emote = { ...action, action: 'emote' as const, move: undefined, amount: undefined, emote: 'gg' };
+    const signed = signRelayedAction(emote, SECRET);
+    expect(verifyRelayedAction(signed, SECRET, 'low-1', NOW)).toEqual(emote);
+    expect(verifyRelayedAction({ ...signed, emote: 'angry' }, SECRET, 'low-1', NOW)).toBeNull();
+  });
+
   it('accepts a signed buy-back', () => {
     const rebuy = { ...action, action: 'rebuy' as const, move: undefined, amount: undefined, buyIn: 500 };
     expect(verifyRelayedAction(signRelayedAction(rebuy, SECRET), SECRET, 'low-1', NOW)).toEqual(rebuy);

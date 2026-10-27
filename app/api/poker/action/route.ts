@@ -5,13 +5,14 @@ import { getPokerTableConfig } from '../../../../lib/pokerTables';
 import { getPokerServerSecret, signRelayedAction } from '../../../../lib/pokerSecure';
 import { POKER_EVENT_ACTION, pokerTableChannelName, type PokerActionRequest } from '../../../../lib/pokerRealtime';
 import type { BettingMove } from '../../../../lib/pokerTable';
+import { isEmoteId } from '../../../../lib/emotes';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
-const ACTIONS = ['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind'];
+const ACTIONS = ['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind', 'emote'];
 const MOVES: BettingMove[] = ['fold', 'check', 'call', 'bet', 'raise'];
 const isOptionalNumber = (value: unknown) => value === undefined || typeof value === 'number';
 
@@ -48,7 +49,8 @@ export async function POST(request: Request) {
     !isOptionalNumber(body.buyIn) ||
     !isOptionalNumber(body.seatNumber) ||
     !isOptionalNumber(body.amount) ||
-    (body.action === 'act' && !MOVES.includes(body.move as BettingMove))
+    (body.action === 'act' && !MOVES.includes(body.move as BettingMove)) ||
+    (body.action === 'emote' && !isEmoteId(body.emote))
   ) {
     return Response.json({ error: 'Invalid poker action.' }, { status: 400 });
   }
@@ -65,6 +67,7 @@ export async function POST(request: Request) {
       seatNumber: body.seatNumber,
       move: body.action === 'act' ? body.move : undefined,
       amount: body.amount,
+      emote: body.action === 'emote' ? body.emote : undefined,
     },
     secret
   );

@@ -15,14 +15,27 @@ import { PlayingCard } from './pokerUi';
 export const SHUFFLE_MS = 1300;
 /** Time between consecutive hole cards in the deal. */
 export const DEAL_STAGGER_MS = 90;
-/** Board cards are 40px wide (PlayingCard md) with a 6px gap. */
-const BOARD_CARD_PITCH = 46;
+/** Board cards are 40px wide (PlayingCard md) with a 6px gap; 56px (lg) on a big table. */
+export const BOARD_CARD_PITCH = { md: 46, lg: 62 };
 const WIDE_TABLE_PX = 560;
 
 const DECK_POS = { left: 26, top: 50 };
 const MUCK_POS = { left: 74, top: 50 };
 
 export const cssVars = (vars: Record<string, string>) => vars as CSSProperties;
+
+/** Whether a CSS media query matches, kept up to date (false until mounted). */
+export function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [query]);
+  return matches;
+}
 
 export function useElementSize(ref: RefObject<HTMLElement>) {
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -49,7 +62,10 @@ export interface TableGeometry {
   boardFromDeck: (index: number) => { x: number; y: number };
 }
 
-export function tableGeometry({ width, height }: { width: number; height: number }): TableGeometry {
+export function tableGeometry(
+  { width, height }: { width: number; height: number },
+  boardCardPitch: number = BOARD_CARD_PITCH.md
+): TableGeometry {
   const wide = width >= WIDE_TABLE_PX;
   const at = (pos: { left: number; top: number }) =>
     wide ? { x: (pos.left / 100) * width, y: (pos.top / 100) * height } : { x: width / 2, y: height / 2 };
@@ -61,7 +77,7 @@ export function tableGeometry({ width, height }: { width: number; height: number
     // Hole cards hang off the top right of the seat's photo.
     seatCards: (left, top) => ({ x: (left / 100) * width + 24, y: (top / 100) * height - 22 }),
     // The board row sits a little above the middle of the table.
-    boardFromDeck: (index) => ({ x: deck.x - (width / 2 + (index - 2) * BOARD_CARD_PITCH), y: deck.y - (height / 2 - 8) }),
+    boardFromDeck: (index) => ({ x: deck.x - (width / 2 + (index - 2) * boardCardPitch), y: deck.y - (height / 2 - 8) }),
   };
 }
 
@@ -285,7 +301,7 @@ export const slamVars = (slam: Slam) => ({
 });
 
 /** The card's back, covering its face until it flips over mid-slam. */
-export function CardBackCover({ size = 'md' }: { size?: 'sm' | 'md' }) {
+export function CardBackCover({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
   return (
     <span aria-hidden="true" className="poker-back-cover pointer-events-none absolute inset-0">
       <PlayingCard size={size} />

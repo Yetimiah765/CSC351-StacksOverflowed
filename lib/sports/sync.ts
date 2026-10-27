@@ -30,6 +30,29 @@ export function configuredSportKeys(): string[] {
   return keys.length > 0 ? keys : DEFAULT_SPORT_KEYS;
 }
 
+// The sports synced with the second key (getSecondOddsApiClient), so they use
+// its credits rather than the first key's.
+export const DEFAULT_SECOND_SPORT_KEYS = ['icehockey_nhl'];
+
+export function secondSportKeys(): string[] {
+  const raw = process.env.ODDS_API_SPORTS_2 || '';
+  const keys = raw.split(',').map((k) => k.trim()).filter(Boolean);
+  return keys.length > 0 ? keys : DEFAULT_SECOND_SPORT_KEYS;
+}
+
+// One summary for a sync run with both keys. `quota` stays the first key's;
+// callers that care report the second key's separately.
+export function mergeSyncSummaries(first: SyncSummary, second: SyncSummary): SyncSummary {
+  return {
+    events: first.events + second.events,
+    markets: first.markets + second.markets,
+    options: first.options + second.options,
+    skipped: [...first.skipped, ...second.skipped],
+    errors: [...first.errors, ...second.errors],
+    quota: first.quota,
+  };
+}
+
 async function expectRow<T>(query: PromiseLike<{ data: T; error: { message: string } | null }>, what: string): Promise<NonNullable<T>> {
   const { data, error } = await query;
   if (error || !data) throw new Error(`Failed to save ${what}: ${error?.message ?? 'no row returned'}`);

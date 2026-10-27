@@ -11,7 +11,7 @@
 --   * All timestamps are TIMESTAMPTZ.
 --   * Values the SRS defines as derivable are NOT stored, to avoid
 --     repeating the same fact in two places:
---       - total time played / money won / money lost (SUM of per-game rows)
+--       - total money won / money lost (SUM of per-game rows)
 --       - blind-box reward probability (1 / number of rewards in the box)
 --       - min/max poker buy-in (40x / 100x the table's big blind)
 --       - potential sports payout (wager amount x recorded odds)

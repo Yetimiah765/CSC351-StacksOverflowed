@@ -10,6 +10,7 @@ import {
 } from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
 import { changeBalance, finishBusy, getHand, removeHand, saveHand, startBusy } from '../hands';
+import { recordRound } from '../record';
 
 // Hit, Stand, Double, or Split (SRS-903.1, SRS-904.1, SRS-910, SRS-911) on
 // the hand being played. Body: { handId, move, step }, where `step` is the
@@ -18,8 +19,9 @@ import { changeBalance, finishBusy, getHand, removeHand, saveHand, startBusy } f
 // Double and Split first take another bet equal to the original (SRS-910.2,
 // SRS-911.2). When the last hand is done the dealer plays and every hand is
 // settled (SRS-906.1, SRS-907.1, SRS-911.6); the round's winnings and pushed
-// bets are then paid back in one balance change (SRS-908.1). Returns
-// { hand, balance? } — balance only when it changed.
+// bets are then paid back in one balance change (SRS-908.1), and the
+// round is saved to the hand history (SRS-909.1). Returns { hand, balance? }
+// — balance only when it changed.
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -78,6 +80,7 @@ export async function POST(request: Request) {
     }
 
     removeHand(playerId!);
+    await recordRound(supabase, playerId!, stored.bet, state, outcome, stored.startedAt);
     const view = handView(handId, stored.bet, state, outcome);
     const payout = totalStake(stored.bet, state) + outcome.net;
     if (payout <= 0) return Response.json({ hand: view, balance }, { status: 200 });

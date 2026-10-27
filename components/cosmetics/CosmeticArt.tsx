@@ -18,18 +18,22 @@ export default function CosmeticArt({
   artKey,
   category,
   avatar = true,
+  value,
   className,
 }: {
   artKey: string;
   category?: CosmeticCategory;
   // Profile outlines only: false draws just the ring, to go around a photo.
   avatar?: boolean;
+  // Chips only: draw the skin for this coin value (one of CHIP_SKIN_VALUES),
+  // as the games show their chips. Left out, the chip's main look.
+  value?: number;
   className?: string;
 }) {
   // useId gives each drawing its own gradient and filter ids, and is the
   // same on the server and in the browser.
   const id = useId();
-  const svg = useMemo(() => drawCosmetic(artKey, id, { avatar }), [artKey, id, avatar]);
+  const svg = useMemo(() => drawCosmetic(artKey, id, { avatar, value }), [artKey, id, avatar, value]);
   const size = className ?? (category ? SIZE[category] : 'h-full w-full');
 
   if (!svg) return <span aria-hidden="true" className={`block rounded-xl bg-slate-800 ${size}`} />;

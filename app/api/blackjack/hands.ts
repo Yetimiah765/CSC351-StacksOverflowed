@@ -12,6 +12,8 @@ export interface StoredHand {
   handId: number;
   bet: number;
   state: BlackjackState;
+  /** When the round was dealt (ISO time), for the hand history. */
+  startedAt: string;
 }
 
 const memory = globalThis as typeof globalThis & {

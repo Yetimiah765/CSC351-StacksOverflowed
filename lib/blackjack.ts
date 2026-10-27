@@ -127,6 +127,16 @@ export interface BlackjackState {
   deck: Card[];
 }
 
+/** One past hand in the player's history (SRS-909.1). */
+export interface BlackjackHistoryEntry {
+  handId: number;
+  bet: number;
+  result: BlackjackResult;
+  /** Coins won (positive), lost (negative), or 0 for a push. */
+  net: number;
+  completedAt: string;
+}
+
 /** How one finished hand came out. `net` is its balance change (SRS-909.1). */
 export interface HandOutcome {
   result: BlackjackResult;

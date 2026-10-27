@@ -3,6 +3,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { checkBlackjackBet, dealHand, handView } from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
 import { changeBalance, finishBusy, getHand, nextHandId, saveHand, startBusy } from '../hands';
+import { recordRound } from '../record';
 
 // Deal (SRS-901.1, SRS-902.1). Body: { bet }. Takes the bet out of the
 // balance, then shuffles with crypto.randomInt (SRS-NFR-5) and deals. A deal
@@ -37,13 +38,16 @@ export async function POST(request: Request) {
     if (!taken.ok) return Response.json({ error: taken.error }, { status: taken.status });
 
     const handId = nextHandId();
+    const startedAt = new Date().toISOString();
     const { state, outcome } = dealHand(bet, (n) => randomInt(n));
     if (!outcome) {
-      saveHand(playerId!, { handId, bet, state });
+      saveHand(playerId!, { handId, bet, state, startedAt });
       return Response.json({ hand: handView(handId, bet, state, null), balance: taken.balance }, { status: 200 });
     }
 
-    // A blackjack on the deal: pay back the bet plus any winnings now.
+    // A blackjack on the deal: save it to the history (SRS-909.1) and pay
+    // back the bet plus any winnings now.
+    await recordRound(supabase, playerId!, bet, state, outcome, startedAt);
     let balance = taken.balance;
     if (bet + outcome.net > 0) {
       const paid = await changeBalance(supabase, playerId!, bet + outcome.net);

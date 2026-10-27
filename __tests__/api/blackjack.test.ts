@@ -4,13 +4,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // Reads go through `.maybeSingle()`, resolving with the next queued entry in
 // `reads`. A balance update is `.update().eq().eq().select()`, and that
 // `.select()` resolves with the next entry in `updates` (default: the write
-// succeeds with the new balance).
+// succeeds with the new balance). `.insert()` records its rows in `inserted`
+// and resolves with `insertResult`; a list read
+// (`.select().eq().not().order().order().limit()`) resolves with `listResult`.
 function makeTableMock() {
   const builder: {
     select: ReturnType<typeof vi.fn>;
     eq: ReturnType<typeof vi.fn>;
     update: ReturnType<typeof vi.fn>;
     maybeSingle: ReturnType<typeof vi.fn>;
+    insert: ReturnType<typeof vi.fn>;
+    not: ReturnType<typeof vi.fn>;
+    order: ReturnType<typeof vi.fn>;
+    limit: ReturnType<typeof vi.fn>;
+    inserted: unknown[];
+    insertResult: { error: unknown };
+    listResult: { data: unknown; error: unknown };
     reads: { data: unknown; error: unknown }[];
     updates: { data: unknown; error: unknown }[];
     pendingUpdate: { balance: number } | null;
@@ -22,6 +31,16 @@ function makeTableMock() {
       return builder;
     }),
     maybeSingle: vi.fn(() => Promise.resolve(builder.reads.shift() ?? { data: null, error: null })),
+    insert: vi.fn((rows: unknown[]) => {
+      builder.inserted.push(...rows);
+      return Promise.resolve(builder.insertResult);
+    }),
+    not: vi.fn(() => builder),
+    order: vi.fn(() => builder),
+    limit: vi.fn(() => Promise.resolve(builder.listResult)),
+    inserted: [],
+    insertResult: { error: null },
+    listResult: { data: [], error: null },
     reads: [],
     updates: [],
     pendingUpdate: null,
@@ -38,6 +57,7 @@ function makeTableMock() {
 const tables = {
   player_sessions: makeTableMock(),
   players: makeTableMock(),
+  blackjack_hands: makeTableMock(),
 };
 
 vi.mock('../../lib/supabase', () => ({
@@ -48,6 +68,7 @@ import { getSupabaseClient } from '../../lib/supabase';
 import { GET } from '../../app/api/blackjack/route';
 import { POST as deal } from '../../app/api/blackjack/deal/route';
 import { POST as act } from '../../app/api/blackjack/action/route';
+import { GET as history } from '../../app/api/blackjack/history/route';
 import { clearHands, getHand, saveHand } from '../../app/api/blackjack/hands';
 
 function resetTable(table: ReturnType<typeof makeTableMock>) {
@@ -55,6 +76,13 @@ function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.eq.mockClear();
   table.update.mockClear();
   table.maybeSingle.mockClear();
+  table.insert.mockClear();
+  table.not.mockClear();
+  table.order.mockClear();
+  table.limit.mockClear();
+  table.inserted = [];
+  table.insertResult = { error: null };
+  table.listResult = { data: [], error: null };
   table.reads = [];
   table.updates = [];
   table.pendingUpdate = null;
@@ -88,6 +116,7 @@ function handInPlay(playerCards: string[], dealerCards: string[], deck: string[]
       dealerCards,
       deck,
     },
+    startedAt: '2026-10-27T18:00:00.000Z',
   });
 }
 
@@ -97,6 +126,7 @@ beforeEach(() => {
   } as never);
   resetTable(tables.player_sessions);
   resetTable(tables.players);
+  resetTable(tables.blackjack_hands);
   clearHands();
 });
 
@@ -406,5 +436,127 @@ describe('POST /api/blackjack/action', () => {
 
     expect((await act(req('/action', body))).status).toBe(400);
     expect(getHand(1)?.state.hands[0]!.cards).toEqual(['Ts', '2h']);
+  });
+});
+
+describe('Hand history (SRS-909.1)', () => {
+  const move = (m: string, step = 0) => act(req('/action', { handId: 4, move: m, step }));
+
+  it('saves a finished hand with its bet, result, and coins won', async () => {
+    signedIn();
+    handInPlay(['Ts', '9h'], ['Kd', '6c'], ['2s']);
+    hasBalance(950);
+
+    await move('stand');
+
+    expect(tables.blackjack_hands.inserted).toEqual([
+      {
+        player_id: 1,
+        bet_amount: 50,
+        result: 'Win',
+        net_amount: 50,
+        started_at: '2026-10-27T18:00:00.000Z',
+        completed_at: expect.any(String),
+      },
+    ]);
+  });
+
+  it('saves a lost or busted hand as minus its bet, as the table requires', async () => {
+    signedIn();
+    handInPlay(['Ts', '7h'], ['Kd', '6c'], ['8s']);
+
+    await move('hit');
+
+    expect(tables.blackjack_hands.inserted).toEqual([
+      expect.objectContaining({ bet_amount: 50, result: 'Bust', net_amount: -50 }),
+    ]);
+  });
+
+  it('saves a doubled hand on its doubled bet', async () => {
+    signedIn();
+    handInPlay(['5s', '6h'], ['Kd', '7c'], ['4d']);
+    hasBalance(950);
+
+    await move('double');
+
+    expect(tables.blackjack_hands.inserted).toEqual([
+      expect.objectContaining({ bet_amount: 100, result: 'Lose', net_amount: -100 }),
+    ]);
+  });
+
+  it('saves the two hands of a split round as two rows, each on its own bet', async () => {
+    signedIn();
+    handInPlay(['8s', '8h'], ['9d', '7c'], ['3c', '2d', 'Td', 'Kc', '4s']);
+    hasBalance(950);
+    await move('split');
+    signedIn();
+    await move('hit', 1);
+    signedIn();
+    hasBalance(900);
+    hasBalance(850);
+    await move('double', 2);
+
+    expect(tables.blackjack_hands.inserted).toEqual([
+      expect.objectContaining({ bet_amount: 50, result: 'Win', net_amount: 50 }),
+      expect.objectContaining({ bet_amount: 100, result: 'Push', net_amount: 0 }),
+    ]);
+  });
+
+  it('saves nothing while the round is still in play', async () => {
+    signedIn();
+    handInPlay(['Ts', '2h'], ['Kd', '6c'], ['5s']);
+
+    await move('hit');
+
+    expect(tables.blackjack_hands.insert).not.toHaveBeenCalled();
+  });
+
+  it('still pays out when the history cannot be saved', async () => {
+    signedIn();
+    handInPlay(['Ts', '9h'], ['Kd', '6c'], ['2s']);
+    hasBalance(950);
+    tables.blackjack_hands.insertResult = { error: { message: 'boom' } };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await move('stand');
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ balance: 1050 });
+  });
+
+  it("GET returns the player's own recent hands, newest first", async () => {
+    signedIn();
+    tables.blackjack_hands.listResult = {
+      data: [
+        { hand_id: 9, bet_amount: '100', result: 'Win', net_amount: '150', completed_at: '2026-10-27T18:05:00Z' },
+        { hand_id: 8, bet_amount: 50, result: 'Bust', net_amount: -50, completed_at: '2026-10-27T18:01:00Z' },
+      ],
+      error: null,
+    };
+
+    const response = await history(req('/history'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      hands: [
+        { handId: 9, bet: 100, result: 'Win', net: 150, completedAt: '2026-10-27T18:05:00Z' },
+        { handId: 8, bet: 50, result: 'Bust', net: -50, completedAt: '2026-10-27T18:01:00Z' },
+      ],
+    });
+    expect(tables.blackjack_hands.eq).toHaveBeenCalledWith('player_id', 1);
+    expect(tables.blackjack_hands.order).toHaveBeenCalledWith('completed_at', { ascending: false });
+    expect(tables.blackjack_hands.limit).toHaveBeenCalledWith(20);
+  });
+
+  it('GET returns 401 without a session', async () => {
+    expect((await history(req('/history', undefined, null))).status).toBe(401);
+  });
+
+  it('GET returns 500 when the history cannot be read', async () => {
+    signedIn();
+    tables.blackjack_hands.listResult = { data: null, error: { message: 'boom' } };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    expect((await history(req('/history'))).status).toBe(500);
   });
 });

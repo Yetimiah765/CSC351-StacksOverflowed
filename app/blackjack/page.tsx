@@ -1,14 +1,17 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useId, useState } from "react";
-import { BALANCE_CHANGED_EVENT, notifyBalanceChanged } from "../../lib/balanceEvents";
+import { createContext, useCallback, useContext, useEffect, useId, useState } from "react";
+import { APPEARANCE_CHANGED_EVENT, BALANCE_CHANGED_EVENT, notifyBalanceChanged } from "../../lib/balanceEvents";
+import type { Cosmetic } from "../../lib/cosmetics";
 import {
   BLACKJACK_CHIPS,
   MIN_BLACKJACK_BET,
   chipsFor,
   nearestChipBet,
   type BlackjackHandView,
+  type BlackjackHistoryEntry,
   type BlackjackMove,
 } from "../../lib/blackjack";
 
@@ -35,6 +38,54 @@ const MOVES: { move: BlackjackMove; label: string; hint: string }[] = [
 ];
 
 const SUITS: Record<string, string> = { s: "♠", h: "♥", d: "♦", c: "♣" };
+
+// The player's equipped card back and chip set (UR-120), drawn by the shared
+// cosmetics artwork. Loaded only when needed, like the nav bar's outline:
+// the drawings are a large file.
+const CosmeticArt = dynamic(() => import("../../components/cosmetics/CosmeticArt"), { ssr: false });
+
+/** Art keys of the equipped card back and chip set; null draws the table's own look. */
+interface EquippedLooks {
+  card: string | null;
+  chip: string | null;
+}
+const LooksContext = createContext<EquippedLooks>({ card: null, chip: null });
+
+/**
+ * Loads what the logged-in player has equipped from GET /api/cosmetics, and
+ * again whenever the profile page equips something else. Guests, and any
+ * failure, keep the table's own card back and chips.
+ */
+function useEquippedLooks(): EquippedLooks {
+  const [looks, setLooks] = useState<EquippedLooks>({ card: null, chip: null });
+  const [version, setVersion] = useState(0);
+
+  useEffect(() => {
+    const handleChange = () => setVersion((v) => v + 1);
+    window.addEventListener(APPEARANCE_CHANGED_EVENT, handleChange);
+    return () => window.removeEventListener(APPEARANCE_CHANGED_EVENT, handleChange);
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem("player_token");
+    if (!token) return;
+    let cancelled = false;
+    fetch("/api/cosmetics", { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data: { owned: Cosmetic[]; equipped: Partial<Record<Cosmetic["category"], number>> } = await res.json();
+        const artFor = (category: Cosmetic["category"]) =>
+          data.owned.find((cosmetic) => cosmetic.cosmeticId === data.equipped[category])?.artKey ?? null;
+        if (!cancelled) setLooks({ card: artFor("Card"), chip: artFor("Chip") });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [version]);
+
+  return looks;
+}
 
 /**
  * SRS-910.5: an "i" button whose explanation shows on hover, on keyboard
@@ -74,6 +125,19 @@ function InfoTip({ label, children }: { label: string; children: React.ReactNode
 /** 'Td' → { rank: '10', suit: '♦' }; null is the face-down card. */
 function PlayingCard({ code, index }: { code: string | null; index: number }) {
   const tilt = index % 2 === 0 ? "-rotate-3" : "rotate-3";
+  const looks = useContext(LooksContext);
+
+  if (code === null && looks.card) {
+    // The equipped card back, the same 5:7 shape as the cards.
+    return (
+      <div
+        className={`${tilt} relative h-28 w-20 overflow-hidden rounded-xl shadow-[0_10px_25px_rgba(0,0,0,0.55)]`}
+        aria-label="Face-down card"
+      >
+        <CosmeticArt artKey={looks.card} className="h-full w-full" />
+      </div>
+    );
+  }
 
   if (code === null) {
     return (
@@ -136,6 +200,17 @@ function HandLabel({ name, value, bust }: { name: string; value: number; bust?: 
 }
 
 function Chip({ value, small }: { value: number; small?: boolean }) {
+  const looks = useContext(LooksContext);
+  const size = small ? "h-10 w-10" : "h-12 w-12";
+  if (looks.chip) {
+    // The equipped chip set's skin for this value, which shows the number.
+    return (
+      <span className={`block rounded-full drop-shadow-[0_3px_5px_rgba(0,0,0,0.5)] ${size}`}>
+        <CosmeticArt artKey={looks.chip} value={value} className="h-full w-full" />
+      </span>
+    );
+  }
+
   const style = CHIP_STYLES[value] ?? CHIP_STYLES[10]!;
   return (
     <span
@@ -175,6 +250,14 @@ function resultTone(result: string | null) {
   if (result === "Win") return "text-emerald-300";
   if (result === "Push") return "text-slate-300";
   return "text-red-300";
+}
+
+/** "3:42 PM" for today's hands, "Oct 26, 3:42 PM" for older ones. */
+function formatPlayedAt(iso: string): string {
+  const when = new Date(iso);
+  const time = when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (when.toDateString() === new Date().toDateString()) return time;
+  return `${when.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
 }
 
 function getToken() {
@@ -223,6 +306,7 @@ function usePlayerBalance() {
 }
 
 export default function BlackjackPage() {
+  const looks = useEquippedLooks();
   const { signedIn, balance } = usePlayerBalance();
   // Each chip the player has put down, in order, so Undo can take the last
   // one back and the betting circle can show the real stack. Kept after a
@@ -270,6 +354,21 @@ export default function BlackjackPage() {
   const available = balance ?? 0;
   const canBet = !hand && !busy;
 
+  // SRS-909.1: the player's recent hands; null until loaded.
+  const [history, setHistory] = useState<BlackjackHistoryEntry[] | null>(null);
+  const loadHistory = useCallback(async () => {
+    const token = getToken();
+    if (!token) return;
+    const res = await fetch("/api/blackjack/history", { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return;
+    const data = await res.json();
+    setHistory(data.hands);
+  }, []);
+
+  useEffect(() => {
+    loadHistory().catch(() => {});
+  }, [loadHistory]);
+
   // Pick up an unfinished hand after a refresh.
   const loadHand = useCallback(async () => {
     const token = getToken();
@@ -314,6 +413,7 @@ export default function BlackjackPage() {
       setHand(data.hand);
       // Refreshes both the nav bar and this page's balance.
       notifyBalanceChanged();
+      if (data.hand.finished) loadHistory().catch(() => {});
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -339,6 +439,7 @@ export default function BlackjackPage() {
       // The balance changes when the player doubles or splits (SRS-910.2,
       // SRS-911.2) and when the round ends (SRS-908.1).
       if (data.balance !== undefined || data.hand.finished) notifyBalanceChanged();
+      if (data.hand.finished) loadHistory().catch(() => {});
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -399,405 +500,456 @@ export default function BlackjackPage() {
   const circleChips = Array.from({ length: repeats }, () => betChips).flat().slice(-5);
 
   return (
-    <main className="min-h-page bg-[radial-gradient(ellipse_at_top,_#14532d_0%,_#052e16_30%,_#020617_70%)] px-4 pb-10 pt-6 text-slate-100 sm:px-6">
-      <div className="mx-auto w-full max-w-7xl">
-        {/* Header */}
-        <header className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-sm text-slate-400 transition hover:text-emerald-300">
-              ← All games
-            </Link>
-            <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
-              Blackjack
-              <span aria-hidden className="text-xl tracking-[0.15em]">
-                <span className="text-slate-300">♠</span>
-                <span className="text-red-500">♥</span>
-              </span>
-            </h1>
-          </div>
-          <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-300">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">Blackjack pays 3 to 2</span>
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">Dealer stands on 17</span>
-          </div>
-        </header>
+    <LooksContext.Provider value={looks}>
+      <main className="min-h-page bg-[radial-gradient(ellipse_at_top,_#14532d_0%,_#052e16_30%,_#020617_70%)] px-4 pb-10 pt-6 text-slate-100 sm:px-6">
+        <div className="mx-auto w-full max-w-7xl">
+          {/* Header */}
+          <header className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="text-sm text-slate-400 transition hover:text-emerald-300">
+                ← All games
+              </Link>
+              <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
+                Blackjack
+                <span aria-hidden className="text-xl tracking-[0.15em]">
+                  <span className="text-slate-300">♠</span>
+                  <span className="text-red-500">♥</span>
+                </span>
+              </h1>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs font-medium text-slate-300">
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">Blackjack pays 3 to 2</span>
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1.5">Dealer stands on 17</span>
+            </div>
+          </header>
 
-        {/* AI assistant: the suggestion shows in the box on the right once
-            the player asks for one. */}
-        <section className="mt-5 grid gap-4 rounded-3xl border border-emerald-400/15 bg-slate-900/80 p-4 shadow-xl shadow-black/40 sm:grid-cols-[14rem_1fr] sm:p-5">
-          <div className="flex flex-col">
-            <h2 className="flex items-center gap-2 font-semibold text-emerald-200">
-              <span aria-hidden className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-400/10">
-                ✨
-              </span>
-              AI assistant
-            </h2>
-            <p className="mt-2 text-sm text-slate-400">Stuck on a hand? Ask for a suggestion on your next move.</p>
-            <button
-              disabled
-              className="mt-3 cursor-not-allowed rounded-xl bg-emerald-400 py-2.5 text-sm font-semibold text-slate-950 opacity-60 shadow-lg shadow-emerald-500/20 sm:mt-auto"
+          {/* AI assistant: the suggestion shows in the box on the right once
+              the player asks for one. */}
+          <section className="mt-5 grid gap-4 rounded-3xl border border-emerald-400/15 bg-slate-900/80 p-4 shadow-xl shadow-black/40 sm:grid-cols-[14rem_1fr] sm:p-5">
+            <div className="flex flex-col">
+              <h2 className="flex items-center gap-2 font-semibold text-emerald-200">
+                <span aria-hidden className="flex h-8 w-8 items-center justify-center rounded-xl bg-emerald-400/10">
+                  ✨
+                </span>
+                AI assistant
+              </h2>
+              <p className="mt-2 text-sm text-slate-400">Stuck on a hand? Ask for a suggestion on your next move.</p>
+              <button
+                disabled
+                className="mt-3 cursor-not-allowed rounded-xl bg-emerald-400 py-2.5 text-sm font-semibold text-slate-950 opacity-60 shadow-lg shadow-emerald-500/20 sm:mt-auto"
+              >
+                Get suggestion
+              </button>
+            </div>
+
+            <div
+              aria-live="polite"
+              className="flex min-h-[7.5rem] flex-col justify-center rounded-2xl border border-dashed border-white/10 bg-black/20 px-5 py-4"
             >
-              Get suggestion
-            </button>
-          </div>
-
-          <div
-            aria-live="polite"
-            className="flex min-h-[7.5rem] flex-col justify-center rounded-2xl border border-dashed border-white/10 bg-black/20 px-5 py-4"
-          >
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Suggestion</p>
-            <p className="mt-1 text-2xl font-bold text-slate-600">—</p>
-            <p className="mt-1 text-sm text-slate-500">
-              The assistant&apos;s recommended move and the reason for it will appear here.
-            </p>
-          </div>
-        </section>
-
-        {/* Your bet on the left, the table in the middle, your move on the
-            right. Narrower screens show the table first, then the panels. Both
-            panels share a minimum height, so they match beside the table. */}
-        <div className="mt-6 grid items-center gap-5 md:grid-cols-2 lg:grid-cols-[17rem_minmax(0,1fr)_17rem]">
-          {/* Table: wood rail around a half-moon felt, dealer at the flat edge */}
-          <section className="rounded-b-[50%] rounded-t-3xl bg-gradient-to-b from-amber-800 via-amber-900 to-amber-950 p-3 shadow-[0_30px_60px_rgba(0,0,0,0.7)] md:col-span-2 lg:order-2 lg:col-span-1">
-            <div className="relative overflow-hidden rounded-b-[50%] rounded-t-2xl bg-[radial-gradient(ellipse_at_center,_#15803d_0%,_#065f46_55%,_#022c22_100%)] px-4 pb-14 pt-6 shadow-[inset_0_0_60px_rgba(0,0,0,0.65)]">
-              {/* Dealer */}
-              <div className="flex min-h-[10.5rem] flex-col items-center gap-3">
-                {hand ? (
-                  <>
-                    <HandLabel name="Dealer" value={hand.dealerTotal} bust={hand.dealerTotal > 21} />
-                    <Hand cards={hand.dealerCards} />
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-100/70">Dealer</p>
-                    <Hand cards={[null, null]} />
-                  </>
-                )}
-              </div>
-
-              {/* The result once the hand is over, otherwise the table rules */}
-              <div className="relative mx-auto mt-2 max-w-lg" aria-live="polite">
-                <svg
-                  viewBox="0 0 600 120"
-                  className={`w-full transition-opacity ${result ? "opacity-20" : ""}`}
-                  aria-hidden="true"
-                >
-                  <defs>
-                    <path id="bj-arc-outer" d="M 30 20 Q 300 115 570 20" />
-                    <path id="bj-arc-inner" d="M 90 58 Q 300 140 510 58" />
-                  </defs>
-                  <text className="fill-amber-300" fontSize="20" fontWeight="700" letterSpacing="5">
-                    <textPath href="#bj-arc-outer" startOffset="50%" textAnchor="middle">
-                      BLACKJACK PAYS 3 TO 2
-                    </textPath>
-                  </text>
-                  <text className="fill-emerald-100/60" fontSize="12" letterSpacing="2.5">
-                    <textPath href="#bj-arc-inner" startOffset="50%" textAnchor="middle">
-                      DEALER MUST STAND ON 17 AND DRAW TO 16
-                    </textPath>
-                  </text>
-                </svg>
-                {result ? (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <p
-                      className={`animate-box-reveal rounded-full border px-6 py-2 text-xl font-bold tabular-nums shadow-lg shadow-black/40 backdrop-blur-sm ${result.tone}`}
-                    >
-                      {result.text}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-
-              {/* Player */}
-              <div className="flex flex-col items-center gap-3">
-                {hand ? (
-                  <div className="flex flex-wrap items-start justify-center gap-6">
-                    {hand.hands.map((playerHand, index) => {
-                      const split = hand.hands.length > 1;
-                      const playing = split && hand.active === index;
-                      const waiting = split && hand.active !== null && hand.active !== index;
-                      return (
-                        <div
-                          key={index}
-                          className={`flex flex-col items-center gap-3 rounded-2xl px-3 py-2 transition ${
-                            playing ? "bg-emerald-300/10 ring-1 ring-emerald-300/50" : ""
-                          } ${waiting ? "opacity-60" : ""}`}
-                        >
-                          <Hand cards={playerHand.cards} />
-                          <HandLabel
-                            name={split ? `Hand ${index + 1}` : "You"}
-                            value={playerHand.total}
-                            bust={playerHand.total > 21}
-                          />
-                          {split ? (
-                            <p className="text-xs tabular-nums text-amber-100/80">
-                              {playerHand.bet.toLocaleString()} coins{playerHand.doubled ? " · doubled" : ""}
-                              {playerHand.result ? (
-                                <span className={`font-semibold ${resultTone(playerHand.result)}`}>
-                                  {" "}
-                                  · {playerHand.result}
-                                </span>
-                              ) : null}
-                            </p>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <>
-                    <Hand cards={[null, null]} />
-                    <p className="text-xs text-emerald-100/60">Place your bet and press Deal.</p>
-                  </>
-                )}
-
-                {/* Betting circle */}
-                <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-amber-300/40 bg-black/10">
-                  {bet > 0 ? (
-                    <div className="flex flex-col items-center">
-                      {/* The most recent chips, stacked, newest on top */}
-                      <div className="relative h-14 w-10">
-                        {(circleChips.length ? circleChips : [MIN_BLACKJACK_BET]).map((value, index) => (
-                          <span key={index} className="absolute left-0" style={{ bottom: index * 4 }}>
-                            <Chip value={value} small />
-                          </span>
-                        ))}
-                      </div>
-                      <span className="text-xs font-semibold tabular-nums text-amber-100">{bet.toLocaleString()}</span>
-                    </div>
-                  ) : (
-                    <span className="text-[10px] font-semibold uppercase tracking-widest text-amber-200/50">Place bet</span>
-                  )}
-                </div>
-              </div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Suggestion</p>
+              <p className="mt-1 text-2xl font-bold text-slate-600">—</p>
+              <p className="mt-1 text-sm text-slate-500">
+                The assistant&apos;s recommended move and the reason for it will appear here.
+              </p>
             </div>
           </section>
 
-            <div className="flex flex-col rounded-3xl border border-white/5 bg-slate-900/80 p-5 shadow-xl shadow-black/40 md:min-h-[23rem] lg:order-1">
-              <div className="flex items-baseline justify-between">
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Your bet</h2>
-                <p className="text-2xl font-bold tabular-nums text-amber-300">
-                  {bet.toLocaleString()} <span className="text-sm font-medium text-slate-400">coins</span>
-                </p>
-              </div>
-              <p className="mt-1 text-right text-xs tabular-nums text-slate-500">
-                {signedIn === false ? (
-                  // Guests have nothing to bet; in the same line, so the panel
-                  // stays the same height as Your move.
-                  <>
-                    <Link href="/login" className="font-semibold text-emerald-300 hover:text-emerald-200">
-                      Log in
-                    </Link>{" "}
-                    to place a bet
-                  </>
-                ) : balance === null ? (
-                  "Loading balance…"
-                ) : (
-                  `${(hand ? available : available - chipTotal).toLocaleString()} coins left to bet`
-                )}
-              </p>
+          {/* Your bet on the left, the table in the middle, your move on the
+              right. Narrower screens show the table first, then the panels. Both
+              panels share a minimum height, so they match beside the table. */}
+          <div className="mt-6 grid items-center gap-5 md:grid-cols-2 lg:grid-cols-[17rem_minmax(0,1fr)_17rem]">
+            {/* Table: wood rail around a half-moon felt, dealer at the flat edge */}
+            <section className="rounded-b-[50%] rounded-t-3xl bg-gradient-to-b from-amber-800 via-amber-900 to-amber-950 p-3 shadow-[0_30px_60px_rgba(0,0,0,0.7)] md:col-span-2 lg:order-2 lg:col-span-1">
+              <div className="relative overflow-hidden rounded-b-[50%] rounded-t-2xl bg-[radial-gradient(ellipse_at_center,_#15803d_0%,_#065f46_55%,_#022c22_100%)] px-4 pb-14 pt-6 shadow-[inset_0_0_60px_rgba(0,0,0,0.65)]">
+                {/* Dealer */}
+                <div className="flex min-h-[10.5rem] flex-col items-center gap-3">
+                  {hand ? (
+                    <>
+                      <HandLabel name="Dealer" value={hand.dealerTotal} bust={hand.dealerTotal > 21} />
+                      <Hand cards={hand.dealerCards} />
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs font-semibold uppercase tracking-[0.3em] text-emerald-100/70">Dealer</p>
+                      <Hand cards={[null, null]} />
+                    </>
+                  )}
+                </div>
 
-              <div className="mt-3 flex items-center justify-between gap-2">
-                {BLACKJACK_CHIPS.map((value) => {
-                  const tooMuch = chipTotal + value > available;
-                  return (
+                {/* The result once the hand is over, otherwise the table rules */}
+                <div className="relative mx-auto mt-2 max-w-lg" aria-live="polite">
+                  <svg
+                    viewBox="0 0 600 120"
+                    className={`w-full transition-opacity ${result ? "opacity-20" : ""}`}
+                    aria-hidden="true"
+                  >
+                    <defs>
+                      <path id="bj-arc-outer" d="M 30 20 Q 300 115 570 20" />
+                      <path id="bj-arc-inner" d="M 90 58 Q 300 140 510 58" />
+                    </defs>
+                    <text className="fill-amber-300" fontSize="20" fontWeight="700" letterSpacing="5">
+                      <textPath href="#bj-arc-outer" startOffset="50%" textAnchor="middle">
+                        BLACKJACK PAYS 3 TO 2
+                      </textPath>
+                    </text>
+                    <text className="fill-emerald-100/60" fontSize="12" letterSpacing="2.5">
+                      <textPath href="#bj-arc-inner" startOffset="50%" textAnchor="middle">
+                        DEALER MUST STAND ON 17 AND DRAW TO 16
+                      </textPath>
+                    </text>
+                  </svg>
+                  {result ? (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <p
+                        className={`animate-box-reveal rounded-full border px-6 py-2 text-xl font-bold tabular-nums shadow-lg shadow-black/40 backdrop-blur-sm ${result.tone}`}
+                      >
+                        {result.text}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+
+                {/* Player */}
+                <div className="flex flex-col items-center gap-3">
+                  {hand ? (
+                    <div className="flex flex-wrap items-start justify-center gap-6">
+                      {hand.hands.map((playerHand, index) => {
+                        const split = hand.hands.length > 1;
+                        const playing = split && hand.active === index;
+                        const waiting = split && hand.active !== null && hand.active !== index;
+                        return (
+                          <div
+                            key={index}
+                            className={`flex flex-col items-center gap-3 rounded-2xl px-3 py-2 transition ${
+                              playing ? "bg-emerald-300/10 ring-1 ring-emerald-300/50" : ""
+                            } ${waiting ? "opacity-60" : ""}`}
+                          >
+                            <Hand cards={playerHand.cards} />
+                            <HandLabel
+                              name={split ? `Hand ${index + 1}` : "You"}
+                              value={playerHand.total}
+                              bust={playerHand.total > 21}
+                            />
+                            {split ? (
+                              <p className="text-xs tabular-nums text-amber-100/80">
+                                {playerHand.bet.toLocaleString()} coins{playerHand.doubled ? " · doubled" : ""}
+                                {playerHand.result ? (
+                                  <span className={`font-semibold ${resultTone(playerHand.result)}`}>
+                                    {" "}
+                                    · {playerHand.result}
+                                  </span>
+                                ) : null}
+                              </p>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <>
+                      <Hand cards={[null, null]} />
+                      <p className="text-xs text-emerald-100/60">Place your bet and press Deal.</p>
+                    </>
+                  )}
+
+                  {/* Betting circle */}
+                  <div className="flex h-24 w-24 items-center justify-center rounded-full border-2 border-amber-300/40 bg-black/10">
+                    {bet > 0 ? (
+                      <div className="flex flex-col items-center">
+                        {/* The most recent chips, stacked, newest on top */}
+                        <div className="relative h-14 w-10">
+                          {(circleChips.length ? circleChips : [MIN_BLACKJACK_BET]).map((value, index) => (
+                            <span key={index} className="absolute left-0" style={{ bottom: index * 4 }}>
+                              <Chip value={value} small />
+                            </span>
+                          ))}
+                        </div>
+                        <span className="text-xs font-semibold tabular-nums text-amber-100">{bet.toLocaleString()}</span>
+                      </div>
+                    ) : (
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-amber-200/50">Place bet</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+              <div className="flex flex-col rounded-3xl border border-white/5 bg-slate-900/80 p-5 shadow-xl shadow-black/40 md:min-h-[23rem] lg:order-1">
+                <div className="flex items-baseline justify-between">
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Your bet</h2>
+                  <p className="text-2xl font-bold tabular-nums text-amber-300">
+                    {bet.toLocaleString()} <span className="text-sm font-medium text-slate-400">coins</span>
+                  </p>
+                </div>
+                <p className="mt-1 text-right text-xs tabular-nums text-slate-500">
+                  {signedIn === false ? (
+                    // Guests have nothing to bet; in the same line, so the panel
+                    // stays the same height as Your move.
+                    <>
+                      <Link href="/login" className="font-semibold text-emerald-300 hover:text-emerald-200">
+                        Log in
+                      </Link>{" "}
+                      to place a bet
+                    </>
+                  ) : balance === null ? (
+                    "Loading balance…"
+                  ) : (
+                    `${(hand ? available : available - chipTotal).toLocaleString()} coins left to bet`
+                  )}
+                </p>
+
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  {BLACKJACK_CHIPS.map((value) => {
+                    const tooMuch = chipTotal + value > available;
+                    return (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => {
+                          setTyped(null);
+                          setBetChips((chips) => [...chips, value]);
+                        }}
+                        disabled={!canBet || tooMuch}
+                        aria-label={`Add ${value} coins`}
+                        title={hand ? "Finish this hand first" : tooMuch ? "Not enough coins" : `Add ${value}`}
+                        className="rounded-full transition hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:translate-y-0"
+                      >
+                        <Chip value={value} />
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <label className="mt-4 block">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Or type an amount
+                  </span>
+                  <span
+                    className={`mt-1.5 flex items-center gap-2 rounded-xl border bg-black/30 px-3 transition focus-within:border-emerald-300/70 ${
+                      typedProblem ? "border-red-400/60" : "border-white/10"
+                    } ${!canBet || available < MIN_BLACKJACK_BET ? "opacity-40" : ""}`}
+                  >
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      placeholder={`${MIN_BLACKJACK_BET} or more`}
+                      value={typed ?? (chipTotal > 0 ? String(chipTotal) : "")}
+                      onFocus={() => setTyped(chipTotal > 0 ? String(chipTotal) : "")}
+                      onChange={(event) => typeBet(event.target.value)}
+                      onBlur={() => setTyped(null)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                      }}
+                      disabled={!canBet || available < MIN_BLACKJACK_BET}
+                      aria-invalid={typedProblem !== null}
+                      aria-describedby={typedProblem ? "bet-amount-problem" : undefined}
+                      className="w-full min-w-0 bg-transparent py-2.5 text-lg font-semibold tabular-nums text-amber-200 outline-none placeholder:text-base placeholder:font-normal placeholder:text-slate-600 disabled:cursor-not-allowed"
+                    />
+                    <span className="text-sm text-slate-500">coins</span>
+                  </span>
+                  {typedProblem ? (
+                    <span id="bet-amount-problem" className="mt-1 block text-xs text-red-400">
+                      {typedProblem}
+                    </span>
+                  ) : null}
+                </label>
+
+
+                {inPlay ? (
+                  <p className="mt-auto pt-4 text-sm text-slate-400">
+                    Bet in play — <span className="font-semibold tabular-nums text-amber-200">{bet.toLocaleString()}</span>{" "}
+                    coins. Hit, Stand, Double, or Split to play the hand.
+                  </p>
+                ) : finished ? (
+                  <div className="mt-auto pt-4">
                     <button
-                      key={value}
+                      type="button"
+                      onClick={newHand}
+                      className="w-full rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300"
+                    >
+                      New hand
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
+                    <button
                       type="button"
                       onClick={() => {
                         setTyped(null);
-                        setBetChips((chips) => [...chips, value]);
+                        setBetChips((chips) => chips.slice(0, -1));
                       }}
-                      disabled={!canBet || tooMuch}
-                      aria-label={`Add ${value} coins`}
-                      title={hand ? "Finish this hand first" : tooMuch ? "Not enough coins" : `Add ${value}`}
-                      className="rounded-full transition hover:-translate-y-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 active:translate-y-0 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:translate-y-0"
+                      disabled={chipTotal === 0 || busy}
+                      className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10"
                     >
-                      <Chip value={value} />
+                      Undo
                     </button>
-                  );
-                })}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTyped(null);
+                        setBetChips([]);
+                      }}
+                      disabled={chipTotal === 0 || busy}
+                      className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      type="button"
+                      onClick={deal}
+                      disabled={chipTotal < MIN_BLACKJACK_BET || busy}
+                      className="col-span-2 rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-emerald-400"
+                    >
+                      {busy ? "Dealing…" : "Deal"}
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <label className="mt-4 block">
-                <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                  Or type an amount
-                </span>
-                <span
-                  className={`mt-1.5 flex items-center gap-2 rounded-xl border bg-black/30 px-3 transition focus-within:border-emerald-300/70 ${
-                    typedProblem ? "border-red-400/60" : "border-white/10"
-                  } ${!canBet || available < MIN_BLACKJACK_BET ? "opacity-40" : ""}`}
-                >
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="off"
-                    placeholder={`${MIN_BLACKJACK_BET} or more`}
-                    value={typed ?? (chipTotal > 0 ? String(chipTotal) : "")}
-                    onFocus={() => setTyped(chipTotal > 0 ? String(chipTotal) : "")}
-                    onChange={(event) => typeBet(event.target.value)}
-                    onBlur={() => setTyped(null)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") event.currentTarget.blur();
-                    }}
-                    disabled={!canBet || available < MIN_BLACKJACK_BET}
-                    aria-invalid={typedProblem !== null}
-                    aria-describedby={typedProblem ? "bet-amount-problem" : undefined}
-                    className="w-full min-w-0 bg-transparent py-2.5 text-lg font-semibold tabular-nums text-amber-200 outline-none placeholder:text-base placeholder:font-normal placeholder:text-slate-600 disabled:cursor-not-allowed"
-                  />
-                  <span className="text-sm text-slate-500">coins</span>
-                </span>
-                {typedProblem ? (
-                  <span id="bet-amount-problem" className="mt-1 block text-xs text-red-400">
-                    {typedProblem}
-                  </span>
-                ) : null}
-              </label>
-
-
-              {inPlay ? (
-                <p className="mt-auto pt-4 text-sm text-slate-400">
-                  Bet in play — <span className="font-semibold tabular-nums text-amber-200">{bet.toLocaleString()}</span>{" "}
-                  coins. Hit, Stand, Double, or Split to play the hand.
-                </p>
-              ) : finished ? (
-                <div className="mt-auto pt-4">
-                  <button
-                    type="button"
-                    onClick={newHand}
-                    className="w-full rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300"
-                  >
-                    New hand
-                  </button>
+              <div className="flex flex-col rounded-3xl border border-white/5 bg-slate-900/80 p-5 shadow-xl shadow-black/40 md:min-h-[23rem] lg:order-3">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Your move</h2>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {MOVES.map(({ move, label, hint }) => (
+                    <button
+                      key={move}
+                      type="button"
+                      onClick={() => play(move)}
+                      disabled={!inPlay || busy}
+                      className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-emerald-300/60 hover:bg-emerald-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
+                    >
+                      {label}
+                      <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
+                        {hint}
+                      </kbd>
+                    </button>
+                  ))}
+                  <div className="col-span-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => play("double")}
+                      disabled={!doubleAllowed}
+                      title={doubleReason}
+                      className="flex flex-1 items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-amber-300/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
+                    >
+                      <span>
+                        Double
+                        {extraCost > 0 ? (
+                          <span className="ml-2 text-sm font-medium tabular-nums text-amber-300/80">
+                            +{extraCost.toLocaleString()}
+                          </span>
+                        ) : null}
+                      </span>
+                      <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
+                        D
+                      </kbd>
+                    </button>
+                    <InfoTip label="What does Double do?">
+                      <span className="mb-1 block font-semibold text-amber-200">Double</span>
+                      Doubles your bet and gives you exactly one more card, then your turn ends.{" "}
+                      {extraCost > 0
+                        ? `It costs another ${extraCost.toLocaleString()} coins, so your bet becomes ${(extraCost * 2).toLocaleString()}.`
+                        : "It costs the same amount as your bet again."}{" "}
+                      Wins and losses are paid on the doubled bet. Only allowed on a hand&apos;s first two cards.
+                    </InfoTip>
+                  </div>
+                  <div className="col-span-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => play("split")}
+                      disabled={!splitAllowed}
+                      title={splitReason}
+                      className="flex flex-1 items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-sky-300/60 hover:bg-sky-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
+                    >
+                      <span>
+                        Split
+                        {extraCost > 0 ? (
+                          <span className="ml-2 text-sm font-medium tabular-nums text-sky-300/80">
+                            +{extraCost.toLocaleString()}
+                          </span>
+                        ) : null}
+                      </span>
+                      <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
+                        P
+                      </kbd>
+                    </button>
+                    <InfoTip label="What does Split do?">
+                      <span className="mb-1 block font-semibold text-sky-200">Split</span>
+                      When your first two cards are a pair, like 8 and 8, splits them into two separate hands and deals
+                      each one a second card. You then play each hand on its own.{" "}
+                      {extraCost > 0
+                        ? `It costs another ${extraCost.toLocaleString()} coins, one bet for each hand.`
+                        : "It costs the same amount as your bet again, one bet for each hand."}{" "}
+                      Split aces get only one more card each, and 21 after a split pays 1 to 1, not 3 to 2. Once per hand.
+                    </InfoTip>
+                  </div>
                 </div>
+                <p className="mt-auto pt-4 text-xs text-slate-500">
+                  {activeHand
+                    ? `${hand!.hands.length > 1 ? `Playing hand ${hand!.active! + 1} of ${hand!.hands.length}: you` : "You"} have ${
+                        activeHand.total
+                      }. The dealer shows ${hand!.dealerTotal}.`
+                    : "Your moves unlock once the cards are dealt."}
+                </p>
+              </div>
+          </div>
+
+          {error ? (
+            <p role="alert" className="mt-4 text-center text-sm text-red-400">
+              {error}
+            </p>
+          ) : null}
+
+          {/* SRS-909.1: hand history */}
+          {signedIn ? (
+            <section className="mt-8 rounded-3xl border border-white/5 bg-slate-900/80 p-5 shadow-xl shadow-black/40">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Hand history</h2>
+                <p className="text-xs text-slate-500">Your last 20 hands</p>
+              </div>
+              {history === null ? (
+                <p className="mt-4 text-sm text-slate-500">Loading…</p>
+              ) : history.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">No hands yet. Your finished hands will show up here.</p>
               ) : (
-                <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTyped(null);
-                      setBetChips((chips) => chips.slice(0, -1));
-                    }}
-                    disabled={chipTotal === 0 || busy}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10"
-                  >
-                    Undo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTyped(null);
-                      setBetChips([]);
-                    }}
-                    disabled={chipTotal === 0 || busy}
-                    className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-slate-300 transition hover:border-white/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10"
-                  >
-                    Clear
-                  </button>
-                  <button
-                    type="button"
-                    onClick={deal}
-                    disabled={chipTotal < MIN_BLACKJACK_BET || busy}
-                    className="col-span-2 rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-emerald-400"
-                  >
-                    {busy ? "Dealing…" : "Deal"}
-                  </button>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead className="text-xs uppercase tracking-wider text-slate-500">
+                      <tr>
+                        <th className="py-2 pr-4 font-medium">Played</th>
+                        <th className="py-2 pr-4 text-right font-medium">Bet</th>
+                        <th className="py-2 pr-4 font-medium">Result</th>
+                        <th className="py-2 text-right font-medium">Won / lost</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {history.map((entry) => (
+                        <tr key={entry.handId}>
+                          <td className="py-2.5 pr-4 text-slate-400">{formatPlayedAt(entry.completedAt)}</td>
+                          <td className="py-2.5 pr-4 text-right tabular-nums text-slate-200">
+                            {entry.bet.toLocaleString()}
+                          </td>
+                          <td className="py-2.5 pr-4">
+                            <span className={`font-semibold ${resultTone(entry.result)}`}>{entry.result}</span>
+                          </td>
+                          <td
+                            className={`py-2.5 text-right font-semibold tabular-nums ${
+                              entry.net > 0 ? "text-emerald-300" : entry.net < 0 ? "text-red-300" : "text-slate-400"
+                            }`}
+                          >
+                            {entry.net > 0 ? "+" : entry.net < 0 ? "−" : ""}
+                            {Math.abs(entry.net).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
-            </div>
-
-            <div className="flex flex-col rounded-3xl border border-white/5 bg-slate-900/80 p-5 shadow-xl shadow-black/40 md:min-h-[23rem] lg:order-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-400">Your move</h2>
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                {MOVES.map(({ move, label, hint }) => (
-                  <button
-                    key={move}
-                    type="button"
-                    onClick={() => play(move)}
-                    disabled={!inPlay || busy}
-                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-emerald-300/60 hover:bg-emerald-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
-                  >
-                    {label}
-                    <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
-                      {hint}
-                    </kbd>
-                  </button>
-                ))}
-                <div className="col-span-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => play("double")}
-                    disabled={!doubleAllowed}
-                    title={doubleReason}
-                    className="flex flex-1 items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-amber-300/60 hover:bg-amber-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
-                  >
-                    <span>
-                      Double
-                      {extraCost > 0 ? (
-                        <span className="ml-2 text-sm font-medium tabular-nums text-amber-300/80">
-                          +{extraCost.toLocaleString()}
-                        </span>
-                      ) : null}
-                    </span>
-                    <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
-                      D
-                    </kbd>
-                  </button>
-                  <InfoTip label="What does Double do?">
-                    <span className="mb-1 block font-semibold text-amber-200">Double</span>
-                    Doubles your bet and gives you exactly one more card, then your turn ends.{" "}
-                    {extraCost > 0
-                      ? `It costs another ${extraCost.toLocaleString()} coins, so your bet becomes ${(extraCost * 2).toLocaleString()}.`
-                      : "It costs the same amount as your bet again."}{" "}
-                    Wins and losses are paid on the doubled bet. Only allowed on a hand&apos;s first two cards.
-                  </InfoTip>
-                </div>
-                <div className="col-span-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => play("split")}
-                    disabled={!splitAllowed}
-                    title={splitReason}
-                    className="flex flex-1 items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-sky-300/60 hover:bg-sky-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
-                  >
-                    <span>
-                      Split
-                      {extraCost > 0 ? (
-                        <span className="ml-2 text-sm font-medium tabular-nums text-sky-300/80">
-                          +{extraCost.toLocaleString()}
-                        </span>
-                      ) : null}
-                    </span>
-                    <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
-                      P
-                    </kbd>
-                  </button>
-                  <InfoTip label="What does Split do?">
-                    <span className="mb-1 block font-semibold text-sky-200">Split</span>
-                    When your first two cards are a pair, like 8 and 8, splits them into two separate hands and deals
-                    each one a second card. You then play each hand on its own.{" "}
-                    {extraCost > 0
-                      ? `It costs another ${extraCost.toLocaleString()} coins, one bet for each hand.`
-                      : "It costs the same amount as your bet again, one bet for each hand."}{" "}
-                    Split aces get only one more card each, and 21 after a split pays 1 to 1, not 3 to 2. Once per hand.
-                  </InfoTip>
-                </div>
-              </div>
-              <p className="mt-auto pt-4 text-xs text-slate-500">
-                {activeHand
-                  ? `${hand!.hands.length > 1 ? `Playing hand ${hand!.active! + 1} of ${hand!.hands.length}: you` : "You"} have ${
-                      activeHand.total
-                    }. The dealer shows ${hand!.dealerTotal}.`
-                  : "Your moves unlock once the cards are dealt."}
-              </p>
-            </div>
+            </section>
+          ) : null}
         </div>
-
-        {error ? (
-          <p role="alert" className="mt-4 text-center text-sm text-red-400">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    </main>
+      </main>
+    </LooksContext.Provider>
   );
 }

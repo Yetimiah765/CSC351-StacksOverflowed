@@ -11,6 +11,7 @@ import type { MyShowdownEntry, MyShowdowns } from '../../lib/sports/showdown';
 import { LogoNotice, SPORT_ICONS, StatusBadge, TeamCrest, formatDateTime, startsIn } from '../../components/sports/shared';
 import { BetPlacedStamp, type PlacedBet } from '../../components/sports/BetPlacedStamp';
 import { HighlightReel } from '../../components/sports/HighlightReel';
+import { SportsLeaderboard } from '../../components/sports/SportsLeaderboard';
 
 type Selection = { event: SportsEvent; market: SportsMarket; option: SportsOption };
 type SlipMessage = { kind: 'success' | 'error'; text: string } | null;
@@ -905,7 +906,8 @@ export default function SportsBettingPage() {
   const [slipMessage, setSlipMessage] = useState<SlipMessage>(null);
   const [placedBet, setPlacedBet] = useState<PlacedBet | null>(null);
   const clearPlacedBet = useCallback(() => setPlacedBet(null), []);
-  const [view, setView] = useState<'games' | 'bets'>('games');
+  const [view, setView] = useState<'games' | 'bets' | 'leaderboard'>('games');
+  const [playerId, setPlayerId] = useState<number | null>(null);
   const [myBets, setMyBets] = useState<BetsData | null>(null);
   const [betsError, setBetsError] = useState('');
 
@@ -973,7 +975,10 @@ export default function SportsBettingPage() {
     // wagers the player can't afford.
     fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${stored}` } })
       .then((res) => (res.ok ? res.json() : null))
-      .then((data) => setBalance(data?.balance ?? null))
+      .then((data) => {
+        setBalance(data?.balance ?? null);
+        setPlayerId(data?.playerId ?? null);
+      })
       .catch(() => setBalance(null));
   }, []);
 
@@ -1031,32 +1036,31 @@ export default function SportsBettingPage() {
             <h1 className="text-4xl font-black uppercase italic tracking-tight drop-shadow-lg sm:text-5xl">
               Sportsbook<span className="text-sky-400">.</span>
             </h1>
-            {token ? (
-              <div role="tablist" aria-label="Sportsbook views" className="inline-flex rounded-full border border-slate-800 bg-slate-900 p-1">
-                {(
-                  [
-                    ['games', 'Games'],
-                    ['bets', `My bets${openCount > 0 ? ` (${openCount})` : ''}`],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    role="tab"
-                    aria-selected={view === key}
-                    onClick={() => {
-                      setView(key);
-                      if (key === 'bets') loadMyBets();
-                    }}
-                    className={`rounded-full px-4 py-1.5 text-sm font-semibold uppercase tracking-wide transition ${
-                      view === key ? 'bg-sky-400 text-slate-950' : 'text-slate-300 hover:text-slate-100'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <div role="tablist" aria-label="Sportsbook views" className="inline-flex rounded-full border border-slate-800 bg-slate-900 p-1">
+              {(
+                [
+                  ['games', 'Games'],
+                  ...(token ? ([['bets', `My bets${openCount > 0 ? ` (${openCount})` : ''}`]] as const) : []),
+                  ['leaderboard', 'Leaderboard'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === key}
+                  onClick={() => {
+                    setView(key);
+                    if (key === 'bets') loadMyBets();
+                  }}
+                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition sm:px-4 sm:text-sm ${
+                    view === key ? 'bg-sky-400 text-slate-950' : 'text-slate-300 hover:text-slate-100'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
@@ -1076,6 +1080,12 @@ export default function SportsBettingPage() {
               →
             </span>
           </Link>
+        ) : null}
+
+        {view === 'leaderboard' ? (
+          <div className="mt-6">
+            <SportsLeaderboard token={token} playerId={playerId} />
+          </div>
         ) : null}
 
         {view === 'bets' ? (

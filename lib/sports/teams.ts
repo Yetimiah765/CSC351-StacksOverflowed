@@ -78,7 +78,9 @@ export const TEAMS: Record<string, TeamInfo> = {
   'San Antonio Spurs': { league: 'NBA', code: 'sa', primary: '#C4CED4', secondary: '#000000' },
   'Toronto Raptors': { league: 'NBA', code: 'tor', primary: '#CE1141', secondary: '#000000' },
   'Utah Jazz': { league: 'NBA', code: 'utah', primary: '#002B5C', secondary: '#F9A01B' },
-  'Washington Wizards': { league: 'NBA', code: 'wsh', primary: '#002B5C', secondary: '#E31837' },  // NHL (Arizona Coyotes kept so older games still get a logo; the API still
+  'Washington Wizards': { league: 'NBA', code: 'wsh', primary: '#002B5C', secondary: '#E31837' },
+
+  // NHL (Arizona Coyotes kept so older games still get a logo; the API still
   // lists them alongside the Utah Mammoth).
   'Anaheim Ducks': { league: 'NHL', code: 'ana', primary: '#F47A38', secondary: '#B9975B' },
   'Arizona Coyotes': { league: 'NHL', code: 'ari', primary: '#8C2633', secondary: '#E2D6B5' },

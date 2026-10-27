@@ -128,6 +128,10 @@ export default function BlindBoxShop() {
           rewards: b.rewards.map((r) => (r.cosmeticId === data.cosmetic.cosmeticId ? { ...r, owned: true } : r)),
         })) ?? previous
       );
+      // The reveal's backdrop covers the nav bar, so the nav's balance can
+      // refresh now (SRS-NFR-104): the new balance, refund included, is
+      // ready behind the pop-up without giving the result away.
+      notifyBalanceChanged();
     } catch {
       setBuyError(BUY_FAILED);
     } finally {
@@ -305,7 +309,6 @@ export default function BlindBoxShop() {
           boxName={reveal.box.name}
           rewards={reveal.box.rewards}
           result={reveal.result}
-          onStopped={notifyBalanceChanged}
           onClose={() => setReveal(null)}
         />
       ) : null}

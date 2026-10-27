@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
 import {
   BUSTED_DECISION_TIMEOUT_MS,
@@ -25,15 +25,25 @@ import {
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
-import ActionCallout from '../ActionCallout';
+import ActionCallout, { calloutDuration } from '../ActionCallout';
 import {
+  CardBackCover,
   DEAL_STAGGER_MS,
   DeckStack,
+  ImpactBurst,
   MuckPile,
   SHUFFLE_MS,
+  boardHits,
+  boardSlam,
+  impactTime,
   offsetVars,
+  showdownTimeline,
+  slamVars,
   tableGeometry,
   useElementSize,
+  type Hit,
+  type ShowdownTimeline,
+  type Slam,
 } from '../tableAnimations';
 import {
   ConnectionPill,
@@ -63,6 +73,21 @@ const STREET_LABELS: Record<Street, string> = {
 // CSS variables for the animations in app/globals.css (poker-*).
 const cssVars = (vars: Record<string, string>) => vars as CSSProperties;
 
+// A board card that comes out of the deck face down, rises, flips over and
+// slams onto the felt with a shockwave (app/poker/tableAnimations.tsx).
+function SlamCard(props: { card: Card; slam: Slam; from: { x: number; y: number } }) {
+  // Timed once, when the card first appears: later updates (the next action,
+  // a resize) mustn't move a card that's already mid-air.
+  const [{ card, slam, from }] = useState(props);
+  return (
+    <span className="poker-slam inline-block" style={cssVars({ ...offsetVars('from', from), ...slamVars(slam) })}>
+      <PlayingCard card={card} />
+      <CardBackCover />
+      <ImpactBurst at={impactTime(slam)} power={slam.power} gold={slam.power === 3} />
+    </span>
+  );
+}
+
 // The blinds a seat owes after missing them (SRS-11.12) — or, for a
 // newcomer the button is skipping, has chosen to post — or null.
 function owedBlindsLabel(seat: {
@@ -82,17 +107,20 @@ function owedBlindsLabel(seat: {
 // until the next hand is dealt.
 // Each winner gets a line: "P1 wins 120", then their hand ("Two pair, Kings
 // and Fours") after a showdown.
-function LastHandSummary({ result }: { result: HandResult }) {
+function LastHandSummary({
+  result,
+  winnerStart,
+  renderBoardCard,
+}: {
+  result: HandResult;
+  // When to show who won — after the reveals and any run-out.
+  winnerStart: number;
+  renderBoardCard: (card: Card, index: number) => ReactNode;
+}) {
   return (
     <div key={result.handNumber} className="poker-result-in flex flex-col items-center gap-1.5">
-      {result.board.length > 0 ? (
-        <div className="flex gap-1">
-          {result.board.map((card) => (
-            <PlayingCard key={card} card={card} size="sm" />
-          ))}
-        </div>
-      ) : null}
-      <div className="max-w-[80%] space-y-0.5">
+      {result.board.length > 0 ? <div className="flex gap-1.5">{result.board.map(renderBoardCard)}</div> : null}
+      <div className="poker-result-in max-w-[80%] space-y-0.5" style={{ animationDelay: `${winnerStart}ms` }}>
         {result.awards.map((award) => (
           <p key={award.seatNumber} className="text-sm font-bold text-amber-200 sm:text-base">
             {award.username ?? `Seat ${award.seatNumber}`} wins <span className="tabular-nums">{award.amount}</span>
@@ -164,6 +192,73 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
       setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);
     }
   );
+
+  // Cards landing shake the whole table (alternating classes, so a shake
+  // restarts), and the river flashes the felt. Each landing is scheduled for
+  // when its slam hits (app/poker/tableAnimations.tsx).
+  const [quake, setQuake] = useState({ count: 0, strength: 0 });
+  const [flashCount, setFlashCount] = useState(0);
+  const hitTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const scheduleHits = useCallback((hits: Hit[]) => {
+    for (const hit of hits) {
+      hitTimersRef.current.push(
+        setTimeout(() => {
+          setQuake((previous) => ({ count: previous.count + 1, strength: hit.strength }));
+          if (hit.flash) setFlashCount((count) => count + 1);
+        }, hit.at)
+      );
+    }
+  }, []);
+  useEffect(() => () => hitTimersRef.current.forEach(clearTimeout), []);
+
+  // A brand-new action's callout (app/poker/ActionCallout.tsx) sweeps across
+  // the table first; cards that action brings out wait for it to pass, so
+  // they aren't hidden behind it. 0 when there's no new callout — like the
+  // action already on the table when the page loads, which ActionCallout
+  // doesn't play either.
+  const actionSeenRef = useRef<number | null | undefined>(undefined);
+  const latestAction = tableState?.lastAction ?? null;
+  const calloutWait =
+    latestAction && actionSeenRef.current !== undefined && latestAction.id !== actionSeenRef.current
+      ? calloutDuration(latestAction)
+      : 0;
+
+  // New board cards during a hand. The board already out when the page
+  // loads isn't news, so it doesn't shake anything.
+  const boardSeenRef = useRef<{ hand: number; length: number } | null>(null);
+  const inHandBoardLength = tableState?.phase === 'in-hand' ? tableState.board.length : null;
+  const handNumberNow = tableState?.handNumber ?? null;
+  useEffect(() => {
+    if (inHandBoardLength === null || handNumberNow === null) return;
+    const seen = boardSeenRef.current;
+    boardSeenRef.current = { hand: handNumberNow, length: inHandBoardLength };
+    if (seen && seen.hand === handNumberNow && inHandBoardLength > seen.length) {
+      scheduleHits(boardHits(seen.length, inHandBoardLength, calloutWait));
+    }
+  }, [inHandBoardLength, handNumberNow, scheduleHits, calloutWait]);
+
+  // The end of a hand: reveals, any run-out, then the winners — one
+  // timeline for the animations and the shakes.
+  const finishedHand = tableState && tableState.phase !== 'in-hand' ? tableState.lastHandResult : null;
+  const showdown: ShowdownTimeline | null = useMemo(() => {
+    if (!finishedHand) return null;
+    const seen = boardSeenRef.current;
+    const boardBefore = seen && seen.hand === finishedHand.handNumber ? seen.length : finishedHand.board.length;
+    return showdownTimeline(finishedHand, boardBefore, calloutWait);
+    // One timeline per finished hand; later broadcasts of it don't restart anything.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedHand?.handNumber]);
+  const shookForHandRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!finishedHand || !showdown || shookForHandRef.current === finishedHand.handNumber) return;
+    shookForHandRef.current = finishedHand.handNumber;
+    scheduleHits(showdown.hits);
+  }, [finishedHand, showdown, scheduleHits]);
+
+  // After the effects above have used this state's calloutWait.
+  useEffect(() => {
+    if (tableState) actionSeenRef.current = tableState.lastAction?.id ?? null;
+  }, [tableState]);
 
   // Folded cards on the muck pile: two per folded seat during a hand, then
   // kept on the table until the next hand gathers them into the deck.
@@ -630,7 +725,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           </div>
         </header>
 
-        <div ref={tableRef} className="relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px]">
+        <div
+          ref={tableRef}
+          className={`relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px] ${
+            quake.count === 0 ? '' : quake.count % 2 ? 'poker-quake-a' : 'poker-quake-b'
+          }`}
+          style={cssVars({ '--quake': `${quake.strength}px` })}
+        >
           {/* Light over the table */}
           <div className="pointer-events-none absolute inset-x-[10%] -top-8 bottom-0 rounded-[50%] bg-[radial-gradient(ellipse_at_center,_rgba(52,211,153,0.12)_0%,_transparent_65%)]" />
 
@@ -643,6 +744,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           <div className="absolute inset-[12%] rounded-[50%] bg-[radial-gradient(ellipse_at_center,_#15803d_0%,_#065f46_60%,_#022c22_100%)] shadow-[inset_0_0_60px_rgba(0,0,0,0.65)]">
             {/* Racetrack line */}
             <div className="absolute inset-[8%] rounded-[50%] border border-emerald-300/15" />
+            {/* The river's flash */}
+            {flashCount > 0 ? (
+              <div key={flashCount} className="poker-felt-flash pointer-events-none absolute inset-0 rounded-[50%]" />
+            ) : null}
             {/* Center: pot during a hand, the countdown before one, otherwise the emblem */}
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 text-center">
               {tableState?.phase === 'in-hand' ? (
@@ -654,17 +759,14 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   <div className="flex gap-1.5">
                     {Array.from({ length: 5 }, (_, index) =>
                       tableState.board[index] ? (
-                        // A new street's cards slide out of the deck and turn over (the flop one after another).
-                        <span
+                        // A new street's cards leave the deck face down, rise, flip and
+                        // slam onto the felt (the flop one after another, the river hardest).
+                        <SlamCard
                           key={`${tableState.handNumber}-${index}`}
-                          className="poker-board-deal inline-block"
-                          style={cssVars({
-                            ...offsetVars('from', geometry.boardFromDeck(index)),
-                            '--delay': `${index < 3 ? index * 150 : 0}ms`,
-                          })}
-                        >
-                          <PlayingCard card={tableState.board[index]} />
-                        </span>
+                          card={tableState.board[index] as Card}
+                          slam={boardSlam(index, calloutWait)}
+                          from={geometry.boardFromDeck(index)}
+                        />
                       ) : (
                         <EmptyCardSlot key={index} />
                       )
@@ -691,7 +793,20 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 </>
               ) : tableState?.phase === 'countdown' && countdownSeconds !== null ? (
                 <>
-                  {lastResult ? <LastHandSummary result={lastResult} /> : null}
+                  {lastResult ? (
+                    <LastHandSummary
+                      result={lastResult}
+                      winnerStart={showdown?.winnerStart ?? 0}
+                      renderBoardCard={(card, index) => {
+                        const slam = showdown?.runout(index);
+                        return slam ? (
+                          <SlamCard key={card} card={card} slam={slam} from={geometry.boardFromDeck(index)} />
+                        ) : (
+                          <PlayingCard key={card} card={card} />
+                        );
+                      }}
+                    />
+                  ) : null}
                   <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
                     {lastResult ? 'Next hand in' : 'Hand starts in'}
                   </p>
@@ -707,7 +822,18 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               ) : (
                 <>
                   {lastResult ? (
-                    <LastHandSummary result={lastResult} />
+                    <LastHandSummary
+                      result={lastResult}
+                      winnerStart={showdown?.winnerStart ?? 0}
+                      renderBoardCard={(card, index) => {
+                        const slam = showdown?.runout(index);
+                        return slam ? (
+                          <SlamCard key={card} card={card} slam={slam} from={geometry.boardFromDeck(index)} />
+                        ) : (
+                          <PlayingCard key={card} card={card} />
+                        );
+                      }}
+                    />
                   ) : (
                     <>
                       <StakesChip stakes={config.stakes} size="h-8 w-8" />
@@ -773,6 +899,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             };
             const award = lastResult?.awards.find((candidate) => candidate.seatNumber === seat.seatNumber);
             const awardIndex = award && lastResult ? lastResult.awards.indexOf(award) : 0;
+            const winnerStart = showdown?.winnerStart ?? 0;
             // The button stays on its seat between hands, like a real table.
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
             const seatCosmetics = seat.playerId ? cosmetics[seat.playerId] : undefined;
@@ -815,7 +942,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     style={cssVars({
                       '--to-left': `${50 + 28 * Math.cos(angle)}%`,
                       '--to-top': `${50 + 24 * Math.sin(angle)}%`,
-                      '--delay': `${300 + awardIndex * 350}ms`,
+                      '--delay': `${winnerStart + 300 + awardIndex * 350}ms`,
                     })}
                     className="poker-pot-to-winner pointer-events-none absolute z-30 flex -translate-x-1/2 -translate-y-1/2 -space-x-3"
                   >
@@ -861,12 +988,24 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         // onto the muck on a fold; at showdown flipped over, hand by
                         // hand in the order they're shown.
                         const motion = mucked ? 'muck' : shown ? 'reveal' : 'deal';
+                        if (motion === 'reveal' && showdown) {
+                          // Shown hands slam down one after another; winners with a gold burst.
+                          const slam = showdown.reveal(Math.max(shownIndex, 0), cardIndex);
+                          return (
+                            <span
+                              key={`${tableState.handNumber}-reveal-${card ?? 'back'}-${cardIndex}`}
+                              className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}
+                            >
+                              <span className="poker-slam inline-block" style={cssVars(slamVars(slam))}>
+                                <PlayingCard card={card} size="sm" highlight={Boolean(shown && wonLastHand)} />
+                                <CardBackCover size="sm" />
+                                <ImpactBurst at={impactTime(slam)} power={wonLastHand ? 2 : 1} gold={wonLastHand} />
+                              </span>
+                            </span>
+                          );
+                        }
                         const delay =
-                          motion === 'deal'
-                            ? SHUFFLE_MS + (cardIndex * dealOrder.length + dealIndex) * DEAL_STAGGER_MS
-                            : motion === 'reveal'
-                              ? Math.max(shownIndex, 0) * 450 + cardIndex * 120
-                              : 0;
+                          motion === 'deal' ? SHUFFLE_MS + (cardIndex * dealOrder.length + dealIndex) * DEAL_STAGGER_MS : 0;
                         return (
                           <span
                             key={`${tableState.handNumber}-${motion}-${card ?? 'back'}-${cardIndex}`}
@@ -892,7 +1031,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   {award && lastResult ? (
                     <span
                       key={`won-${lastResult.handNumber}`}
-                      style={cssVars({ '--delay': `${1300 + awardIndex * 350}ms` })}
+                      style={cssVars({ '--delay': `${winnerStart + 1300 + awardIndex * 350}ms` })}
                       className="poker-win-float pointer-events-none absolute bottom-full left-1/2 z-40 mb-1 whitespace-nowrap rounded-full bg-amber-300 px-2.5 py-0.5 text-sm font-black tabular-nums text-slate-950 shadow-lg shadow-black/50"
                     >
                       +{award.amount}
@@ -902,7 +1041,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       sits beside the button rather than in its clipped circle. */}
                   <div
                     className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award ? 'poker-win-glow' : ''}`}
-                    style={award ? cssVars({ animationDelay: `${1300 + awardIndex * 350}ms` }) : undefined}
+                    style={award ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
                   >
                     <button
                       type="button"
@@ -983,10 +1122,21 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       </p>
                     ) : null}
                     {shown ? (
+                      // Named once the hand lands — or, after an all-in, once the
+                      // board has run out, so the name doesn't give it away.
                       <p
-                        className={`max-w-[96px] truncate text-[10px] font-semibold ${
+                        className={`poker-pop-in max-w-[96px] truncate text-[10px] font-semibold ${
                           wonLastHand ? 'text-amber-300' : 'text-slate-300'
                         }`}
+                        style={{
+                          animationDelay: `${
+                            lastResult?.ranOut
+                              ? winnerStart
+                              : showdown
+                                ? impactTime(showdown.reveal(Math.max(shownIndex, 0), 1))
+                                : 0
+                          }ms`,
+                        }}
                       >
                         {shown.handName}
                       </p>

@@ -78,8 +78,10 @@ describe('sealed hole cards (SRS-6.1)', () => {
   it('does not contain the cards in readable form', () => {
     const sealed = sealHoleCards(SECRET, 'low-1', 7, '42', ['As', 'Kd']);
 
-    expect(sealed).not.toContain('As');
-    expect(Buffer.from(sealed.split('.')[2] as string, 'base64').toString('utf8')).not.toContain('As');
+    // Looks for the cards as they'd appear unencrypted ("As" in quotes): random
+    // base64 often contains the letters As by chance, but never a quote mark.
+    expect(sealed).not.toContain('"As"');
+    expect(Buffer.from(sealed.split('.')[2] as string, 'base64').toString('utf8')).not.toContain('"As"');
   });
 
   it('will not open for another player, hand, or table', () => {

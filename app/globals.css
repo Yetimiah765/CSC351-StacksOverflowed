@@ -287,3 +287,103 @@ body {
   .callout-shake, .callout-tap { animation: none !important; }
   .callout-flash, .callout-lines { display: none !important; }
 }
+
+/* Cards landing with an impact (app/poker/tableAnimations.tsx): board cards
+   and showdown hands rise off the table face down (poker-back-cover hides the
+   face), flip over in a white glare, then slam down and bounce. The landing,
+   at 72% (IMPACT_AT), sets off a shockwave ring, sparks and dust, and the
+   page shakes the whole table (poker-quake-*, alternating so it restarts);
+   the river also flashes the felt. --lift and --lift-scale grow with how
+   hard the card lands. */
+@keyframes poker-slam {
+  0% { opacity: 0; transform: translate(var(--from-x, 0), var(--from-y, 0)) rotate(-12deg) scale(0.8); }
+  8% { opacity: 1; }
+  34% { transform: translate(0, var(--lift, -60px)) rotate(5deg) scale(var(--lift-scale, 1.6)); filter: none; }
+  44% { transform: translate(0, var(--lift, -60px)) rotate(0deg) scale(var(--lift-scale, 1.6)) scaleX(0.04); filter: brightness(2.2); }
+  58% {
+    transform: translate(0, var(--lift, -60px)) scale(var(--lift-scale, 1.6));
+    filter: brightness(1.5) drop-shadow(0 0 16px rgba(255, 255, 255, 0.95));
+    animation-timing-function: cubic-bezier(0.6, 0, 1, 1);
+  }
+  72% { transform: translate(0, 3px) scale(0.9); filter: brightness(1.25) drop-shadow(0 0 10px rgba(255, 255, 255, 0.6)); }
+  80% { transform: translate(0, -4px) scale(1.08); }
+  90% { transform: scale(0.98); }
+  100% { opacity: 1; transform: none; filter: none; }
+}
+@keyframes poker-back-cover {
+  0%, 43.9% { opacity: 1; }
+  44%, 100% { opacity: 0; }
+}
+@keyframes poker-impact-ring {
+  0% { opacity: 0; transform: scale(0.2); }
+  5% { opacity: 1; }
+  100% { opacity: 0; transform: scale(var(--ring, 3)); }
+}
+@keyframes poker-impact-spark {
+  0% { opacity: 0; transform: rotate(var(--angle)) translateY(0) scaleY(1); }
+  10% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--angle)) translateY(calc(var(--spark, 30px) * -1)) scaleY(0.4); }
+}
+@keyframes poker-impact-dust {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  15% { opacity: 0.8; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.8); }
+}
+@keyframes poker-quake-a {
+  0%, 100% { transform: none; }
+  12% { transform: translate(calc(var(--quake, 5px) * -1), calc(var(--quake, 5px) * 0.5)) rotate(-0.4deg); }
+  28% { transform: translate(var(--quake, 5px), calc(var(--quake, 5px) * -0.6)) rotate(0.4deg); }
+  45% { transform: translate(calc(var(--quake, 5px) * -0.6), calc(var(--quake, 5px) * 0.3)); }
+  62% { transform: translate(calc(var(--quake, 5px) * 0.4), 0); }
+  80% { transform: translate(calc(var(--quake, 5px) * -0.2), 0); }
+}
+@keyframes poker-quake-b {
+  0%, 100% { transform: none; }
+  12% { transform: translate(calc(var(--quake, 5px) * -1), calc(var(--quake, 5px) * 0.5)) rotate(-0.4deg); }
+  28% { transform: translate(var(--quake, 5px), calc(var(--quake, 5px) * -0.6)) rotate(0.4deg); }
+  45% { transform: translate(calc(var(--quake, 5px) * -0.6), calc(var(--quake, 5px) * 0.3)); }
+  62% { transform: translate(calc(var(--quake, 5px) * 0.4), 0); }
+  80% { transform: translate(calc(var(--quake, 5px) * -0.2), 0); }
+}
+@keyframes poker-felt-flash {
+  0% { opacity: 0; }
+  15% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+.poker-slam {
+  position: relative;
+  z-index: 20;
+  animation: poker-slam var(--slam-ms, 1000ms) cubic-bezier(0.3, 0.7, 0.4, 1) var(--delay, 0ms) both;
+}
+.poker-back-cover { animation: poker-back-cover var(--slam-ms, 1000ms) linear var(--delay, 0ms) both; }
+.poker-impact-ring {
+  border: 3px solid rgba(var(--burst), 0.95);
+  box-shadow: 0 0 14px rgba(var(--burst), 0.8), inset 0 0 8px rgba(var(--burst), 0.6);
+  animation: poker-impact-ring 0.6s ease-out var(--impact, 0ms) both;
+}
+.poker-impact-ring-late { border-width: 2px; animation-delay: calc(var(--impact, 0ms) + 90ms); }
+.poker-impact-spark {
+  background: rgb(var(--burst));
+  box-shadow: 0 0 6px rgba(var(--burst), 0.9);
+  transform-origin: 50% 0;
+  animation: poker-impact-spark 0.5s ease-out var(--impact, 0ms) both;
+}
+.poker-impact-dust {
+  background: radial-gradient(ellipse at center, rgba(var(--burst), 0.55), transparent 70%);
+  filter: blur(2px);
+  animation: poker-impact-dust 0.7s ease-out var(--impact, 0ms) both;
+}
+.poker-quake-a { animation: poker-quake-a 0.45s ease-out; }
+.poker-quake-b { animation: poker-quake-b 0.45s ease-out; }
+.poker-felt-flash {
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.9), rgba(253, 224, 71, 0.35) 45%, transparent 75%);
+  animation: poker-felt-flash 0.6s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .poker-slam, .poker-quake-a, .poker-quake-b { animation: none !important; }
+  .poker-back-cover, .poker-impact-ring, .poker-impact-spark, .poker-impact-dust, .poker-felt-flash {
+    display: none !important;
+  }
+}

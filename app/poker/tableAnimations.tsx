@@ -145,3 +145,172 @@ export function MuckPile({ geometry, count }: { geometry: TableGeometry; count: 
     </div>
   );
 }
+
+// ---------- Cards landing with an impact ----------
+// Board cards and showdown hands rise, flip over and slam down; at the moment
+// they land (IMPACT_AT of the way through) the page shakes the table and an
+// ImpactBurst goes off. One timeline drives both the CSS delays and the
+// shakes, so they line up.
+
+/** Fraction of a slam animation at which the card hits the felt. */
+export const IMPACT_AT = 0.72;
+
+export interface Slam {
+  /** When this card's animation starts, in ms. */
+  delay: number;
+  /** How long it takes. */
+  duration: number;
+  /** How hard it lands: 1 (a showdown card) to 3 (the river). */
+  power: 1 | 2 | 3;
+}
+
+export const impactTime = (slam: Slam) => slam.delay + slam.duration * IMPACT_AT;
+
+/** A table shake (and, for the river, a flash) at `at` ms. */
+export interface Hit {
+  at: number;
+  strength: number;
+  flash?: boolean;
+}
+
+const STREET_OF = (index: number) => (index < 3 ? 0 : index - 2); // flop 0, turn 1, river 2
+const SLAM_MS = [1000, 1150, 1400];
+const FLOP_STAGGER_MS = 220;
+const STREET_GAP_MS = 1500;
+const QUAKE = [5, 7, 11];
+
+/**
+ * A board card dealt during the hand: the flop one after another, the turn
+ * and river alone. `wait` holds the street back, e.g. until the callout of
+ * the action that closed the betting has passed.
+ */
+export function boardSlam(index: number, wait = 0): Slam {
+  const street = STREET_OF(index);
+  return {
+    delay: wait + (street === 0 ? index * FLOP_STAGGER_MS : 0),
+    duration: SLAM_MS[street] ?? 1000,
+    power: (street + 1) as 1 | 2 | 3,
+  };
+}
+
+export function boardHits(fromIndex: number, toIndex: number, wait = 0): Hit[] {
+  const hits: Hit[] = [];
+  for (let index = fromIndex; index < toIndex; index++) {
+    const street = STREET_OF(index);
+    hits.push({ at: impactTime(boardSlam(index, wait)), strength: QUAKE[street] ?? 5, flash: street === 2 });
+  }
+  return hits;
+}
+
+const REVEAL_STAGGER_MS = 600;
+const REVEAL_CARD_STAGGER_MS = 120;
+const REVEAL_MS = 900;
+
+export interface ShowdownTimeline {
+  /** Hand `handIndex` (in reveal order), card `cardIndex`. */
+  reveal: (handIndex: number, cardIndex: number) => Slam;
+  /** Board cards dealt after the hand ended (an all-in run-out), or null for the ones already out. */
+  runout: (index: number) => Slam | null;
+  /** When the pot starts moving to the winners. */
+  winnerStart: number;
+  hits: Hit[];
+}
+
+/**
+ * The end of a hand, in order: each shown hand slams down one after another
+ * (winners hardest), then any board an all-in left undealt runs out street
+ * by street, then the pot goes to the winners. `boardBefore` is how many
+ * board cards were out before the hand ended; `wait` holds it all back, e.g.
+ * until the callout of the hand's last action has passed.
+ */
+export function showdownTimeline(
+  result: { reason: 'fold' | 'showdown'; ranOut: boolean; board: unknown[]; shown: { seatNumber: number }[]; awards: { seatNumber: number }[] },
+  boardBefore: number,
+  wait = 0
+): ShowdownTimeline {
+  const winners = new Set(result.awards.map((award) => award.seatNumber));
+  const reveal = (handIndex: number, cardIndex: number): Slam => ({
+    delay: wait + handIndex * REVEAL_STAGGER_MS + cardIndex * REVEAL_CARD_STAGGER_MS,
+    duration: REVEAL_MS,
+    power: 1,
+  });
+  const hits: Hit[] = result.shown.map((hand, handIndex) => ({
+    at: impactTime(reveal(handIndex, 1)),
+    strength: winners.has(hand.seatNumber) ? 9 : 4,
+  }));
+  const revealEnd = result.shown.length ? impactTime(reveal(result.shown.length - 1, 1)) + 300 : wait;
+
+  // Run-out: whichever streets weren't dealt yet, each STREET_GAP_MS apart.
+  const runFrom = result.ranOut ? Math.min(boardBefore, result.board.length) : result.board.length;
+  const firstStreet = runFrom < result.board.length ? STREET_OF(runFrom) : 0;
+  const runoutStart = revealEnd + 300;
+  const runout = (index: number): Slam | null => {
+    if (index < runFrom) return null;
+    const street = STREET_OF(index);
+    const streetStart = runoutStart + (street - firstStreet) * STREET_GAP_MS;
+    const within = street === 0 ? (index - Math.max(runFrom, 0)) * FLOP_STAGGER_MS : 0;
+    return { delay: streetStart + within, duration: SLAM_MS[street] ?? 1000, power: (street + 1) as 1 | 2 | 3 };
+  };
+  let runoutEnd = 0;
+  for (let index = runFrom; index < result.board.length; index++) {
+    const slam = runout(index) as Slam;
+    const street = STREET_OF(index);
+    hits.push({ at: impactTime(slam), strength: QUAKE[street] ?? 5, flash: street === 2 });
+    runoutEnd = Math.max(runoutEnd, impactTime(slam) + 400);
+  }
+
+  return {
+    reveal,
+    runout,
+    winnerStart: result.reason === 'showdown' ? Math.max(revealEnd, runoutEnd) + 200 : wait,
+    hits,
+  };
+}
+
+/** CSS variables for a slam: its timing, and how high and big it lifts. */
+export const slamVars = (slam: Slam) => ({
+  '--delay': `${Math.round(slam.delay)}ms`,
+  '--slam-ms': `${slam.duration}ms`,
+  '--lift': `${[-50, -80, -120][slam.power - 1]}px`,
+  '--lift-scale': `${[1.5, 1.75, 2.2][slam.power - 1]}`,
+});
+
+/** The card's back, covering its face until it flips over mid-slam. */
+export function CardBackCover({ size = 'md' }: { size?: 'sm' | 'md' }) {
+  return (
+    <span aria-hidden="true" className="poker-back-cover pointer-events-none absolute inset-0">
+      <PlayingCard size={size} />
+    </span>
+  );
+}
+
+const SPARK_ANGLES = [0, 36, 72, 108, 144, 180, 216, 252, 288, 324];
+
+/**
+ * What goes off where a card lands: a shockwave ring (two, for the bigger
+ * hits), sparks flying out and a puff of dust. Starts at `at` ms.
+ */
+export function ImpactBurst({ at, power, gold = false }: { at: number; power: 1 | 2 | 3; gold?: boolean }) {
+  const ring = [2.4, 3.2, 4.6][power - 1] as number;
+  const spark = [26, 40, 64][power - 1] as number;
+  const color = gold ? '253, 224, 71' : '255, 255, 255';
+  return (
+    <span
+      aria-hidden="true"
+      // Behind the card (the slam is its own stacking context), so it bursts out from under it.
+      className="pointer-events-none absolute inset-0 -z-10"
+      style={cssVars({ '--impact': `${Math.round(at)}ms`, '--ring': `${ring}`, '--spark': `${spark}px`, '--burst': color })}
+    >
+      <span className="poker-impact-dust absolute left-1/2 top-1/2 h-16 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full" />
+      <span className="poker-impact-ring absolute left-1/2 top-1/2 -ml-5 -mt-5 h-10 w-10 rounded-full" />
+      {power > 1 ? <span className="poker-impact-ring poker-impact-ring-late absolute left-1/2 top-1/2 -ml-5 -mt-5 h-10 w-10 rounded-full" /> : null}
+      {SPARK_ANGLES.map((angle) => (
+        <span
+          key={angle}
+          className="poker-impact-spark absolute left-1/2 top-1/2 -ml-[1.5px] h-3 w-[3px] rounded-full"
+          style={cssVars({ '--angle': `${angle + (power === 3 ? 18 : 0)}deg` })}
+        />
+      ))}
+    </span>
+  );
+}

@@ -984,6 +984,14 @@ flowchart LR
 
 *Traces to: UR-107*
 
+**SRS-107.3, JO, Upcoming game listing.** The system shall list games that are planned but not yet available on the home page, mark each one as coming soon, and shall not allow a player or guest to select it.
+
+*Traces to: UR-107, UR-108*
+
+**SRS-107.4, JO, Daily Login Box promotion.** The home page shall display a prompt for the Daily Login Box that states its range of possible coin rewards and links to the Cosmetic Shop, where the box is opened.
+
+*Traces to: UR-107, UR-128*
+
 ### UR-108, JO – Select Game
 
 *User story: As a logged-in player, I want to select an available game from the home page, so that I can begin playing.*
@@ -1118,6 +1126,10 @@ flowchart LR
 
 *Traces to: UR-101, UR-113*
 
+**SRS-113.4, JO, New-password confirmation.** The system shall require the player to enter the new password twice and shall reject the change, leaving the stored password unchanged, when the two entries do not match.
+
+*Traces to: UR-113*
+
 ### UR-114, JO – Edit Bio
 
 *User story: As a player, I want to add, change, or remove a profile bio of up to 50 words, so that I can personalize my public profile.*
@@ -1139,6 +1151,10 @@ flowchart LR
 *Traces to: UR-114*
 
 **SRS-114.5, JO, Bio word-count calculation.** The system shall determine the bio word count using whitespace-separated words after removing leading and trailing whitespace and treating consecutive whitespace characters as a single separator.
+
+*Traces to: UR-114*
+
+**SRS-114.6, JO, Live word count.** While the player edits their bio, the system shall display the current word count, calculated as defined in SRS-114.5, against the 50-word limit, shall indicate when the limit is exceeded, and shall prevent saving until the bio is within the limit.
 
 *Traces to: UR-114*
 
@@ -1436,6 +1452,14 @@ flowchart LR
 
 *Traces to: UR-119, UR-122*
 
+**SRS-122.6, JO, Owned-reward indication.** For an authenticated player, each blind box's list of possible rewards shall mark the cosmetics the player already owns.
+
+*Traces to: UR-122, UR-126*
+
+**SRS-122.7, JO, Limited-time end display.** Each limited-time blind box shall be marked as limited-time and shall display the last day on which it can be purchased.
+
+*Traces to: UR-122*
+
 ### UR-123, JO – View Reward Probabilities
 
 *User story: As a player, I want to see the probability of receiving each cosmetic from a purchasable blind box, so that I understand the possible outcomes before spending my virtual currency.*
@@ -1507,6 +1531,10 @@ flowchart LR
 **SRS-124.7, JO, No unopened blind-box inventory.** The system shall not store a successfully purchased blind box as an unopened item in the player's inventory.
 
 *Traces to: UR-124*
+
+**SRS-124.8, JO, Purchase authentication restriction.** The system shall allow only authenticated players with active accounts to purchase blind boxes, shall direct unauthenticated guests to log in instead of purchasing, and shall reject purchase requests from unauthenticated users or accounts pending deletion.
+
+*Traces to: UR-103, UR-106, UR-124*
 
 ### UR-125, JO – Receive Randomized Cosmetic
 

@@ -1214,6 +1214,26 @@ export class PokerTable {
     this.minRaise = this.bigBlind;
     this.deadContributions = [];
     this.deadRoundBets = [];
+    // Everyone may have left during the hand.
+    this.resetIfEmpty();
+  }
+
+  /**
+   * Once the last player leaves, the table starts over: the last hand's
+   * result, the dealer button and the blinds' history are forgotten, so the
+   * next player to sit down finds a fresh table. The hand count keeps
+   * going (hole cards are sealed per hand number).
+   */
+  private resetIfEmpty() {
+    if (this.phase === 'in-hand' || this.seats.some((seat) => seat.playerId !== null)) return;
+    this.phase = 'waiting';
+    this.countdownEndsAt = null;
+    this.nextCountdownMs = null;
+    this.lastHandResult = null;
+    this.lastAction = null;
+    this.dealerSeat = null;
+    this.previousSmallBlindSeat = null;
+    this.previousBigBlindSeat = null;
   }
 
   /**
@@ -1315,6 +1335,7 @@ export class PokerTable {
     const seatNumber = seat.seatNumber;
     const chipStack = seat.chipStack ?? 0;
     Object.assign(seat, emptySeat(seatNumber));
+    this.resetIfEmpty();
 
     return { ok: true, seatNumber, chipStack };
   }
@@ -1419,6 +1440,7 @@ export class PokerTable {
       removed.push(seat.playerId as string);
       Object.assign(seat, emptySeat(seat.seatNumber));
     }
+    this.resetIfEmpty();
     return removed;
   }
 }

@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const { firstName, lastName, birthday, username, password } = body;
 
     // SRS-101.1: first name, last name, birthday, username, and password are
-    // all required. SRS-101.9: no email is collected.
+    // all required. SRS-101.10: no email is collected.
     if (!firstName || !lastName || !birthday || !username || !password) {
       return Response.json(
         { error: 'First name, last name, birthday, username, and password are required.' },
@@ -67,7 +67,7 @@ export async function POST(request: Request) {
       .eq('is_current', false)
       .lte('reserved_until', new Date().toISOString());
 
-    // SRS-101.5 / SRS-101.6: usernames are unique and reserved
+    // SRS-101.6 / SRS-101.7: usernames are unique and reserved
     // case-insensitively, so check before creating a player row.
     const { data: existingUsername, error: lookupError } = await supabase
       .from('usernames')

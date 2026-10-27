@@ -20,21 +20,19 @@ const RESULT_DELAY_MS = 250;
 // The blind-box reveal (UR-127): one reel runs through the box's rewards and
 // stops on the one won. It only opens after the purchase has been saved, so
 // leaving mid-spin loses nothing, and nothing replays later (SRS-127.5).
-// onStopped runs once when the reel stops; the shop refreshes the nav bar's
-// balance then, so a duplicate refund doesn't give the result away early.
-// A holographic win gets a rainbow frame and its own line (SRS-127.6), shown
+// Its backdrop covers the nav bar, so the shop refreshes the nav's balance
+// as soon as the purchase is saved without a duplicate refund giving the
+// result away. A holographic win gets a rainbow frame and its own line (SRS-127.6), shown
 // only once the reel has stopped so it doesn't give the result away either.
 export default function BlindBoxReveal({
   boxName,
   rewards,
   result,
-  onStopped,
   onClose,
 }: {
   boxName: string;
   rewards: Pick<Cosmetic, 'cosmeticId' | 'category' | 'artKey'>[];
   result: BoxResult;
-  onStopped: () => void;
   onClose: () => void;
 }) {
   const [instant] = useState(
@@ -43,8 +41,6 @@ export default function BlindBoxReveal({
   const [stopped, setStopped] = useState(instant);
   const [done, setDone] = useState(instant);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const onStoppedRef = useRef(onStopped);
-  onStoppedRef.current = onStopped;
 
   // A backup in case animationend arrives late (e.g. in a background tab).
   useEffect(() => {
@@ -54,9 +50,7 @@ export default function BlindBoxReveal({
   }, [instant]);
 
   useEffect(() => {
-    if (!stopped) return;
-    onStoppedRef.current();
-    if (instant) return;
+    if (!stopped || instant) return;
     const timer = setTimeout(() => setDone(true), RESULT_DELAY_MS);
     return () => clearTimeout(timer);
   }, [stopped, instant]);

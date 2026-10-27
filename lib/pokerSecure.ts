@@ -31,7 +31,7 @@ export function getPokerServerSecret(): string | null {
   return process.env.POKER_SERVER_SECRET || null;
 }
 
-export type RelayedActionType = 'join' | 'leave' | 'act' | 'rebuy' | 'post-blinds' | 'wait-for-big-blind';
+export type RelayedActionType = 'join' | 'leave' | 'act' | 'rebuy' | 'post-blinds' | 'wait-for-big-blind' | 'emote';
 
 /** What POST /api/poker/action broadcasts on a table's channel. */
 export interface RelayedAction {
@@ -49,6 +49,8 @@ export interface RelayedAction {
   seatNumber?: number;
   move?: BettingMove;
   amount?: number;
+  /** For an 'emote' action: which one (lib/emotes.ts). */
+  emote?: string;
 }
 
 export interface SignedRelayedAction extends RelayedAction {
@@ -68,6 +70,7 @@ function canonical(action: RelayedAction): string {
     action.seatNumber ?? null,
     action.move ?? null,
     action.amount ?? null,
+    action.emote ?? null,
   ]);
 }
 
@@ -102,11 +105,12 @@ export function verifyRelayedAction(
     typeof candidate.nonce !== 'string' ||
     typeof candidate.issuedAt !== 'number' ||
     typeof candidate.playerId !== 'number' ||
-    !['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind'].includes(candidate.action as string) ||
+    !['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind', 'emote'].includes(candidate.action as string) ||
     !isOptionalNumber(candidate.buyIn) ||
     !isOptionalNumber(candidate.seatNumber) ||
     !isOptionalNumber(candidate.amount) ||
-    (candidate.move !== undefined && typeof candidate.move !== 'string')
+    (candidate.move !== undefined && typeof candidate.move !== 'string') ||
+    (candidate.emote !== undefined && typeof candidate.emote !== 'string')
   ) {
     return null;
   }

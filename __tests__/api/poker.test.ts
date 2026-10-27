@@ -110,6 +110,13 @@ describe('POST /api/poker/action', () => {
     expect(verifyRelayedAction(payload, SECRET, 'low-1', Date.now())).toMatchObject({ action: 'rebuy', buyIn: 500 });
   });
 
+  it('relays an emote, signed along with everything else', async () => {
+    await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'e', action: 'emote', emote: 'laugh' }));
+
+    const payload = httpSend.mock.calls[0]?.[2];
+    expect(verifyRelayedAction(payload, SECRET, 'low-1', Date.now())).toMatchObject({ action: 'emote', emote: 'laugh' });
+  });
+
   it('relays the choice to post missed blinds or wait for the big blind (SRS-11.6)', async () => {
     await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'a', action: 'post-blinds' }));
     await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'b', action: 'wait-for-big-blind' }));
@@ -133,6 +140,7 @@ describe('POST /api/poker/action', () => {
     ['a missing request id', { ...join, requestId: '' }],
     ['a non-numeric buy-in', { ...join, buyIn: '250' }],
     ['an act without a valid move', { tableId: 'low-1', requestId: 'r', action: 'act', move: 'shove' }],
+    ['an emote that does not exist', { tableId: 'low-1', requestId: 'r', action: 'emote', emote: 'dance' }],
   ])('returns 400 for %s', async (_label, body) => {
     expect((await postAction(req('/api/poker/action', body))).status).toBe(400);
     expect(httpSend).not.toHaveBeenCalled();

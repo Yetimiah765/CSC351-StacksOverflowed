@@ -127,7 +127,7 @@ describe('Change password route', () => {
     expect(tables.players.update).not.toHaveBeenCalled();
   });
 
-  it("rejects a confirmation that doesn't match", async () => {
+  it("rejects a confirmation that doesn't match (SRS-113.4)", async () => {
     const response = await POST(
       req({ currentPassword: 'OldPass123', newPassword: 'NewPass456', confirmPassword: 'NewPass457' })
     );

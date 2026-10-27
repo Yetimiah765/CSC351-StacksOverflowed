@@ -20,16 +20,21 @@ import { POKER_TABLES, getPokerTableConfig } from '../../../lib/pokerTables';
 import {
   pokerTableChannelName,
   type PokerHoleCardsRequest,
+  type PokerEmotePayload,
   type PokerTableBroadcast,
 } from '../../../lib/pokerRealtime';
+import { EMOTE_SHOW_MS } from '../../../lib/emotes';
+import EmoteArt from '../../../components/emotes/EmoteArt';
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
 import ActionCallout, { calloutDuration } from '../ActionCallout';
+import EmotePicker from '../EmotePicker';
 import {
   CardBackCover,
   DEAL_STAGGER_MS,
   DeckStack,
+  BOARD_CARD_PITCH,
   ImpactBurst,
   MuckPile,
   SHUFFLE_MS,
@@ -41,6 +46,7 @@ import {
   slamVars,
   tableGeometry,
   useElementSize,
+  useMediaQuery,
   type Hit,
   type ShowdownTimeline,
   type Slam,
@@ -50,7 +56,6 @@ import {
   EmptyCardSlot,
   PlayerChip,
   PlayingCard,
-  PokerRoomEyebrow,
   ProfileOutline,
   Room,
   RoomMessage,
@@ -75,14 +80,14 @@ const cssVars = (vars: Record<string, string>) => vars as CSSProperties;
 
 // A board card that comes out of the deck face down, rises, flips over and
 // slams onto the felt with a shockwave (app/poker/tableAnimations.tsx).
-function SlamCard(props: { card: Card; slam: Slam; from: { x: number; y: number } }) {
+function SlamCard(props: { card: Card; slam: Slam; from: { x: number; y: number }; size: 'md' | 'lg' }) {
   // Timed once, when the card first appears: later updates (the next action,
   // a resize) mustn't move a card that's already mid-air.
   const [{ card, slam, from }] = useState(props);
   return (
     <span className="poker-slam inline-block" style={cssVars({ ...offsetVars('from', from), ...slamVars(slam) })}>
-      <PlayingCard card={card} />
-      <CardBackCover />
+      <PlayingCard card={card} size={props.size} />
+      <CardBackCover size={props.size} />
       <ImpactBurst at={impactTime(slam)} power={slam.power} gold={slam.power === 3} />
     </span>
   );
@@ -141,6 +146,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const { token, profile, setProfile, loading: profileLoading, error: profileError } = usePlayerProfile();
 
   const [tableState, setTableState] = useState<PokerTableBroadcast | null>(null);
+  // The emote showing over each seat right now, by seat number.
+  const [seatEmotes, setSeatEmotes] = useState<Record<number, PokerEmotePayload>>({});
   // This player's own hole cards for the current hand, opened by
   // POST /api/poker/hole-cards from the sealed copy in the state (SRS-6.1).
   const [myCards, setMyCards] = useState<{ handNumber: number; cards: Card[] } | null>(null);
@@ -179,6 +186,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // The table's size, for the deck/muck flight paths (app/poker/tableAnimations.tsx).
   const tableRef = useRef<HTMLDivElement>(null);
   const tableSize = useElementSize(tableRef);
+  // On a laptop or desktop screen the page fits in the window: the table
+  // takes whatever room the top bar and the control dock leave.
+  const fitScreen = useMediaQuery('(min-width: 1024px) and (min-height: 600px)');
+  const tableAreaRef = useRef<HTMLDivElement>(null);
+  const tableArea = useElementSize(tableAreaRef);
 
   const {
     connected,
@@ -190,6 +202,18 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     (state) => {
       setTableState(state);
       setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);
+    },
+    (emote) => {
+      setSeatEmotes((shown) => ({ ...shown, [emote.seatNumber]: emote }));
+      setTimeout(
+        () =>
+          setSeatEmotes((shown) => {
+            if (shown[emote.seatNumber]?.id !== emote.id) return shown;
+            const { [emote.seatNumber]: _gone, ...rest } = shown;
+            return rest;
+          }),
+        EMOTE_SHOW_MS
+      );
     }
   );
 
@@ -210,6 +234,23 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     }
   }, []);
   useEffect(() => () => hitTimersRef.current.forEach(clearTimeout), []);
+
+  // What was already on the table when this page opened — a hand in
+  // progress, or the last hand's result — happened before the player was
+  // watching, so it's drawn as it stands instead of being played out again.
+  const loadedRef = useRef<{ hand: number; inHand: boolean; board: number; result: number | null } | null>(null);
+  if (tableState && !loadedRef.current) {
+    loadedRef.current = {
+      hand: tableState.handNumber,
+      inHand: tableState.phase === 'in-hand',
+      board: tableState.board.length,
+      result: tableState.phase === 'in-hand' ? null : tableState.lastHandResult?.handNumber ?? null,
+    };
+  }
+  // The hand in progress when the page opened.
+  const handIsHistory = Boolean(
+    tableState && loadedRef.current?.inHand && loadedRef.current.hand === tableState.handNumber
+  );
 
   // A brand-new action's callout (app/poker/ActionCallout.tsx) sweeps across
   // the table first; cards that action brings out wait for it to pass, so
@@ -241,7 +282,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // timeline for the animations and the shakes.
   const finishedHand = tableState && tableState.phase !== 'in-hand' ? tableState.lastHandResult : null;
   const showdown: ShowdownTimeline | null = useMemo(() => {
-    if (!finishedHand) return null;
+    // No timeline (so no reveals, run-out or payout animation) for a result
+    // that was already on the table when the page opened.
+    if (!finishedHand || loadedRef.current?.result === finishedHand.handNumber) return null;
     const seen = boardSeenRef.current;
     const boardBefore = seen && seen.hand === finishedHand.handNumber ? seen.length : finishedHand.board.length;
     return showdownTimeline(finishedHand, boardBefore, calloutWait);
@@ -521,6 +564,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     }
   }
 
+  // An emote, for everyone at the table to see over this player's seat.
+  async function handleEmote(emote: string) {
+    if (!connected || !token) return;
+    const result = await sendAction(token, { tableId: params.tableId, action: 'emote', emote });
+    if (!result.ok && result.error) setActError(result.error);
+  }
+
   async function handleAct(move: BettingMove, amount?: number) {
     if (!connected || !token || acting) return;
     setActError('');
@@ -661,7 +711,31 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           )
       : [];
   const myCosmetics = cosmetics[String(profile.playerId)];
-  const geometry = tableGeometry(tableSize);
+  // Fitting the screen: as big as the table area allows, leaving room for
+  // the seats that hang over its edge (their centres sit 6% in from the top
+  // and bottom and 4% from the sides; a seat reaches ~110px tall, ~110px wide).
+  // Seats also grow with the table (up to 30%), so they need more room
+  // around it: sized once, then again with the seats' scale.
+  // The oval is 1.9 times as wide as it's tall when there's room, and gets
+  // rounder (down to 1.4) when width runs short, so it still fills the height.
+  const WIDEST_TABLE = 1.9;
+  const ROUNDEST_TABLE = 1.4;
+  const seatScaleFor = (tableWidth: number) => Math.min(1.3, Math.max(1, tableWidth / 950));
+  const fitTable = (scale: number) => {
+    const maxWidth = (tableArea.width - 110 * scale) / 0.92;
+    const maxHeight = (tableArea.height - 120 * scale) / 0.88;
+    const height = Math.max(260, Math.min(maxHeight, maxWidth / ROUNDEST_TABLE, 700));
+    const width = Math.min(maxWidth, height * WIDEST_TABLE);
+    return { width: Math.round(width), height: Math.round(height) };
+  };
+  let fittedTable: { width: number; height: number } | null = null;
+  if (fitScreen && tableArea.width > 0 && tableArea.height > 0) {
+    fittedTable = fitTable(seatScaleFor(fitTable(1).width));
+  }
+  const seatScale = fittedTable ? seatScaleFor(fittedTable.width) : 1;
+  // A big table gets big board cards.
+  const boardCardSize: 'md' | 'lg' = fittedTable && fittedTable.width >= 900 ? 'lg' : 'md';
+  const geometry = tableGeometry(tableSize, BOARD_CARD_PITCH[boardCardSize]);
   const myOwedLabel = mySeat ? owedBlindsLabel(mySeat) : null;
   // SRS-11.7/11.8: a live big blind and/or a dead small blind — both for a
   // newcomer the button is skipping.
@@ -672,22 +746,24 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
       : (mySeat.missedBigBlind ? config.bigBlind : 0) + (mySeat.missedSmallBlind ? config.smallBlind : 0);
 
   return (
-    <Room>
-      <section className="w-full max-w-4xl">
-        <header className="flex flex-col gap-6 border-b border-white/10 pb-8 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            {!mySeat ? (
-              <Link href="/poker" className="mb-4 inline-block text-sm text-slate-400 transition hover:text-emerald-300">
-                ← Lobby
-              </Link>
-            ) : null}
-            <PokerRoomEyebrow>{config.stakes} Stakes</PokerRoomEyebrow>
-            <h1 className="mt-3 flex items-center gap-3 text-4xl font-bold tracking-tight sm:text-5xl">
-              <StakesChip stakes={config.stakes} size="h-10 w-10" />
-              {config.name}
-            </h1>
-            <p className="mt-2 text-slate-400">
-              Blinds{' '}
+    // One screen on a laptop or desktop: a slim top bar, the table filling the
+    // middle, and the controls docked underneath. Narrower screens scroll.
+    <main className="flex min-h-page flex-col gap-3 bg-slate-950 bg-[radial-gradient(ellipse_at_top,_#14532d_0%,_#052e16_35%,_#020617_75%)] px-4 pb-4 pt-3 text-slate-100 sm:px-6 lg:h-[calc(100vh-4rem)]">
+      <header className="flex w-full shrink-0 flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          {!mySeat ? (
+            <Link
+              href="/poker"
+              className="shrink-0 rounded-full border border-white/10 bg-black/30 px-3 py-1.5 text-sm text-slate-300 transition hover:border-emerald-400/60 hover:text-emerald-200"
+            >
+              ← Lobby
+            </Link>
+          ) : null}
+          <StakesChip stakes={config.stakes} size="h-9 w-9" />
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-bold tracking-tight sm:text-2xl">{config.name}</h1>
+            <p className="truncate text-xs text-slate-400 sm:text-sm">
+              <span className="uppercase tracking-[0.2em] text-emerald-300/80">{config.stakes} stakes</span> · Blinds{' '}
               <span className={`font-semibold tabular-nums ${STAKES_STYLES[config.stakes].accent}`}>
                 {config.smallBlind}/{config.bigBlind}
               </span>{' '}
@@ -697,40 +773,50 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               </span>
             </p>
           </div>
+        </div>
 
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            {tableState ? (
-              <StatPill>
-                {tableState.phase === 'in-hand' ? (
-                  <span className="font-semibold text-emerald-300">
-                    Hand #{tableState.handNumber}
-                    {tableState.street ? ` · ${STREET_LABELS[tableState.street]}` : ''}
-                  </span>
-                ) : tableState.phase === 'countdown' ? (
-                  <span className="font-semibold text-amber-300">Starting in {countdownSeconds ?? 0}s</span>
-                ) : (
-                  <span className="text-slate-400">Waiting for players</span>
-                )}
-              </StatPill>
-            ) : null}
-            {tableState ? (
-              <StatPill>
-                <span className="font-semibold tabular-nums text-amber-300">
-                  {tableState.seatedCount} / {tableState.maxSeats}
-                </span>{' '}
-                <span className="text-slate-400">{isFull ? 'seated · full' : 'seated'}</span>
-              </StatPill>
-            ) : null}
-            <ConnectionPill connected={connected} />
-          </div>
-        </header>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          {tableState ? (
+            <StatPill>
+              {tableState.phase === 'in-hand' ? (
+                <span className="font-semibold text-emerald-300">
+                  Hand #{tableState.handNumber}
+                  {tableState.street ? ` · ${STREET_LABELS[tableState.street]}` : ''}
+                </span>
+              ) : tableState.phase === 'countdown' ? (
+                <span className="font-semibold text-amber-300">Next hand in {countdownSeconds ?? 0}s</span>
+              ) : (
+                <span className="text-slate-400">Waiting for players</span>
+              )}
+            </StatPill>
+          ) : null}
+          {tableState ? (
+            <StatPill>
+              <span className="font-semibold tabular-nums text-amber-300">
+                {tableState.seatedCount} / {tableState.maxSeats}
+              </span>{' '}
+              <span className="text-slate-400">{isFull ? 'seated · full' : 'seated'}</span>
+            </StatPill>
+          ) : null}
+          <ConnectionPill connected={connected} />
+        </div>
+      </header>
 
+      {/* On a wide screen: you and your cards on the left, the table in the
+          middle, your actions on the right. Stacked on a phone: the table,
+          then your actions, then you. */}
+      <div className="flex w-full flex-1 flex-col gap-4 lg:min-h-0 lg:flex-row lg:items-center">
+      {/* The table, as big as the room between the side panels allows. */}
+      <div ref={tableAreaRef} className="relative flex w-full flex-1 items-center justify-center px-8 py-12 sm:px-10 lg:order-2 lg:min-h-0 lg:self-stretch lg:p-0">
         <div
           ref={tableRef}
-          className={`relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px] ${
+          className={`relative ${fittedTable ? '' : 'h-[340px] w-full max-w-3xl sm:h-[440px]'} ${
             quake.count === 0 ? '' : quake.count % 2 ? 'poker-quake-a' : 'poker-quake-b'
           }`}
-          style={cssVars({ '--quake': `${quake.strength}px` })}
+          style={{
+            ...(fittedTable ? { width: fittedTable.width, height: fittedTable.height } : {}),
+            ...cssVars({ '--quake': `${quake.strength}px` }),
+          }}
         >
           {/* Light over the table */}
           <div className="pointer-events-none absolute inset-x-[10%] -top-8 bottom-0 rounded-[50%] bg-[radial-gradient(ellipse_at_center,_rgba(52,211,153,0.12)_0%,_transparent_65%)]" />
@@ -758,7 +844,14 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   {/* Community cards (SRS-17) */}
                   <div className="flex gap-1.5">
                     {Array.from({ length: 5 }, (_, index) =>
-                      tableState.board[index] ? (
+                      tableState.board[index] && handIsHistory && index < (loadedRef.current?.board ?? 0) ? (
+                        // Already out when the page opened.
+                        <PlayingCard
+                          key={`${tableState.handNumber}-${index}`}
+                          card={tableState.board[index]}
+                          size={boardCardSize}
+                        />
+                      ) : tableState.board[index] ? (
                         // A new street's cards leave the deck face down, rise, flip and
                         // slam onto the felt (the flop one after another, the river hardest).
                         <SlamCard
@@ -766,9 +859,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                           card={tableState.board[index] as Card}
                           slam={boardSlam(index, calloutWait)}
                           from={geometry.boardFromDeck(index)}
+                          size={boardCardSize}
                         />
                       ) : (
-                        <EmptyCardSlot key={index} />
+                        <EmptyCardSlot key={index} size={boardCardSize} />
                       )
                     )}
                   </div>
@@ -800,9 +894,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       renderBoardCard={(card, index) => {
                         const slam = showdown?.runout(index);
                         return slam ? (
-                          <SlamCard key={card} card={card} slam={slam} from={geometry.boardFromDeck(index)} />
+                          <SlamCard
+                            key={card}
+                            card={card}
+                            slam={slam}
+                            from={geometry.boardFromDeck(index)}
+                            size={boardCardSize}
+                          />
                         ) : (
-                          <PlayingCard key={card} card={card} />
+                          <PlayingCard key={card} card={card} size={boardCardSize} />
                         );
                       }}
                     />
@@ -828,9 +928,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       renderBoardCard={(card, index) => {
                         const slam = showdown?.runout(index);
                         return slam ? (
-                          <SlamCard key={card} card={card} slam={slam} from={geometry.boardFromDeck(index)} />
+                          <SlamCard
+                            key={card}
+                            card={card}
+                            slam={slam}
+                            from={geometry.boardFromDeck(index)}
+                            size={boardCardSize}
+                          />
                         ) : (
-                          <PlayingCard key={card} card={card} />
+                          <PlayingCard key={card} card={card} size={boardCardSize} />
                         );
                       }}
                     />
@@ -857,7 +963,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           </div>
 
           {/* The deck (gathers and shuffles at each new hand) and the folded cards' muck pile. */}
-          {tableState ? <DeckStack geometry={geometry} handNumber={tableState.handNumber} /> : null}
+          {tableState ? (
+            <DeckStack
+              geometry={geometry}
+              handNumber={tableState.handNumber}
+              shuffle={tableState.handNumber !== loadedRef.current?.hand}
+            />
+          ) : null}
           <MuckPile geometry={geometry} count={foldedCards ?? heldMuck} />
 
           {tableState?.seats.map((seat, index) => {
@@ -936,7 +1048,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 ) : null}
 
                 {/* The pot sliding over to a winner, one winner after another. */}
-                {award && lastResult ? (
+                {award && lastResult && showdown ? (
                   <span
                     key={`won-${lastResult.handNumber}`}
                     style={cssVars({
@@ -963,6 +1075,21 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   </span>
                 ) : null}
 
+                {/* This seat's emote, popping up over the player's photo */}
+                {seat.playerId && seatEmotes[seat.seatNumber]?.playerId === seat.playerId ? (
+                  <span
+                    style={{ left: `${left}%`, top: `${top}%` }}
+                    className="pointer-events-none absolute z-40 -translate-x-1/2 -translate-y-[calc(100%+2.5rem)]"
+                  >
+                    <span key={seatEmotes[seat.seatNumber]?.id} className="emote-pop block">
+                      <EmoteArt
+                        emoteId={seatEmotes[seat.seatNumber]?.emote ?? ''}
+                        className={`h-24 w-24 drop-shadow-[0_6px_10px_rgba(0,0,0,0.5)] emote-move-${seatEmotes[seat.seatNumber]?.emote}`}
+                      />
+                    </span>
+                  </span>
+                ) : null}
+
                 {/* Dealer button (SRS-13.5) */}
                 {isDealer ? (
                   <span
@@ -975,7 +1102,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 ) : null}
 
                 <div
-                  style={{ left: `${left}%`, top: `${top}%` }}
+                  // Seats grow with a big table (the CSS scale property, so it
+                  // doesn't fight the centring transform).
+                  style={{ left: `${left}%`, top: `${top}%`, scale: seatScale === 1 ? undefined : String(seatScale) }}
                   className={`absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center transition-opacity ${
                     sittingOut || seat.folded ? 'opacity-45' : ''
                   }`}
@@ -1004,6 +1133,23 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                             </span>
                           );
                         }
+                        // Already dealt (or folded, or shown) before the page opened: no replay.
+                        if ((handIsHistory && motion !== 'reveal') || (motion === 'reveal' && !showdown)) {
+                          if (motion === 'muck') return null;
+                          return (
+                            <span
+                              key={`${tableState.handNumber}-still-${card ?? 'back'}-${cardIndex}`}
+                              className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}
+                            >
+                              <PlayingCard
+                                card={card}
+                                size="sm"
+                                highlight={Boolean(shown && wonLastHand)}
+                                backArtKey={seatCosmetics?.card}
+                              />
+                            </span>
+                          );
+                        }
                         const delay =
                           motion === 'deal' ? SHUFFLE_MS + (cardIndex * dealOrder.length + dealIndex) * DEAL_STAGGER_MS : 0;
                         return (
@@ -1028,7 +1174,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     </div>
                   ) : null}
                   {/* "+120" over a winner, once the pot reaches them. */}
-                  {award && lastResult ? (
+                  {award && lastResult && showdown ? (
                     <span
                       key={`won-${lastResult.handNumber}`}
                       style={cssVars({ '--delay': `${winnerStart + 1300 + awardIndex * 350}ms` })}
@@ -1040,8 +1186,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   {/* The equipped profile outline hangs outside the photo, so it
                       sits beside the button rather than in its clipped circle. */}
                   <div
-                    className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award ? 'poker-win-glow' : ''}`}
-                    style={award ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
+                    className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award && showdown ? 'poker-win-glow' : ''}`}
+                    style={award && showdown ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
                   >
                     <button
                       type="button"
@@ -1190,11 +1336,19 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           ) : null}
         </div>
 
-        {/* Controls */}
-        <div className="mx-auto mt-8 max-w-3xl rounded-3xl border border-white/5 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-6 shadow-2xl shadow-black/50">
-          <div className="flex flex-col gap-6 md:flex-row md:items-start">
-            <div className="flex items-center gap-3 md:w-56 md:shrink-0">
-              <div className={`relative h-12 w-12 shrink-0 ${myCosmetics?.outline ? 'm-3' : ''}`}>
+        {/* Emotes, any time while seated */}
+        {mySeat ? (
+          <div className="absolute bottom-2 left-2 z-40 lg:bottom-4 lg:left-4">
+            <EmotePicker onSend={handleEmote} />
+          </div>
+        ) : null}
+      </div>
+
+        {/* Left: who you are — photo, balance, stack and Leave — and your cards */}
+        <aside className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-4 shadow-2xl shadow-black/60 order-3 flex flex-col gap-4 lg:order-1 lg:w-60 lg:shrink-0">
+          <div className="flex flex-wrap items-center gap-4 lg:flex-col lg:flex-nowrap lg:items-stretch">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className={`relative h-11 w-11 shrink-0 ${myCosmetics?.outline ? 'm-2.5' : ''}`}>
                 <div
                   className={`h-full w-full overflow-hidden rounded-full border-2 bg-slate-900 ${
                     myCosmetics?.outline ? 'border-transparent' : 'border-emerald-300/60'
@@ -1217,299 +1371,298 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 </p>
               </div>
             </div>
-
-            <div className="flex-1 md:border-l md:border-white/10 md:pl-6">
-              {removedForTimeout && !mySeat ? (
-                // SRS-9.11: why they lost their seat.
-                <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-                  You were removed from your seat because you didn&apos;t buy back in or leave within{' '}
-                  {BUSTED_DECISION_TIMEOUT_MS / 1000} seconds of running out of chips.
+            {mySeat && !amBusted ? (
+              <div className="ml-auto flex items-center gap-4 lg:ml-0 lg:justify-between lg:border-t lg:border-white/10 lg:pt-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-slate-500">Stack · Seat {mySeat.seatNumber}</p>
+                  <p className="flex items-center gap-1.5 text-2xl font-bold tabular-nums text-amber-300">
+                    <PlayerChip artKey={myCosmetics?.chip} stakes={config.stakes} size="h-6 w-6" />
+                    {mySeat.chipStack}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLeave}
+                  disabled={leaving || leavePending}
+                  title={
+                    leavePending
+                      ? "You'll fold when it's your turn and leave when this hand ends — anything you win this hand comes with you."
+                      : inHandPhase && mySeat.inHand
+                        ? "Leaving during a hand folds you when it's your turn; you leave once the hand ends."
+                        : undefined
+                  }
+                  className="rounded-xl border border-red-400/40 bg-red-500/10 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {leaving
+                      ? 'Leaving…'
+                      : leavePending
+                        ? 'Leaving after this hand'
+                        : mySeat.inHand && inHandPhase
+                          ? 'Leave'
+                          : 'Leave table'}
+                </button>
+              </div>
+            ) : null}
+          </div>
+          {mySeat && myHoleCards ? (
+            <div className="flex items-center gap-3 lg:flex-col lg:items-stretch lg:border-t lg:border-white/10 lg:pt-4">
+              <div className="flex gap-1.5">
+                {myHoleCards.map((card) => (
+                  <PlayingCard key={card} card={card} size="lg" />
+                ))}
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Your hand</p>
+                <p className="font-semibold leading-tight text-slate-100">
+                  {mySeat.folded ? 'Folded' : myHandName ?? 'Waiting for the flop'}
                 </p>
-              ) : null}
-              {!mySeat ? (
-                leaving ? (
-                  <p className="py-3 text-center text-slate-300">Returning to the lobby…</p>
-                ) : isFull ? (
-                  <div className="space-y-3 text-center">
-                    <p className="text-slate-300">This table is full.</p>
+              </div>
+            </div>
+          ) : null}
+        </aside>
+
+        {/* Right: what you can do right now */}
+        <aside className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-4 shadow-2xl shadow-black/60 order-2 flex flex-col gap-3 lg:order-3 lg:max-h-full lg:w-80 lg:shrink-0 lg:overflow-y-auto">
+            {removedForTimeout && !mySeat ? (
+              // SRS-9.11: why they lost their seat.
+              <p className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                You were removed from your seat because you didn&apos;t buy back in or leave within{' '}
+                {BUSTED_DECISION_TIMEOUT_MS / 1000} seconds of running out of chips.
+              </p>
+            ) : null}
+            {!mySeat ? (
+              leaving ? (
+                <p className="py-3 text-center text-slate-300">Returning to the lobby…</p>
+              ) : isFull ? (
+                <div className="flex flex-wrap items-center justify-center gap-4">
+                  <p className="text-slate-300">This table is full.</p>
+                  <Link
+                    href="/poker"
+                    className="rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                  >
+                    Find another table
+                  </Link>
+                </div>
+              ) : minBuyIn === null || maxBuyIn === null ? (
+                <p className="py-3 text-center text-slate-400">Loading table…</p>
+              ) : !canAffordBuyIn ? (
+                <div className="flex flex-wrap items-center justify-center gap-4">
+                  <p className="text-slate-300">
+                    You need at least <span className="font-semibold text-amber-300">{minBuyIn}</span> to sit here (your
+                    balance: {profile.balance}).
+                  </p>
+                  {canAffordLowerStakes ? (
                     <Link
                       href="/poker"
-                      className="inline-block rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                      className="rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
                     >
-                      Find another table
+                      Try lower stakes
                     </Link>
-                  </div>
-                ) : minBuyIn === null || maxBuyIn === null ? (
-                  <p className="py-3 text-center text-slate-400">Loading table…</p>
-                ) : !canAffordBuyIn ? (
-                  <div className="space-y-3 text-center">
-                    <p className="text-slate-300">
-                      You need at least <span className="font-semibold text-amber-300">{minBuyIn}</span> to sit
-                      here (your balance: {profile.balance}).
-                    </p>
-                    {canAffordLowerStakes ? (
-                      <Link
-                        href="/poker"
-                        className="inline-block rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
-                      >
-                        Try lower stakes
-                      </Link>
-                    ) : (
-                      // Already the lowest stakes (or can't afford those either): the
-                      // shop's Daily Login Box is where free coins come from.
-                      <Link
-                        href="/shop"
-                        className="inline-block rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
-                      >
-                        Get free coins in the shop
-                      </Link>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <ol className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                      <li className={selectedSeat === null ? 'text-amber-200' : 'text-emerald-300'}>
-                        <span
-                          className={`mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
-                            selectedSeat === null ? 'bg-amber-300 text-slate-950' : 'bg-emerald-400 text-slate-950'
-                          }`}
-                        >
-                          {selectedSeat === null ? '1' : '✓'}
-                        </span>
-                        {selectedSeat === null ? 'Pick an open seat' : `Seat ${selectedSeat}`}
-                      </li>
-                      <li className={selectedSeat === null ? 'text-slate-500' : 'text-amber-200'}>
-                        <span
-                          className={`mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
-                            selectedSeat === null ? 'bg-slate-800 text-slate-400' : 'bg-amber-300 text-slate-950'
-                          }`}
-                        >
-                          2
-                        </span>
-                        Choose your buy-in
-                      </li>
-                    </ol>
-
-                    {buyInFields}
-
-                    <button
-                      type="button"
-                      onClick={handleJoin}
-                      disabled={!connected || !buyInValid || selectedSeat === null}
-                      className="w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
-                    >
-                      {selectedSeat === null
-                        ? 'Pick a seat to join'
-                        : buyInValid
-                          ? `Sit in seat ${selectedSeat} with ${parsedBuyIn} chips`
-                          : 'Join table'}
-                    </button>
-                  </div>
-                )
-              ) : (
-                <div className="space-y-5">
-                  {amBusted ? (
-                    // SRS-12.2: buy back in, or leave (SRS-12.3).
-                    <div className="space-y-4 rounded-2xl border border-red-400/30 bg-red-500/[0.05] p-4">
-                      <div>
-                        <p className="text-lg font-semibold text-red-200">You&apos;re out of chips</p>
-                        <p className="text-sm text-slate-400">
-                          Buy back in to keep your seat ({mySeat.seatNumber}), or leave the table. You&apos;ll sit out
-                          until you buy back in.
-                        </p>
-                        {bustedSeconds !== null ? (
-                          <p className="mt-1 text-sm font-semibold text-amber-200">
-                            Choose within <span className="tabular-nums">{bustedSeconds}s</span> or you&apos;ll be
-                            removed from the table.
-                          </p>
-                        ) : null}
-                      </div>
-                      {canAffordBuyIn ? (
-                        <>
-                          {buyInFields}
-                          <div className="flex flex-col gap-3 sm:flex-row">
-                            <button
-                              type="button"
-                              onClick={handleRebuy}
-                              disabled={!connected || !buyInValid || rebuying || leaving}
-                              className="flex-1 rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
-                            >
-                              {rebuying
-                                ? 'Buying back in…'
-                                : buyInValid
-                                  ? `Buy back in with ${parsedBuyIn} chips`
-                                  : 'Buy back in'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleLeave}
-                              disabled={leaving || rebuying}
-                              className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {leaving ? 'Leaving…' : 'Leave table'}
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <p className="text-sm text-slate-300">
-                            Buying back in takes at least <span className="font-semibold text-amber-300">{minBuyIn}</span>{' '}
-                            (your balance: {profile.balance}).
-                          </p>
-                          <div className="flex flex-col gap-3 sm:flex-row">
-                            <Link
-                              href="/shop"
-                              className="flex-1 rounded-xl border border-white/10 bg-slate-800 px-5 py-3 text-center font-semibold text-slate-200 transition hover:border-emerald-400/60"
-                            >
-                              Get free coins in the shop
-                            </Link>
-                            <button
-                              type="button"
-                              onClick={handleLeave}
-                              disabled={leaving}
-                              className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              {leaving ? 'Leaving…' : 'Leave table'}
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
                   ) : (
-                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-slate-500">
-                          Your stack · Seat {mySeat.seatNumber}
-                        </p>
-                        <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
-                          <PlayerChip artKey={myCosmetics?.chip} stakes={config.stakes} size="h-7 w-7" />
-                          {mySeat.chipStack}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleLeave}
-                        disabled={leaving || leavePending}
-                        className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {leaving
-                          ? 'Leaving…'
-                          : leavePending
-                            ? 'Leaving after this hand'
-                            : mySeat.inHand && inHandPhase
-                              ? 'Leave'
-                              : 'Leave table'}
-                      </button>
-                    </div>
+                    // Already the lowest stakes (or can't afford those either): the
+                    // shop's Daily Login Box is where free coins come from.
+                    <Link
+                      href="/shop"
+                      className="rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                    >
+                      Get free coins in the shop
+                    </Link>
                   )}
-
-                  {(myOwedLabel || mySeat.waitingForButton) && !amBusted && !mySeat.inHand ? (
-                    // SRS-11.5/11.6: wait for the big blind, or post what's owed to play the next hand. A
-                    // newcomer the button is about to skip posts both blinds, or sits one hand out.
-                    <div className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
-                      <div>
-                        <p className="font-semibold text-amber-200">
-                          {mySeat.waitingForButton
-                            ? 'The button is about to reach your seat'
-                            : `You owe the ${myOwedLabel === 'SB+BB' ? 'small and big blind' : myOwedLabel === 'SB' ? 'small blind' : 'big blind'}`}
-                        </p>
-                        <p className="text-sm text-slate-400">
-                          {mySeat.postingMissedBlinds
-                            ? `You'll post ${myPostCost} and be dealt into the next hand.`
-                            : mySeat.waitingForButton
-                              ? `The button skips new players, so you'll sit out the next hand and be dealt in free after that — or post both blinds (${myPostCost}) to play it.`
-                              : `You'll be dealt in when the big blind reaches your seat — or post ${myPostCost} to play the next hand.`}
-                        </p>
-                        {(mySeat.waitingForButton || (mySeat.missedSmallBlind && mySeat.missedBigBlind)) &&
-                        !mySeat.postingMissedBlinds ? (
-                          <p className="mt-1 text-xs text-slate-500">
-                            Posting puts in a live big blind ({config.bigBlind}) that counts toward your bet, plus a dead small
-                            blind ({config.smallBlind}) that goes straight into the pot.
-                          </p>
-                        ) : null}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handlePostBlinds(!mySeat.postingMissedBlinds)}
-                        disabled={!connected || choosingBlinds}
-                        className={`w-full rounded-xl px-6 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          mySeat.postingMissedBlinds
-                            ? 'border border-white/10 bg-slate-800 text-slate-200 hover:border-amber-300/60'
-                            : 'bg-amber-300 text-slate-950 shadow-lg shadow-amber-500/20 hover:bg-amber-200'
+                </div>
+              ) : (
+                // Pick a seat on the table, choose a buy-in, sit down.
+                <div className="grid gap-4">
+                  <ol className="flex flex-wrap gap-x-6 gap-y-2 text-sm lg:flex-col">
+                    <li className={selectedSeat === null ? 'text-amber-200' : 'text-emerald-300'}>
+                      <span
+                        className={`mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
+                          selectedSeat === null ? 'bg-amber-300 text-slate-950' : 'bg-emerald-400 text-slate-950'
                         }`}
                       >
-                        {mySeat.postingMissedBlinds
-                          ? mySeat.waitingForButton
-                            ? 'Sit out one hand instead'
-                            : 'Wait for the big blind instead'
-                          : `Post ${myPostCost} and play next hand`}
-                      </button>
-                    </div>
-                  ) : null}
-
-                  {myHoleCards ? (
-                    <div className="flex items-center gap-4">
-                      <div className="flex gap-2">
-                        {myHoleCards.map((card) => (
-                          <PlayingCard key={card} card={card} size="lg" />
-                        ))}
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-wider text-slate-500">Your hand</p>
-                        <p className="font-semibold text-slate-100">
-                          {mySeat.folded ? 'Folded' : myHandName ?? 'Waiting for the flop'}
-                        </p>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {isMyTurn && bettingOptions && tableState ? (
-                    <div className="rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
-                      <p className="mb-3 text-sm font-semibold text-amber-200">Your turn</p>
-                      <BettingControls
-                        // Fresh controls (and amount) for every turn and every change in the bet to match.
-                        key={`${tableState.handNumber}-${tableState.street}-${tableState.currentBet}-${mySeat.bet}`}
-                        options={bettingOptions}
-                        potTotal={potTotal}
-                        seatBet={mySeat.bet}
-                        disabled={acting || !connected}
-                        onAct={handleAct}
-                      />
-                    </div>
-                  ) : inHandPhase && mySeat.inHand ? (
-                    <p className="text-sm text-slate-400">
-                      {mySeat.allIn
-                        ? "You're all-in — sit tight until the hand is over."
-                        : `Waiting for ${activePlayer?.username ?? 'the next player'} to act…`}
-                    </p>
-                  ) : null}
-
-                  {leavePending ? (
-                    <p className="text-xs text-slate-500">
-                      You&apos;ll fold when it&apos;s your turn and leave the table when this hand ends — anything you
-                      win this hand comes with you.
-                    </p>
-                  ) : inHandPhase && mySeat.inHand ? (
-                    <p className="text-xs text-slate-500">
-                      Leaving during a hand folds you when it&apos;s your turn; you leave once the hand ends.
-                    </p>
-                  ) : inHandPhase && !mySeat.folded && !mySeat.inHand && !amBusted && !myOwedLabel ? (
-                    <p className="text-xs text-slate-500">You sat down mid-hand, so you&apos;ll be dealt in next hand.</p>
-                  ) : null}
-
-                  {actError ? (
-                    <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{actError}</p>
-                  ) : null}
+                        {selectedSeat === null ? '1' : '✓'}
+                      </span>
+                      {selectedSeat === null ? 'Pick an open seat' : `Seat ${selectedSeat}`}
+                    </li>
+                    <li className={selectedSeat === null ? 'text-slate-500' : 'text-amber-200'}>
+                      <span
+                        className={`mr-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs font-bold ${
+                          selectedSeat === null ? 'bg-slate-800 text-slate-400' : 'bg-amber-300 text-slate-950'
+                        }`}
+                      >
+                        2
+                      </span>
+                      Choose your buy-in
+                    </li>
+                  </ol>
+                  <div className="min-w-0 space-y-2">{buyInFields}</div>
+                  <button
+                    type="button"
+                    onClick={handleJoin}
+                    disabled={!connected || !buyInValid || selectedSeat === null}
+                    className="rounded-xl bg-emerald-400 px-6 py-4 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+                  >
+                    {selectedSeat === null
+                      ? 'Pick a seat to join'
+                      : buyInValid
+                        ? `Sit in seat ${selectedSeat} with ${parsedBuyIn} chips`
+                        : 'Join table'}
+                  </button>
                 </div>
-              )}
+              )
+            ) : (
+              <>
+                {amBusted ? (
+                  // SRS-12.2: buy back in, or leave (SRS-12.3).
+                  <div className="rounded-2xl border border-red-400/30 bg-red-500/[0.05] p-4">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                      <p className="text-lg font-semibold text-red-200">You&apos;re out of chips</p>
+                      {bustedSeconds !== null ? (
+                        <p className="text-sm font-semibold text-amber-200">
+                          Choose within <span className="tabular-nums">{bustedSeconds}s</span> or you&apos;ll be removed
+                        </p>
+                      ) : null}
+                    </div>
+                    <p className="text-sm text-slate-400">
+                      Buy back in to keep your seat ({mySeat.seatNumber}), or leave the table. You&apos;ll sit out until
+                      you buy back in.
+                    </p>
+                    {canAffordBuyIn ? (
+                      <div className="mt-3 grid gap-3">
+                        <div className="min-w-0 space-y-2">{buyInFields}</div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={handleRebuy}
+                            disabled={!connected || !buyInValid || rebuying || leaving}
+                            className="flex-1 rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+                          >
+                            {rebuying ? 'Buying back in…' : buyInValid ? `Buy back in with ${parsedBuyIn}` : 'Buy back in'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleLeave}
+                            disabled={leaving || rebuying}
+                            className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {leaving ? 'Leaving…' : 'Leave table'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-3 flex flex-wrap items-center gap-3">
+                        <p className="text-sm text-slate-300">
+                          Buying back in takes at least <span className="font-semibold text-amber-300">{minBuyIn}</span>{' '}
+                          (your balance: {profile.balance}).
+                        </p>
+                        <Link
+                          href="/shop"
+                          className="rounded-xl border border-white/10 bg-slate-800 px-5 py-2.5 text-center font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                        >
+                          Get free coins in the shop
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={handleLeave}
+                          disabled={leaving}
+                          className="rounded-xl border border-red-400/40 bg-red-500/10 px-5 py-2.5 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {leaving ? 'Leaving…' : 'Leave table'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
 
-              {pageError ? (
-                <p className="mt-4 rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{pageError}</p>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </section>
-    </Room>
+                {(myOwedLabel || mySeat.waitingForButton) && !amBusted && !mySeat.inHand ? (
+                  // SRS-11.5/11.6: wait for the big blind, or post what's owed to play the next hand. A
+                  // newcomer the button is about to skip posts both blinds, or sits one hand out.
+                  <div className="flex flex-col gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-amber-200">
+                        {mySeat.waitingForButton
+                          ? 'The button is about to reach your seat'
+                          : `You owe the ${myOwedLabel === 'SB+BB' ? 'small and big blind' : myOwedLabel === 'SB' ? 'small blind' : 'big blind'}`}
+                      </p>
+                      <p className="text-sm text-slate-400">
+                        {mySeat.postingMissedBlinds
+                          ? `You'll post ${myPostCost} and be dealt into the next hand.`
+                          : mySeat.waitingForButton
+                            ? `The button skips new players, so you'll sit out the next hand and be dealt in free after that — or post both blinds (${myPostCost}) to play it.`
+                            : `You'll be dealt in when the big blind reaches your seat — or post ${myPostCost} to play the next hand.`}
+                      </p>
+                      {(mySeat.waitingForButton || (mySeat.missedSmallBlind && mySeat.missedBigBlind)) &&
+                      !mySeat.postingMissedBlinds ? (
+                        <p className="mt-1 text-xs text-slate-500">
+                          Posting puts in a live big blind ({config.bigBlind}) that counts toward your bet, plus a dead
+                          small blind ({config.smallBlind}) that goes straight into the pot.
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handlePostBlinds(!mySeat.postingMissedBlinds)}
+                      disabled={!connected || choosingBlinds}
+                      className={`shrink-0 rounded-xl px-6 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        mySeat.postingMissedBlinds
+                          ? 'border border-white/10 bg-slate-800 text-slate-200 hover:border-amber-300/60'
+                          : 'bg-amber-300 text-slate-950 shadow-lg shadow-amber-500/20 hover:bg-amber-200'
+                      }`}
+                    >
+                      {mySeat.postingMissedBlinds
+                        ? mySeat.waitingForButton
+                          ? 'Sit out one hand instead'
+                          : 'Wait for the big blind instead'
+                        : `Post ${myPostCost} and play next hand`}
+                    </button>
+                  </div>
+                ) : null}
+
+                {!amBusted ? (
+                  <div>
+                    <div>
+                      {isMyTurn && bettingOptions && tableState ? (
+                        <div className="rounded-2xl border border-amber-300/40 bg-amber-300/[0.06] p-3 shadow-[0_0_28px_rgba(252,211,77,0.12)]">
+                          <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-amber-200">Your turn</p>
+                          <BettingControls
+                            // Fresh controls (and amount) for every turn and every change in the bet to match.
+                            key={`${tableState.handNumber}-${tableState.street}-${tableState.currentBet}-${mySeat.bet}`}
+                            options={bettingOptions}
+                            potTotal={potTotal}
+                            seatBet={mySeat.bet}
+                            disabled={acting || !connected}
+                            onAct={handleAct}
+                          />
+                        </div>
+                      ) : inHandPhase && mySeat.inHand ? (
+                        <p className="text-sm text-slate-400">
+                          {mySeat.allIn
+                            ? "You're all-in — sit tight until the hand is over."
+                            : `Waiting for ${activePlayer?.username ?? 'the next player'} to act…`}
+                        </p>
+                      ) : inHandPhase && !mySeat.folded && !mySeat.inHand && !myOwedLabel && !mySeat.waitingForButton ? (
+                        <p className="text-sm text-slate-400">You sat down mid-hand, so you&apos;ll be dealt in next hand.</p>
+                      ) : !inHandPhase && !myOwedLabel && !mySeat.waitingForButton ? (
+                        <p className="text-sm text-slate-400">
+                          {tableState?.phase === 'countdown'
+                            ? `Next hand in ${countdownSeconds ?? 0}s…`
+                            : 'Waiting for more players to start the next hand…'}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {actError ? (
+                  <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{actError}</p>
+                ) : null}
+              </>
+            )}
+
+            {pageError ? (
+              <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{pageError}</p>
+            ) : null}
+        </aside>
+      </div>
+    </main>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { notifyBalanceChanged } from '../lib/balanceEvents';
+import { BALANCE_CHANGED_EVENT, notifyBalanceChanged } from '../lib/balanceEvents';
 import { COSMETIC_CATEGORIES, type Cosmetic } from '../lib/cosmetics';
 import BlindBoxReveal, { type BoxResult } from './cosmetics/BlindBoxReveal';
 import CosmeticArt from './cosmetics/CosmeticArt';
@@ -90,6 +90,23 @@ export default function BlindBoxShop() {
     load(stored).catch(() => setError(LOAD_FAILED));
   }, [load]);
 
+  // The Daily Login Box on the same page credits coins without a reload, so
+  // re-read the balance whenever it changes; otherwise a box the player can
+  // now afford would stay disabled (SRS-124.5) until the page is refreshed.
+  useEffect(() => {
+    if (!token) return;
+    const refresh = () => {
+      fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${token}` } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data) setBalance(data.balance);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(BALANCE_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(BALANCE_CHANGED_EVENT, refresh);
+  }, [token]);
+
   // Escape closes the confirmation without buying (SRS-124.2, SRS-124.3).
   useEffect(() => {
     if (!confirming) return;
@@ -128,6 +145,10 @@ export default function BlindBoxShop() {
           rewards: b.rewards.map((r) => (r.cosmeticId === data.cosmetic.cosmeticId ? { ...r, owned: true } : r)),
         })) ?? previous
       );
+      // The reveal's backdrop covers the nav bar, so the nav's balance can
+      // refresh now (SRS-NFR-104): the new balance, refund included, is
+      // ready behind the pop-up without giving the result away.
+      notifyBalanceChanged();
     } catch {
       setBuyError(BUY_FAILED);
     } finally {
@@ -305,7 +326,6 @@ export default function BlindBoxShop() {
           boxName={reveal.box.name}
           rewards={reveal.box.rewards}
           result={reveal.result}
-          onStopped={notifyBalanceChanged}
           onClose={() => setReveal(null)}
         />
       ) : null}

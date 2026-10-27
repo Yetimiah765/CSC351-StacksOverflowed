@@ -210,6 +210,15 @@ describe('Profile API routes', () => {
     expect(tables.players.update).toHaveBeenCalledWith({ bio: 'Hi' });
   });
 
+  it('PATCH never changes the birthday (SRS-102.3)', async () => {
+    const onlyBirthday = await PATCH(req('PATCH', { birthday: '2000-01-01' }));
+    expect(onlyBirthday.status).toBe(400);
+    expect(tables.players.update).not.toHaveBeenCalled();
+
+    await PATCH(req('PATCH', { bio: 'Hi', birthday: '2000-01-01' }));
+    expect(tables.players.update).toHaveBeenCalledWith({ bio: 'Hi' });
+  });
+
   describe('PATCH username', () => {
     it('changes it through fn_change_username without asking for a password (SRS-112.4, SRS-112.5)', async () => {
       rpc.mockResolvedValue({ data: { status: 'changed', username: 'newname1' }, error: null });

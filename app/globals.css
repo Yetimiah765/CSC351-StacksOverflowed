@@ -387,3 +387,107 @@ body {
     display: none !important;
   }
 }
+
+/* Poker emotes (lib/emotes.ts, components/emotes/EmoteArt.tsx). An emote
+   pops up over the sender's seat (emote-pop, lasting EMOTE_SHOW_MS = 2.6s)
+   while the chip itself does that emote's move (emote-move-<id>). */
+@keyframes emote-pop {
+  0% { opacity: 0; transform: translateY(16px) scale(0.2); }
+  12% { opacity: 1; transform: translateY(0) scale(1.18); }
+  20% { transform: scale(1); }
+  85% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: translateY(-10px) scale(0.85); }
+}
+@keyframes emote-laugh {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-9deg) translateY(-2px); }
+  75% { transform: rotate(9deg) translateY(-2px); }
+}
+@keyframes emote-cry {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  50% { transform: translateY(4px) scale(1.05, 0.93); }
+}
+@keyframes emote-rattle {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px) rotate(-2deg); }
+  75% { transform: translateX(4px) rotate(2deg); }
+}
+@keyframes emote-bounce {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  40% { transform: translateY(-12px) scale(0.96, 1.05); }
+  70% { transform: translateY(0) scale(1.06, 0.94); }
+}
+@keyframes emote-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-12deg); }
+}
+@keyframes emote-jump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-16px) scale(1.12); }
+}
+@keyframes emote-sway {
+  0%, 100% { transform: rotate(0deg) translateX(0); }
+  25% { transform: rotate(-6deg) translateX(-3px); }
+  75% { transform: rotate(6deg) translateX(3px); }
+}
+
+.emote-pop { transform-origin: 50% 100%; animation: emote-pop 2.6s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.emote-move-laugh { transform-origin: 50% 90%; animation: emote-laugh 0.32s ease-in-out 0.3s 6; }
+.emote-move-cry { transform-origin: 50% 100%; animation: emote-cry 0.8s ease-in-out 0.3s 2; }
+.emote-move-angry { animation: emote-rattle 0.12s linear 0.3s 12; }
+.emote-move-thumbs-up, .emote-move-gg { transform-origin: 50% 100%; animation: emote-bounce 0.55s ease-out 0.3s 3; }
+.emote-move-thinking { transform-origin: 50% 90%; animation: emote-tilt 1.1s ease-in-out 0.3s 2; }
+.emote-move-shocked { transform-origin: 50% 100%; animation: emote-jump 0.6s ease-out 0.25s 2; }
+.emote-move-cool { transform-origin: 50% 90%; animation: emote-sway 1s ease-in-out 0.3s 2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .emote-pop { animation: callout-fade 2.6s both; }
+  .emote-move-laugh, .emote-move-cry, .emote-move-angry, .emote-move-thumbs-up, .emote-move-gg,
+  .emote-move-thinking, .emote-move-shocked, .emote-move-cool { animation: none !important; }
+}
+
+/* Sportsbook "Bet placed" stamp (components/sports/BetPlacedStamp.tsx): the
+   stamp slams down and wobbles, coins burst out from behind it, then the bet's
+   details slide up. */
+@keyframes bet-stamp-in {
+  0% { transform: scale(2.6) rotate(-14deg); opacity: 0; }
+  55% { transform: scale(0.92) rotate(-5deg); opacity: 1; }
+  75% { transform: scale(1.05) rotate(-7deg); }
+  100% { transform: scale(1) rotate(-6deg); }
+}
+@keyframes bet-stamp-coin {
+  0% { transform: rotate(var(--coin-angle)) translateY(0) scale(0.4); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: rotate(var(--coin-angle)) translateY(calc(var(--coin-reach) * -1)) scale(1); opacity: 0; }
+}
+@keyframes bet-stamp-details {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes bet-stamp-backdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.bet-stamp { animation: bet-stamp-in 0.45s cubic-bezier(0.3, 0.8, 0.3, 1.2) both; }
+.bet-stamp-coin { animation: bet-stamp-coin 0.75s ease-out 0.22s both; }
+.bet-stamp-details { animation: bet-stamp-details 0.3s ease-out 0.4s both; }
+.bet-stamp-backdrop { animation: bet-stamp-backdrop 0.15s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bet-stamp, .bet-stamp-details, .bet-stamp-backdrop { animation: none !important; }
+  .bet-stamp { transform: rotate(-6deg); }
+  .bet-stamp-fx { display: none !important; }
+}
+
+/* Sportsbook's Showdown banner: a slow band of light sweeping across it. */
+@keyframes showdown-banner-shine {
+  0%, 60% { transform: translateX(0) skewX(-20deg); }
+  100% { transform: translateX(450%) skewX(-20deg); }
+}
+.showdown-banner-shine {
+  background: linear-gradient(90deg, transparent, rgba(253, 230, 138, 0.18), transparent);
+  animation: showdown-banner-shine 4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .showdown-banner-shine { display: none; }
+}

@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import bcrypt from 'bcryptjs';
 
@@ -99,6 +101,19 @@ const validRegistration = {
   password: 'secret123',
 };
 
+// Lets a registration through: the name is free and the new player row comes back.
+function acceptRegistration() {
+  tables.players.singleResult = {
+    data: { player_id: 1, first_name: 'New', last_name: 'User', birthday: '1990-01-01', balance: 1000 },
+    error: null,
+  };
+}
+
+// The row the register route handed to players.insert().
+function insertedPlayer() {
+  return tables.players.insert.mock.calls[0][0] as Record<string, unknown>;
+}
+
 describe('Auth API routes', () => {
   beforeEach(() => {
     vi.mocked(getSupabaseClient).mockReturnValue({
@@ -133,13 +148,89 @@ describe('Auth API routes', () => {
       });
     });
 
-    it('rejects a username that is already taken or reserved (SRS-101.5)', async () => {
+    it('rejects a username that is already taken or reserved (SRS-101.6)', async () => {
       tables.usernames.maybeSingleResult = { data: { username_id: 5 }, error: null };
 
       const response = await registerPost(registerRequest(validRegistration));
 
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: 'That username is already taken or reserved.' });
+    });
+
+    it('checks whether a username is taken without regard to capitals (SRS-101.7)', async () => {
+      tables.usernames.maybeSingleResult = { data: { username_id: 5 }, error: null }; // 'newuser123' exists
+
+      const response = await registerPost(registerRequest({ ...validRegistration, username: 'NewUser123' }));
+
+      expect(response.status).toBe(400);
+      // ILIKE with no wildcards (usernames are letters and digits only) is a
+      // case-insensitive equals; the unique index on LOWER(username) backs it up.
+      expect(tables.usernames.ilike).toHaveBeenCalledWith('username', 'NewUser123');
+      expect(tables.usernames.eq).not.toHaveBeenCalledWith('username', expect.anything());
+    });
+
+    it('stores the birthday given at registration (SRS-102.2)', async () => {
+      acceptRegistration();
+
+      await registerPost(registerRequest({ ...validRegistration, birthday: '1985-07-04' }));
+
+      expect(insertedPlayer().birthday).toBe('1985-07-04');
+    });
+
+    it('stores a one-way hash of the password, never the password itself (SRS-104.5)', async () => {
+      acceptRegistration();
+
+      await registerPost(registerRequest(validRegistration));
+
+      const row = insertedPlayer();
+      expect(row.password_hash).not.toBe(validRegistration.password);
+      expect(JSON.stringify(row)).not.toContain(validRegistration.password);
+      expect(JSON.stringify(tables.usernames.insert.mock.calls)).not.toContain(validRegistration.password);
+      expect(await bcrypt.compare(validRegistration.password, row.password_hash as string)).toBe(true);
+    });
+
+    it('hashes with salted bcrypt at cost 10 or more and never logs the password (SRS-NFR-101)', async () => {
+      const logs = (['log', 'info', 'warn', 'error'] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation(() => {})
+      );
+      acceptRegistration();
+      await registerPost(registerRequest(validRegistration));
+      const firstHash = insertedPlayer().password_hash as string;
+
+      const [, cost] = firstHash.match(/^\$2[aby]\$(\d{2})\$/) ?? [];
+      expect(Number(cost)).toBeGreaterThanOrEqual(10);
+
+      // Salted: the same password hashes differently for a second account.
+      resetTable(tables.players);
+      acceptRegistration();
+      await registerPost(registerRequest({ ...validRegistration, username: 'other1234' }));
+      expect(insertedPlayer().password_hash).not.toBe(firstHash);
+
+      // Then log in against the stored hash.
+      tables.usernames.maybeSingleResult = { data: { player_id: 1, username: 'newuser123' }, error: null };
+      tables.players.maybeSingleResult = {
+        data: { player_id: 1, first_name: 'New', last_name: 'User', balance: 1000, password_hash: firstHash, account_status: 'Active' },
+        error: null,
+      };
+      const login = await loginPost(loginRequest({ username: 'newuser123', password: validRegistration.password }));
+      expect(login.status).toBe(200);
+
+      for (const spy of logs) {
+        expect(JSON.stringify(spy.mock.calls)).not.toContain(validRegistration.password);
+        spy.mockRestore();
+      }
+    });
+
+    it('starts a new account at the 1,000-coin database default (SRS-110.1)', async () => {
+      acceptRegistration();
+
+      // A balance sent by the browser is ignored.
+      const response = await registerPost(registerRequest({ ...validRegistration, balance: 999999 }));
+
+      expect(response.status).toBe(201);
+      expect(insertedPlayer()).not.toHaveProperty('balance');
+      const schema = readFileSync(join(__dirname, '../../supabase/schema.sql'), 'utf8');
+      expect(schema).toMatch(/\bbalance\s+BIGINT\s+NOT NULL DEFAULT 1000\b/);
     });
 
     it('releases an expired reservation of the name before checking it (SRS-112.8)', async () => {
@@ -166,17 +257,32 @@ describe('Auth API routes', () => {
       expect(response.status).toBe(400);
     });
 
-    it('rejects a name containing digits (SRS-101.2)', async () => {
+    it.each([
+      ["O'Brien", 'User'],
+      ['New', 'Smith-Jones'],
+      ['Mary Ann', 'Van Dyke'],
+    ])('accepts the name "%s %s" with spaces, apostrophes, or hyphens (SRS-101.2)', async (firstName, lastName) => {
+      acceptRegistration();
+
+      const response = await registerPost(registerRequest({ ...validRegistration, firstName, lastName }));
+
+      expect(response.status).toBe(201);
+      expect(tables.players.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ first_name: firstName, last_name: lastName })
+      );
+    });
+
+    it('rejects a name containing digits (SRS-101.3)', async () => {
       const response = await registerPost(registerRequest({ ...validRegistration, firstName: 'New1' }));
       expect(response.status).toBe(400);
     });
 
-    it('rejects a username outside 6-10 alphanumeric characters (SRS-101.3/101.4)', async () => {
+    it('rejects a username outside 6-10 alphanumeric characters (SRS-101.4/101.5)', async () => {
       const response = await registerPost(registerRequest({ ...validRegistration, username: 'ab' }));
       expect(response.status).toBe(400);
     });
 
-    it('rejects a password without both a letter and a number (SRS-101.7)', async () => {
+    it('rejects a password without both a letter and a number (SRS-101.8)', async () => {
       const response = await registerPost(registerRequest({ ...validRegistration, password: 'allletters' }));
       expect(response.status).toBe(400);
     });
@@ -262,7 +368,7 @@ describe('Auth API routes', () => {
       });
     });
 
-    it('replaces any existing session on login (SRS-103.4/103.5)', async () => {
+    it('replaces any existing session on login (SRS-103.5)', async () => {
       await seedPlayer();
 
       await loginPost(loginRequest({ username: 'gooduser1', password }));
@@ -273,7 +379,7 @@ describe('Auth API routes', () => {
       );
     });
 
-    it('rejects an unknown username with a generic message (SRS-104.2/104.3)', async () => {
+    it('rejects an unknown username with a generic message (SRS-104.2/104.4)', async () => {
       tables.usernames.maybeSingleResult = { data: null, error: null };
 
       const response = await loginPost(loginRequest({ username: 'ghostuser', password }));
@@ -282,13 +388,46 @@ describe('Auth API routes', () => {
       expect(await response.json()).toEqual({ error: 'Invalid username or password.' });
     });
 
-    it('rejects an incorrect password with the same generic message (SRS-104.2/104.3)', async () => {
+    it('rejects an incorrect password with the same generic message (SRS-104.2/104.4)', async () => {
       await seedPlayer();
 
       const response = await loginPost(loginRequest({ username: 'gooduser1', password: 'wrongpass1' }));
 
       expect(response.status).toBe(401);
       expect(await response.json()).toEqual({ error: 'Invalid username or password.' });
+    });
+
+    it('finds the account whatever capitals the username is typed in (SRS-101.7)', async () => {
+      await seedPlayer();
+
+      const response = await loginPost(loginRequest({ username: 'GoodUser1', password }));
+
+      expect(response.status).toBe(200);
+      expect(tables.usernames.ilike).toHaveBeenCalledWith('username', 'GoodUser1');
+      expect((await response.json()).player.username).toBe('gooduser1');
+    });
+
+    it('treats capitals in the password as different characters (SRS-101.9)', async () => {
+      await seedPlayer({ password: 'Secret123' });
+
+      for (const attempt of ['secret123', 'SECRET123']) {
+        const response = await loginPost(loginRequest({ username: 'gooduser1', password: attempt }));
+        expect(response.status).toBe(401);
+      }
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password: 'Secret123' }));
+      expect(response.status).toBe(200);
+    });
+
+    it('never adds coins for logging in (SRS-110.4)', async () => {
+      await seedPlayer();
+
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password }));
+
+      expect(response.status).toBe(200);
+      expect(tables.players.update).not.toHaveBeenCalled();
+      expect(tables.players.upsert).not.toHaveBeenCalled();
+      expect(tables.players.insert).not.toHaveBeenCalled();
+      expect((await response.json()).player.balance).toBe(1000);
     });
 
     it('rejects a pending-deletion account (SRS-106.7)', async () => {

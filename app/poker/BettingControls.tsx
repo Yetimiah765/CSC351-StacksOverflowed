@@ -47,14 +47,18 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
           { label: 'All-in', amount: maxTo },
         ];
 
+  const rangeText = minTo === maxTo ? `All-in only: ${maxTo}` : `${minTo}–${maxTo}`;
+
+  // Fold and Check/Call side by side, then the amount (typed or slid, with
+  // shortcuts) and Bet/Raise — narrow enough for the table's side panel.
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           disabled={disabled}
           onClick={() => onAct('fold')}
-          className="rounded-xl border border-red-400/40 bg-red-500/10 px-4 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl border border-red-400/40 bg-red-500/10 px-5 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Fold
         </button>
@@ -62,33 +66,18 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
           type="button"
           disabled={disabled}
           onClick={() => onAct(canCheck ? 'check' : 'call')}
-          className="rounded-xl bg-sky-500 px-4 py-3 font-semibold text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-sky-500 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {canCheck ? 'Check' : `Call ${callAmount}`}
         </button>
-        {aggressive ? (
-          <button
-            type="button"
-            disabled={disabled || !amountValid}
-            onClick={() => onAct(aggressive, parsedAmount as number)}
-            className="col-span-2 rounded-xl bg-amber-400 px-4 py-3 font-semibold text-slate-950 shadow-lg shadow-amber-500/20 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none sm:col-span-1"
-          >
-            {amountValid ? (isAllIn ? `All-in ${parsedAmount}` : `${verb} ${parsedAmount}`) : verb}
-          </button>
-        ) : null}
       </div>
 
       {aggressive ? (
-        <div className="rounded-2xl border border-white/5 bg-black/20 p-4">
-          <div className="flex items-baseline justify-between">
-            <label htmlFor="raise-amount" className="text-xs uppercase tracking-wider text-slate-500">
+        <div className="flex min-w-0 flex-col gap-2 rounded-2xl border border-white/5 bg-black/25 p-3">
+          <div className="flex items-center gap-3">
+            <label htmlFor="raise-amount" className="sr-only">
               {aggressive === 'bet' ? 'Bet amount' : 'Raise to'}
             </label>
-            <span className="text-xs tabular-nums text-slate-500">
-              {minTo === maxTo ? `All-in only: ${maxTo}` : `${minTo}–${maxTo}`}
-            </span>
-          </div>
-          <div className="mt-2 flex items-center gap-3">
             <input
               id="raise-amount"
               inputMode="numeric"
@@ -97,7 +86,7 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
               onBlur={() => {
                 if (parsedAmount === null) setAmountText(String(minTo));
               }}
-              className="w-28 shrink-0 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-lg font-semibold tabular-nums text-amber-200 outline-none transition focus:border-amber-300"
+              className="w-24 shrink-0 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-lg font-semibold tabular-nums text-amber-200 outline-none transition focus:border-amber-300"
             />
             {minTo < maxTo ? (
               <input
@@ -107,27 +96,36 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
                 max={maxTo}
                 value={Math.min(Math.max(parsedAmount ?? minTo, minTo), maxTo)}
                 onChange={(e) => setAmountText(e.target.value)}
-                className="w-full accent-amber-300"
+                className="min-w-[5rem] flex-1 accent-amber-300"
               />
-            ) : null}
+            ) : (
+              <span className="flex-1" />
+            )}
           </div>
-          {quickAmounts.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {quickAmounts.map(({ label, amount }) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={() => setAmountText(String(amount))}
-                  className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {quickAmounts.map(({ label, amount }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => setAmountText(String(amount))}
+                className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
+              >
+                {label}
+              </button>
+            ))}
+            <span className="ml-auto text-xs tabular-nums text-slate-500">{rangeText}</span>
+          </div>
+            <button
+              type="button"
+              disabled={disabled || !amountValid}
+              onClick={() => onAct(aggressive, parsedAmount as number)}
+              className="w-full rounded-xl bg-amber-400 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-amber-500/25 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+            >
+              {amountValid ? (isAllIn ? `All-in ${parsedAmount}` : `${verb} ${parsedAmount}`) : verb}
+            </button>
           {amountText && !amountValid ? (
             // SRS-15.10: say what range is allowed.
-            <p className="mt-2 text-sm text-red-300">
+            <p className="text-sm text-red-300">
               {minTo === maxTo
                 ? `You can only go all-in for ${maxTo}.`
                 : `${aggressive === 'bet' ? 'Bet' : 'Raise to'} between ${minTo} and ${maxTo}.`}
@@ -135,7 +133,7 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
           ) : null}
         </div>
       ) : (
-        <p className="text-sm text-slate-500">You can only call or fold here.</p>
+        <p className="self-center text-sm text-slate-500">You can only call or fold here.</p>
       )}
     </div>
   );

@@ -5,6 +5,7 @@ import type { NormalizedEvent } from '../../lib/sports/normalize';
 const mocks = vi.hoisted(() => ({
   supabase: {} as unknown,
   oddsApi: {} as unknown,
+  secondOddsApi: null as unknown,
   syncSports: vi.fn(),
   settleWagers: vi.fn(),
   settleShowdowns: vi.fn(),
@@ -13,7 +14,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../lib/supabase', () => ({ getSupabaseClient: vi.fn(() => mocks.supabase) }));
-vi.mock('../../lib/oddsApi', () => ({ getOddsApiClient: vi.fn(() => mocks.oddsApi) }));
+vi.mock('../../lib/oddsApi', () => ({
+  getOddsApiClient: vi.fn(() => mocks.oddsApi),
+  getSecondOddsApiClient: vi.fn(() => mocks.secondOddsApi),
+}));
 vi.mock('../../lib/sports/sync', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/sports/sync')>()),
   syncSports: mocks.syncSports,
@@ -191,6 +195,7 @@ describe('POST /api/sports/sync', () => {
     vi.stubEnv('CRON_SECRET', '');
     mocks.supabase = {};
     mocks.oddsApi = {};
+    mocks.secondOddsApi = null;
   });
 
   afterEach(() => {
@@ -236,6 +241,27 @@ describe('POST /api/sports/sync', () => {
       settlement,
       showdowns: { settled: 1, refunded: 0, errors: [], picked: [{ sport: 'Basketball', eventId: 9 }] },
     });
+  });
+
+  it("also syncs a second key's sports on that key, and adds them to the summary", async () => {
+    vi.stubEnv('ODDS_API_SPORTS_2', 'icehockey_nhl');
+    mocks.secondOddsApi = { second: true };
+    mocks.syncSports
+      .mockResolvedValueOnce({ events: 4, markets: 12, options: 24, skipped: [], errors: [], quota: { remaining: 490, used: 10 } })
+      .mockResolvedValueOnce({ events: 2, markets: 6, options: 12, skipped: [], errors: ['nhl boom'], quota: { remaining: 495, used: 5 } });
+    mocks.settleWagers.mockResolvedValue(NO_SETTLEMENT);
+    mocks.settleShowdowns.mockResolvedValue({ settled: 0, refunded: 0, errors: [] });
+    mocks.selectShowdowns.mockResolvedValue({ picked: [], errors: [] });
+
+    const response = await POST(request('Bearer secret'));
+
+    expect(mocks.syncSports).toHaveBeenCalledTimes(2);
+    expect(mocks.syncSports).toHaveBeenLastCalledWith(mocks.supabase, { second: true }, ['icehockey_nhl']);
+    expect(response.status).toBe(207);
+    const body = await response.json();
+    expect(body).toMatchObject({ events: 6, markets: 18, options: 36, errors: ['nhl boom'] });
+    // The first key's quota is the one reported.
+    expect(body.quota).toEqual({ remaining: 490, used: 10 });
   });
 
   it('returns 207 when settling a wager failed', async () => {
@@ -310,5 +336,38 @@ describe('syncSports', () => {
     expect(summary.skipped).toEqual(['basketball_nba']);
     expect(summary.errors).toEqual([]);
     expect(oddsApi.getOdds).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('second Odds API key', () => {
+  // The route tests above replace syncSports, so load the real module here.
+  const realSync = () => vi.importActual<typeof import('../../lib/sports/sync')>('../../lib/sports/sync');
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('syncs NHL by default, or the sports in ODDS_API_SPORTS_2', async () => {
+    const { secondSportKeys } = await realSync();
+    vi.stubEnv('ODDS_API_SPORTS_2', '');
+    expect(secondSportKeys()).toEqual(['icehockey_nhl']);
+    vi.stubEnv('ODDS_API_SPORTS_2', ' icehockey_nhl, soccer_epl ');
+    expect(secondSportKeys()).toEqual(['icehockey_nhl', 'soccer_epl']);
+  });
+
+  it("merges two keys' summaries, keeping the first key's quota", async () => {
+    const { mergeSyncSummaries } = await realSync();
+    const merged = mergeSyncSummaries(
+      { events: 4, markets: 12, options: 24, skipped: ['baseball_mlb'], errors: ['a'], quota: { remaining: 490, used: 10 } },
+      { events: 2, markets: 6, options: 12, skipped: [], errors: ['b'], quota: { remaining: 495, used: 5 } },
+    );
+    expect(merged).toEqual({
+      events: 6,
+      markets: 18,
+      options: 36,
+      skipped: ['baseball_mlb'],
+      errors: ['a', 'b'],
+      quota: { remaining: 490, used: 10 },
+    });
   });
 });

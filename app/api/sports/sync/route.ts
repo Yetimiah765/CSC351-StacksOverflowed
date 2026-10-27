@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
-import { getOddsApiClient } from '../../../../lib/oddsApi';
-import { syncSports } from '../../../../lib/sports/sync';
+import { getOddsApiClient, getSecondOddsApiClient } from '../../../../lib/oddsApi';
+import { mergeSyncSummaries, secondSportKeys, syncSports } from '../../../../lib/sports/sync';
 import { settleWagers } from '../../../../lib/sports/settle';
 import { selectShowdowns, settleShowdowns } from '../../../../lib/sports/showdown';
 import { notifyShowdownChanged } from '../../../../lib/sports/showdownRealtime';
@@ -30,7 +30,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const summary = await syncSports(supabase, oddsApi);
+    let summary = await syncSports(supabase, oddsApi);
+    // A teammate's second key, if set, syncs its own sports on its own credits.
+    const second = getSecondOddsApiClient();
+    if (second) summary = mergeSyncSummaries(summary, await syncSports(supabase, second, secondSportKeys()));
     // SRS-209 / SRS-210: pay out wagers whose games the sync just decided.
     const settlement = await settleWagers(supabase);
     // SRS-212 - SRS-214: pay out finished Showdowns, then pick new ones.

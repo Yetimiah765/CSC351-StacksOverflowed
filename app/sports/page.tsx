@@ -9,6 +9,8 @@ import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import type { MyBet, MyBets, WagerResult } from '../../lib/sports/myBets';
 import type { MyShowdownEntry, MyShowdowns } from '../../lib/sports/showdown';
 import { LogoNotice, SPORT_ICONS, StatusBadge, TeamCrest, formatDateTime, startsIn } from '../../components/sports/shared';
+import { BetPlacedStamp, type PlacedBet } from '../../components/sports/BetPlacedStamp';
+import { HighlightReel } from '../../components/sports/HighlightReel';
 
 type Selection = { event: SportsEvent; market: SportsMarket; option: SportsOption };
 type SlipMessage = { kind: 'success' | 'error'; text: string } | null;
@@ -61,35 +63,42 @@ const ROW_SIDES: Record<SportsMarket['type'], [OptionSide, OptionSide, OptionSid
   moneyline: ['away', 'home', 'draw'],
 };
 
-function FilterChip({
-  active,
-  onClick,
-  icon,
+// SRS-201.1 / SRS-202.1: filter the list by status as well as sport and
+// league. Finished games stay listed (with their final score) but are hidden by
+// default, so the games you can still bet on or watch come first.
+type StatusFilter = 'current' | 'finished' | 'all';
+
+function isFinished(event: SportsEvent) {
+  return event.status === 'Completed' || event.status === 'Canceled' || event.status === 'Postponed';
+}
+
+// A filter as a compact dropdown (SRS-201.1). The label is for screen readers;
+// each list's first option ("All sports", …) says what it filters.
+function FilterSelect({
+  label,
+  value,
+  onChange,
   children,
 }: {
-  active: boolean;
-  onClick: () => void;
-  icon?: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-full border px-4 py-1.5 text-sm transition ${
-        active
-          ? 'border-emerald-400 bg-emerald-400/10 text-emerald-200'
-          : 'border-slate-700 bg-slate-800 text-slate-300 hover:border-slate-500'
-      }`}
-    >
-      {icon ? (
-        <span aria-hidden="true" className="mr-1.5">
-          {icon}
-        </span>
-      ) : null}
-      {children}
-    </button>
+    <label className="relative min-w-[9rem] flex-1 sm:flex-none">
+      <span className="sr-only">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full cursor-pointer appearance-none rounded-xl border border-slate-700 bg-slate-900 py-2 pl-3 pr-9 text-sm font-semibold text-slate-100 outline-none transition hover:border-slate-500 focus:border-sky-400"
+      >
+        {children}
+      </select>
+      <span aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-sky-400">
+        ▼
+      </span>
+    </label>
   );
 }
 
@@ -110,7 +119,7 @@ function EventCard({
   ];
   const showScore = event.status !== 'Upcoming' && event.homeScore !== null && event.awayScore !== null;
   // Finished games stay listed for a day so players can see the result.
-  const finished = event.status === 'Completed' || event.status === 'Canceled' || event.status === 'Postponed';
+  const finished = isFinished(event);
 
   const countdown = event.status === 'Upcoming' ? startsIn(event.startTime, Date.now()) : null;
 
@@ -119,14 +128,14 @@ function EventCard({
       className={`rounded-2xl border p-3 transition sm:p-5 ${
         finished
           ? 'border-slate-800/60 bg-slate-900/40 opacity-60'
-          : 'border-slate-800 bg-gradient-to-br from-slate-900 to-slate-900/60 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/5'
+          : 'border-slate-800 bg-gradient-to-br from-slate-900 to-slate-900/60 hover:border-sky-500/40 hover:shadow-lg hover:shadow-sky-500/5'
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
         <span className="flex items-center gap-2">
           <span className="rounded-md bg-slate-800 px-1.5 py-0.5 font-semibold text-slate-300">{event.league}</span>
           {formatTime(event.startTime)}
-          {countdown ? <span className="text-emerald-300">· {countdown}</span> : null}
+          {countdown ? <span className="text-sky-300">· {countdown}</span> : null}
         </span>
         <span className="flex items-center gap-2">
           {event.resultPending ? <span className="text-slate-500">Final score pending</span> : null}
@@ -187,8 +196,8 @@ function EventCard({
                         aria-label={`${option.label} at ${formatOdds(option.decimalOdds)}`}
                         className={`flex min-h-[3.25rem] w-full flex-col items-center justify-center rounded-xl border px-1 py-2 transition sm:px-2 ${
                           selected
-                            ? 'border-emerald-300 bg-emerald-400 text-slate-950 shadow-lg shadow-emerald-500/20'
-                            : 'border-slate-700 bg-slate-800/80 text-slate-100 hover:-translate-y-0.5 hover:border-emerald-400/70 hover:bg-slate-800'
+                            ? 'border-sky-300 bg-sky-400 text-slate-950 shadow-lg shadow-sky-500/20'
+                            : 'border-slate-700 bg-slate-800/80 text-slate-100 hover:-translate-y-0.5 hover:border-sky-400/70 hover:bg-slate-800'
                         } disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-500`}
                       >
                         {caption ? (
@@ -234,6 +243,7 @@ function BetSlip({
   onOddsChanged,
   onRefresh,
   onPlaced,
+  onCelebrate,
   onClear,
 }: {
   selection: Selection | null;
@@ -245,6 +255,7 @@ function BetSlip({
   onOddsChanged: (odds: number) => void;
   onRefresh: () => void;
   onPlaced: () => void;
+  onCelebrate: (bet: PlacedBet) => void;
   onClear: () => void;
 }) {
   const [amountText, setAmountText] = useState('');
@@ -264,7 +275,7 @@ function BetSlip({
   if (!selection) {
     return (
       <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6">
-        <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Bet slip</p>
+        <p className="text-sm uppercase tracking-[0.25em] text-sky-300">Bet slip</p>
         <SlipNotice message={message} />
         <p className="mt-4 text-sm text-slate-400">Pick an outcome to see its rules and what you could win.</p>
       </div>
@@ -305,11 +316,11 @@ function BetSlip({
       if (res.ok) {
         onBalance(data.balance);
         onPlaced();
-        onMessage({
-          kind: 'success',
-          text: `Bet placed: ${amount.toLocaleString()} coins on ${option.label} at ${formatOdds(data.wager.odds)}. Pays ${Number(
-            data.wager.potentialPayout,
-          ).toLocaleString()} coins if it wins.`,
+        onCelebrate({
+          amount,
+          label: option.label,
+          odds: formatOdds(data.wager.odds),
+          payout: Number(data.wager.potentialPayout),
         });
         setAmountText('');
       } else {
@@ -328,7 +339,7 @@ function BetSlip({
   return (
     <div className="rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/60 lg:border-slate-800">
       <div className="flex items-center justify-between">
-        <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Bet slip</p>
+        <p className="text-sm uppercase tracking-[0.25em] text-sky-300">Bet slip</p>
         <button type="button" onClick={onClear} className="text-sm text-slate-400 hover:text-slate-200">
           Clear
         </button>
@@ -339,7 +350,7 @@ function BetSlip({
       </p>
       <div className="mt-1 flex items-baseline justify-between gap-3">
         <p className="text-lg font-semibold">{option.label}</p>
-        <p className="text-lg font-semibold tabular-nums text-emerald-300">{formatOdds(option.decimalOdds)}</p>
+        <p className="text-lg font-semibold tabular-nums text-sky-300">{formatOdds(option.decimalOdds)}</p>
       </div>
       <p className="text-sm text-slate-400">{market.name}</p>
       <p className="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-300">
@@ -361,7 +372,7 @@ function BetSlip({
           clearSuccess();
         }}
         placeholder={String(MIN_WAGER)}
-        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-emerald-400 disabled:opacity-60"
+        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-sky-400 disabled:opacity-60"
       />
       <div className="mt-2 flex flex-wrap gap-2">
         {QUICK_AMOUNTS.map((value) => (
@@ -373,7 +384,7 @@ function BetSlip({
               setAmountText(String(value));
               clearSuccess();
             }}
-            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-emerald-400/70 disabled:opacity-60"
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-sky-400/70 disabled:opacity-60"
           >
             {value}
           </button>
@@ -395,7 +406,7 @@ function BetSlip({
       {!token ? (
         <Link
           href="/login"
-          className="mt-5 block w-full rounded-xl bg-emerald-400 px-6 py-3 text-center font-semibold text-slate-950 transition hover:bg-emerald-300"
+          className="mt-5 block w-full rounded-xl bg-sky-400 px-6 py-3 text-center font-semibold text-slate-950 transition hover:bg-sky-300"
         >
           Log in to place bets
         </Link>
@@ -404,12 +415,12 @@ function BetSlip({
           type="button"
           disabled={!canPlace}
           onClick={() => setStage('confirm')}
-          className="mt-5 w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-5 w-full rounded-xl bg-sky-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Place bet
         </button>
       ) : (
-        <div className="mt-5 rounded-xl border border-emerald-700/60 bg-emerald-950/40 p-4">
+        <div className="mt-5 rounded-xl border border-sky-700/60 bg-sky-950/40 p-4">
           <p className="text-sm text-slate-200">
             Bet <span className="font-semibold">{amount?.toLocaleString()} coins</span> on{' '}
             <span className="font-semibold">{option.label}</span> at{' '}
@@ -422,7 +433,7 @@ function BetSlip({
               type="button"
               onClick={placeBet}
               disabled={stage === 'placing'}
-              className="flex-1 rounded-xl bg-emerald-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+              className="flex-1 rounded-xl bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300 disabled:opacity-60"
             >
               {stage === 'placing' ? 'Placing…' : 'Confirm bet'}
             </button>
@@ -712,7 +723,7 @@ function MyBetsView({
           <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8 text-center">
             <p className="text-lg font-medium">No open bets</p>
             <p className="mt-2 text-sm text-slate-400">
-              <button type="button" onClick={onBrowse} className="text-emerald-300 hover:underline">
+              <button type="button" onClick={onBrowse} className="text-sky-300 hover:underline">
                 Browse games
               </button>{' '}
               to place one.
@@ -819,7 +830,7 @@ function ResultsModal({ items, onClose }: { items: ResultItem[]; onClose: () => 
         onClick={(e) => e.stopPropagation()}
         className="max-h-[85vh] w-full max-w-md overflow-y-auto rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/60"
       >
-        <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Bet results</p>
+        <p className="text-sm uppercase tracking-[0.25em] text-sky-300">Bet results</p>
         <h2 id="results-title" className="mt-2 text-2xl font-semibold">
           {headline}
         </h2>
@@ -873,7 +884,7 @@ function ResultsModal({ items, onClose }: { items: ResultItem[]; onClose: () => 
           ref={closeRef}
           type="button"
           onClick={onClose}
-          className="mt-6 w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300"
+          className="mt-6 w-full rounded-xl bg-sky-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-sky-300"
         >
           {net > 0 ? 'Nice!' : 'Got it'}
         </button>
@@ -887,10 +898,13 @@ export default function SportsBettingPage() {
   const [loadError, setLoadError] = useState('');
   const [sport, setSport] = useState<string | null>(null);
   const [leagueId, setLeagueId] = useState<number | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('current');
   const [selection, setSelection] = useState<Selection | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [slipMessage, setSlipMessage] = useState<SlipMessage>(null);
+  const [placedBet, setPlacedBet] = useState<PlacedBet | null>(null);
+  const clearPlacedBet = useCallback(() => setPlacedBet(null), []);
   const [view, setView] = useState<'games' | 'bets'>('games');
   const [myBets, setMyBets] = useState<BetsData | null>(null);
   const [betsError, setBetsError] = useState('');
@@ -980,94 +994,92 @@ export default function SportsBettingPage() {
     [listing, sport],
   );
 
-  const openGames = (listing?.events ?? []).filter((e) => e.status === 'Upcoming').length;
   const openCount = myBets ? myBets.open.length + myBets.showdowns.open.length : 0;
 
+  const inLeague = useMemo(
+    () => (listing?.events ?? []).filter((e) => (!sport || e.sport === sport) && (!leagueId || e.leagueId === leagueId)),
+    [listing, sport, leagueId],
+  );
+  const finishedCount = inLeague.filter(isFinished).length;
+
   const days = useMemo(() => {
-    const events = (listing?.events ?? []).filter(
-      (e) => (!sport || e.sport === sport) && (!leagueId || e.leagueId === leagueId),
-    );
+    let events = inLeague;
+    if (statusFilter === 'current') events = events.filter((e) => !isFinished(e));
+    // Most recent results first, rather than last week's at the top.
+    if (statusFilter === 'finished') events = events.filter(isFinished).reverse();
     const groups = new Map<string, SportsEvent[]>();
     for (const event of events) {
       const key = dayHeading(event.startTime);
       groups.set(key, [...(groups.get(key) ?? []), event]);
     }
     return [...groups.entries()];
-  }, [listing, sport, leagueId]);
+  }, [inLeague, statusFilter]);
 
   return (
-    <main className={`min-h-page bg-slate-950 px-4 py-10 text-slate-100 sm:px-6 ${selection && view === 'games' ? 'pb-[28rem] lg:pb-10' : ''}`}>
+    <main
+      className={`min-h-page bg-slate-950 bg-[radial-gradient(ellipse_80%_40%_at_50%_-10%,rgba(56,189,248,0.14),transparent)] px-4 py-6 text-slate-100 sm:px-6 ${selection && view === 'games' ? 'pb-[28rem] lg:pb-10' : ''}`}
+    >
       <div className="mx-auto w-full max-w-5xl">
-        <header className="relative overflow-hidden rounded-3xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/15 via-slate-900 to-slate-950 p-6 sm:p-8">
-          <div aria-hidden="true" className="pointer-events-none absolute -right-6 -top-8 select-none text-[7rem] leading-none opacity-10 sm:text-[9rem]">
-            🏈🏀
-          </div>
-          <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Sports Betting</p>
-          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">Sportsbook</h1>
-          <p className="mt-2 max-w-md text-slate-300">Real games, real odds, virtual coins only.</p>
-          <dl className="mt-6 grid grid-cols-3 gap-2 text-sm sm:flex sm:flex-wrap sm:gap-3">
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-3 py-2 sm:px-4">
-              <dt className="text-xs text-slate-400">Open games</dt>
-              <dd className="text-lg font-semibold tabular-nums">{openGames}</dd>
-            </div>
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-3 py-2 sm:px-4">
-              <dt className="text-xs text-slate-400">Sports</dt>
-              <dd className="text-lg font-semibold">{listing?.sports.length ? listing.sports.map((name) => SPORT_ICONS[name] ?? name).join(' ') : '–'}</dd>
-            </div>
+        <header className="relative overflow-hidden rounded-3xl border border-sky-400/20 bg-slate-900">
+          <HighlightReel />
+          {/* Darken and tint the clips so the title and tabs stay readable. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-gradient-to-r from-slate-950/95 via-slate-950/70 to-sky-950/60"
+          />
+          <div className="relative flex min-h-[8.5rem] flex-wrap items-end justify-between gap-3 p-5 sm:min-h-[10rem] sm:p-6">
+            <h1 className="text-4xl font-black uppercase italic tracking-tight drop-shadow-lg sm:text-5xl">
+              Sportsbook<span className="text-sky-400">.</span>
+            </h1>
             {token ? (
-              <div className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-3 py-2 sm:px-4">
-                <dt className="text-xs text-slate-400">Your bets</dt>
-                <dd className="text-lg font-semibold tabular-nums">{myBets ? myBets.open.length + myBets.showdowns.open.length : '…'}</dd>
+              <div role="tablist" aria-label="Sportsbook views" className="inline-flex rounded-full border border-slate-800 bg-slate-900 p-1">
+                {(
+                  [
+                    ['games', 'Games'],
+                    ['bets', `My bets${openCount > 0 ? ` (${openCount})` : ''}`],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === key}
+                    onClick={() => {
+                      setView(key);
+                      if (key === 'bets') loadMyBets();
+                    }}
+                    className={`rounded-full px-4 py-1.5 text-sm font-semibold uppercase tracking-wide transition ${
+                      view === key ? 'bg-sky-400 text-slate-950' : 'text-slate-300 hover:text-slate-100'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             ) : null}
-          </dl>
-        </header>
-
-        {token ? (
-          <div role="tablist" aria-label="Sportsbook views" className="mt-8 inline-flex rounded-full border border-slate-800 bg-slate-900 p-1">
-            {(
-              [
-                ['games', 'Games'],
-                ['bets', `My bets${openCount > 0 ? ` (${openCount})` : ''}`],
-              ] as const
-            ).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                role="tab"
-                aria-selected={view === key}
-                onClick={() => {
-                  setView(key);
-                  if (key === 'bets') loadMyBets();
-                }}
-                className={`rounded-full px-5 py-2 text-sm transition ${
-                  view === key ? 'bg-emerald-400 font-semibold text-slate-950' : 'text-slate-300 hover:text-slate-100'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
           </div>
-        ) : null}
+        </header>
 
         {view === 'games' ? (
           <Link
             href="/sports/showdown"
-            className="group mt-6 flex items-center justify-between gap-4 rounded-3xl border border-amber-400/40 bg-gradient-to-r from-amber-500/20 via-slate-900 to-slate-900 px-5 py-4 transition hover:border-amber-300"
+            className="showdown-banner group relative mt-4 block overflow-hidden rounded-2xl border border-amber-400/60 bg-gradient-to-r from-amber-600/25 via-slate-900 to-amber-600/25 px-12 py-5 text-center shadow-[0_0_30px_rgba(251,191,36,0.18)] transition hover:border-amber-300 hover:shadow-[0_0_40px_rgba(251,191,36,0.3)]"
           >
-            <span>
-              <span className="block text-xs uppercase tracking-[0.25em] text-amber-300">New</span>
-              <span className="block text-xl font-black uppercase italic tracking-tight sm:text-2xl">The Showdown</span>
-              <span className="block text-sm text-slate-300">One featured game per sport. Pick a side, winners split the pool.</span>
-            </span>
-            <span className="text-2xl text-amber-300 transition group-hover:translate-x-1" aria-hidden="true">
+            <span aria-hidden="true" className="showdown-banner-shine pointer-events-none absolute inset-y-0 -left-1/3 w-1/3" />
+            <span className="block text-xs font-semibold uppercase tracking-[0.3em] text-amber-300">Featured</span>
+            <span className="mt-1 block text-3xl font-black uppercase italic tracking-tight sm:text-4xl">The Showdown</span>
+            <span className="mt-1 block text-sm text-slate-300">Pick a side. Winners split the pool.</span>
+            <span
+              className="absolute right-5 top-1/2 -translate-y-1/2 text-2xl text-amber-300 transition group-hover:translate-x-1"
+              aria-hidden="true"
+            >
               →
             </span>
           </Link>
         ) : null}
 
         {view === 'bets' ? (
-          <div className="mt-8">
+          <div className="mt-6">
             <MyBetsView
               bets={myBets}
               error={betsError}
@@ -1083,33 +1095,42 @@ export default function SportsBettingPage() {
         ) : null}
 
         {view === 'games' && listing && listing.sports.length > 0 ? (
-          <nav aria-label="Filter games" className="mt-8 space-y-3">
-            <div className="flex flex-wrap gap-2">
-              <FilterChip active={sport === null} onClick={() => { setSport(null); setLeagueId(null); }}>
-                All sports
-              </FilterChip>
+          <nav aria-label="Filter games" className="mt-4 flex flex-wrap gap-2">
+            <FilterSelect
+              label="Sport"
+              value={sport ?? ''}
+              onChange={(value) => {
+                setSport(value || null);
+                setLeagueId(null);
+              }}
+            >
+              <option value="">All sports</option>
               {listing.sports.map((name) => (
-                <FilterChip key={name} icon={SPORT_ICONS[name]} active={sport === name} onClick={() => { setSport(name); setLeagueId(null); }}>
+                <option key={name} value={name}>
+                  {SPORT_ICONS[name] ? `${SPORT_ICONS[name]} ` : ''}
                   {name}
-                </FilterChip>
+                </option>
               ))}
-            </div>
+            </FilterSelect>
             {visibleLeagues.length > 1 ? (
-              <div className="flex flex-wrap gap-2">
-                <FilterChip active={leagueId === null} onClick={() => setLeagueId(null)}>
-                  All leagues
-                </FilterChip>
+              <FilterSelect label="League" value={leagueId === null ? '' : String(leagueId)} onChange={(value) => setLeagueId(value ? Number(value) : null)}>
+                <option value="">All leagues</option>
                 {visibleLeagues.map((league) => (
-                  <FilterChip key={league.id} active={leagueId === league.id} onClick={() => setLeagueId(league.id)}>
+                  <option key={league.id} value={league.id}>
                     {league.name}
-                  </FilterChip>
+                  </option>
                 ))}
-              </div>
+              </FilterSelect>
             ) : null}
+            <FilterSelect label="Games" value={statusFilter} onChange={(value) => setStatusFilter(value as StatusFilter)}>
+              <option value="current">Upcoming & live</option>
+              <option value="finished">Finished{finishedCount > 0 ? ` (${finishedCount})` : ''}</option>
+              <option value="all">All games</option>
+            </FilterSelect>
           </nav>
         ) : null}
 
-        <div className={`mt-8 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start ${view === 'games' ? '' : 'hidden'}`}>
+        <div className={`mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start ${view === 'games' ? '' : 'hidden'}`}>
           <section aria-label="Games" className="space-y-8">
             {loadError ? (
               <p className="rounded-xl border border-red-800 bg-red-950/60 p-4 text-sm text-red-200">{loadError}</p>
@@ -1119,14 +1140,23 @@ export default function SportsBettingPage() {
 
             {listing && days.length === 0 ? (
               <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8 text-center">
-                <p className="text-lg font-medium">No games right now</p>
+                <p className="text-lg font-medium">{statusFilter === 'finished' ? 'No finished games yet' : 'No games right now'}</p>
                 <p className="mt-2 text-sm text-slate-400">Odds update a few times a day. Check back soon.</p>
+                {statusFilter === 'current' && finishedCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('finished')}
+                    className="mt-4 rounded-full border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:border-slate-500"
+                  >
+                    See {finishedCount} finished {finishedCount === 1 ? 'game' : 'games'}
+                  </button>
+                ) : null}
               </div>
             ) : null}
 
             {days.map(([day, events]) => (
               <div key={day}>
-                <h2 className="mb-3 flex items-baseline gap-2 text-sm font-medium uppercase tracking-wide text-slate-400">
+                <h2 className="mb-3 flex items-baseline gap-2 text-sm font-black uppercase italic tracking-wide text-slate-300">
                   {day}
                   <span className="text-xs font-normal normal-case tracking-normal text-slate-500">
                     {events.length} {events.length === 1 ? 'game' : 'games'}
@@ -1170,6 +1200,7 @@ export default function SportsBettingPage() {
               }
               onRefresh={loadEvents}
               onPlaced={loadMyBets}
+              onCelebrate={setPlacedBet}
               onClear={() => {
                 setSelection(null);
                 setSlipMessage(null);
@@ -1180,6 +1211,8 @@ export default function SportsBettingPage() {
       </div>
 
       <LogoNotice />
+
+      {placedBet ? <BetPlacedStamp bet={placedBet} onDone={clearPlacedBet} /> : null}
 
       {myBets && myBets.unseen.length + myBets.showdowns.unseen.length > 0 ? (
         <ResultsModal items={[...myBets.showdowns.unseen.map(fromShowdown), ...myBets.unseen.map(fromWager)]} onClose={dismissResults} />

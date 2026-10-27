@@ -9,6 +9,7 @@ import ProfileField from '../../components/profile/ProfileField';
 import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
+import { notifyAppearanceChanged } from '../../lib/balanceEvents';
 import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
 
 interface Profile {
@@ -111,6 +112,7 @@ export default function ProfilePage() {
       const data = await res.json();
       if (!res.ok) return data.error || 'Could not equip that cosmetic.';
       setCosmetics((previous) => (previous ? { ...previous, equipped: { ...previous.equipped, [data.category]: data.cosmeticId } } : previous));
+      if (data.category === 'Profile Outline') notifyAppearanceChanged();
       return null;
     } catch {
       return 'Could not equip that cosmetic. Please try again.';

@@ -7,8 +7,11 @@ function getToken(request: Request): string | null {
 }
 
 // SRS-109.1: the nav bar shows the player's balance on every page, so this
-// returns just that number rather than the full profile from GET
-// /api/profile, whose profile photo can be several MB.
+// returns just what the bar needs rather than the full profile from GET
+// /api/profile, whose profile photo can be several MB: the balance, the
+// player's id (the bar fetches the small avatar from
+// /api/players/[playerId]/avatar) and their equipped profile outline's art
+// key (SRS-120.7, SRS-120.8).
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -28,5 +31,14 @@ export async function GET(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!data) return Response.json({ error: 'Player not found.' }, { status: 404 });
 
-  return Response.json({ balance: data.balance }, { status: 200 });
+  // The bar still shows the balance if this lookup fails, just without the outline.
+  const { data: outline } = await supabase
+    .from('player_equipped_cosmetics')
+    .select('cosmetics(asset_path)')
+    .eq('player_id', playerId)
+    .eq('category', 'Profile Outline')
+    .maybeSingle();
+  const outlineArtKey = (outline as { cosmetics: { asset_path: string } | null } | null)?.cosmetics?.asset_path ?? null;
+
+  return Response.json({ balance: data.balance, playerId, outlineArtKey }, { status: 200 });
 }

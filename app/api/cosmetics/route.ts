@@ -15,7 +15,7 @@ export async function GET(request: Request) {
 
   const { data: ownedRows, error: ownedError } = await supabase
     .from('player_cosmetics')
-    .select('acquired_at, cosmetics(cosmetic_id, cosmetic_name, category, is_default, asset_path)')
+    .select('acquired_at, cosmetics(cosmetic_id, cosmetic_name, category, is_default, asset_path, is_holographic)')
     .eq('player_id', playerId);
   if (ownedError) return Response.json({ error: ownedError.message }, { status: 500 });
 

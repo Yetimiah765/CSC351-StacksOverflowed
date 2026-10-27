@@ -3,12 +3,14 @@ import {
   canDouble,
   canSplit,
   checkBlackjackBet,
+  chipsFor,
   createDeck,
   dealHand,
   handTotal,
   handView,
   isBlackjack,
   moveCost,
+  nearestChipBet,
   playDealer,
   playMove,
   settleHand,
@@ -64,6 +66,44 @@ describe('checkBlackjackBet', () => {
 
   it.each([0, -10, 5, 12.5, '50', null, undefined, Number.MAX_VALUE])('rejects %s', (bet) => {
     expect(checkBlackjackBet(bet).ok).toBe(false);
+  });
+
+  it.each([111, 37, 15, 12, 999])('rejects %s, which the chips cannot make, and suggests one they can', (bet) => {
+    const check = checkBlackjackBet(bet);
+    expect(check.ok).toBe(false);
+    expect(!check.ok && check.error).toContain(nearestChipBet(bet).toLocaleString());
+  });
+});
+
+describe('chipsFor', () => {
+  it.each([
+    [10, [10]],
+    [20, [10, 10]],
+    [25, [25]],
+    [30, [10, 10, 10]],
+    [35, [25, 10]],
+    [110, [100, 10]],
+    [115, [50, 25, 10, 10, 10, 10]],
+    [235, [100, 100, 25, 10]],
+  ])('makes %i from %j', (amount, chips) => {
+    expect(chipsFor(amount)).toEqual(chips);
+  });
+
+  it('makes every multiple of 5 from 20 to 2,000, and 10, and the chips always add up', () => {
+    for (let amount = 20; amount <= 2000; amount += 5) {
+      expect(chipsFor(amount)?.reduce((sum, chip) => sum + chip, 0)).toBe(amount);
+    }
+    expect(chipsFor(10)).toEqual([10]);
+  });
+
+  it.each([0, 5, 15, 111, 37, 12.5])('cannot make %s', (amount) => {
+    expect(chipsFor(amount)).toBeNull();
+  });
+
+  it('suggests the biggest amount the chips can make below an odd one', () => {
+    expect(nearestChipBet(111)).toBe(110);
+    expect(nearestChipBet(19)).toBe(10);
+    expect(nearestChipBet(38)).toBe(35);
   });
 });
 

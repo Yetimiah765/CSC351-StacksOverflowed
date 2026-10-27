@@ -52,12 +52,47 @@ export const MIN_BLACKJACK_BET = BLACKJACK_CHIPS[0];
 
 export type BetCheck = { ok: true; amount: number } | { ok: false; error: string };
 
-// Rejects anything that isn't a whole number of coins at or above the minimum.
+/**
+ * The chips that make up `amount`, largest first, or null if the chips
+ * can't make it. With 10s and 25s every multiple of 5 from 20 up can be
+ * made, plus 10 itself (15 is the one gap): an odd number of fives needs
+ * exactly one 25, and the rest is a multiple of 10 for the 100s, 50s and 10s.
+ */
+export function chipsFor(amount: number): number[] | null {
+  if (!Number.isSafeInteger(amount) || amount < MIN_BLACKJACK_BET || amount % 5 !== 0 || amount === 15) return null;
+  const chips: number[] = [];
+  let left = amount;
+  if ((amount / 5) % 2 === 1) {
+    chips.push(25);
+    left -= 25;
+  }
+  for (const value of [100, 50, 10]) {
+    while (left >= value) {
+      chips.push(value);
+      left -= value;
+    }
+  }
+  return chips.sort((a, b) => b - a);
+}
+
+/** The biggest bet the chips can make that is no more than `amount`. */
+export function nearestChipBet(amount: number): number {
+  for (let bet = Math.floor(amount / 5) * 5; bet >= MIN_BLACKJACK_BET; bet -= 5) {
+    if (chipsFor(bet)) return bet;
+  }
+  return MIN_BLACKJACK_BET;
+}
+
+// SRS-901.1: a bet is an amount the chips can make — whole coins, at least
+// the smallest chip, and nothing a 10, 25, 50, and 100 chip can't add up to.
 export function checkBlackjackBet(input: unknown): BetCheck {
   if (typeof input !== 'number' || !Number.isSafeInteger(input) || input <= 0) {
     return { ok: false, error: 'Bet a whole number of coins greater than 0.' };
   }
   if (input < MIN_BLACKJACK_BET) return { ok: false, error: `The minimum bet is ${MIN_BLACKJACK_BET} coins.` };
+  if (!chipsFor(input)) {
+    return { ok: false, error: `Bet an amount the chips can make, like ${nearestChipBet(input).toLocaleString()}.` };
+  }
   return { ok: true, amount: input };
 }
 

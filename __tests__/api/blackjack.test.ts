@@ -189,7 +189,7 @@ describe('POST /api/blackjack/deal', () => {
     expect(tables.players.update).not.toHaveBeenCalled();
   });
 
-  it.each([0, -10, 5, 12.5, '50', null])('rejects a bet of %s', async (bet) => {
+  it.each([0, -10, 5, 12.5, '50', null, 111, 15])('rejects a bet of %s', async (bet) => {
     signedIn();
 
     expect((await deal(req('/deal', { bet }))).status).toBe(400);

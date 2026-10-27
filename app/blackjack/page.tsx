@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { createContext, useCallback, useContext, useEffect, useId, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { APPEARANCE_CHANGED_EVENT, BALANCE_CHANGED_EVENT, notifyBalanceChanged } from "../../lib/balanceEvents";
 import type { Cosmetic } from "../../lib/cosmetics";
 import {
@@ -383,15 +383,22 @@ export default function BlackjackPage() {
     [loadHistory]
   );
 
+  // Counts the deals and moves sent, so a slower hand reload can't undo one.
+  const playsSent = useRef(0);
+
   // Shows the server's hand in play: after a refresh, and whenever the table
   // may be out of date (the hand was played in another tab, or the server
   // restarted and forgot it). A finished hand's results stay on the table.
   const loadHand = useCallback(async () => {
     const token = getToken();
     if (!token) return;
+    const sentAfter = playsSent.current;
     const res = await fetch("/api/blackjack", { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) return;
     const data = await res.json();
+    // A deal or move sent meanwhile has the newer hand: this answer may show
+    // it from before that move (e.g. still in play after it busted).
+    if (playsSent.current !== sentAfter) return;
     setHand((current) => data.hand ?? (current?.finished ? current : null));
     showRefund(data.refunded);
   }, [showRefund]);
@@ -411,6 +418,7 @@ export default function BlackjackPage() {
   }, [balance, chipTotal, inPlay]);
 
   async function post(path: string, body: unknown) {
+    playsSent.current++;
     const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken()}` },

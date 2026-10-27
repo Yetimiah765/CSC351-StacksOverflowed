@@ -93,20 +93,23 @@ export async function recordRound(
 /**
  * Returns the bets of the player's rounds that the server lost (an open row
  * with no round in memory, e.g. after a restart), saving each as a Push.
- * `keepHandId` is the round still in memory, if any. Call it only while the
- * player is marked busy, so a round being dealt isn't mistaken for a lost
- * one. Returns the coins given back.
+ * `keepHandId` is the round still in memory, if any. A round being dealt
+ * has its row before it is in memory, so call this while the player is
+ * marked busy, or pass `minAgeMs` to skip rounds dealt more recently than
+ * that. Returns the coins given back.
  */
 export async function refundLostRounds(
   supabase: SupabaseClient,
   playerId: number,
-  keepHandId?: number
+  keepHandId?: number,
+  minAgeMs = 0
 ): Promise<number> {
   const { data: open, error } = await supabase
     .from('blackjack_hands')
     .select('hand_id, bet_amount')
     .eq('player_id', playerId)
-    .is('completed_at', null);
+    .is('completed_at', null)
+    .lte('started_at', new Date(Date.now() - minAgeMs).toISOString());
   if (error) {
     console.error(`Blackjack: could not look for lost hands of player ${playerId}: ${error.message}`);
     return 0;

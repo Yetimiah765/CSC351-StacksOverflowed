@@ -86,9 +86,11 @@ export async function POST(request: Request) {
       return Response.json({ hand: handView(handId, stored.bet, state, null), balance }, { status: 200 });
     }
 
+    // Kept in memory until its row is closed, so it can't be taken for a lost
+    // round meanwhile. If it can't be saved, the open row returns the bets.
+    const saved = await recordRound(supabase, playerId!, handId, stored.bet, state, outcome, stored.startedAt);
     removeHand(playerId!);
-    // If the round can't be saved, its open row returns the bets instead.
-    if (!(await recordRound(supabase, playerId!, handId, stored.bet, state, outcome, stored.startedAt))) {
+    if (!saved) {
       return Response.json({ error: 'The hand could not be saved, so your bets will be returned.' }, { status: 500 });
     }
     const view = handView(handId, stored.bet, state, outcome);

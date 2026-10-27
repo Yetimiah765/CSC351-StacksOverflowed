@@ -83,14 +83,15 @@ export default function DailyLoginBox() {
       const data = await res.json();
       if (res.ok) {
         // The reward is already saved (SRS-128.9) before the spin reveals it
-        // (SRS-128.10), so leaving mid-spin loses nothing. The nav bar's
-        // balance refreshes when the reels stop (onStopped below), about
-        // 1.5 s from now, so it doesn't spoil the spin but still lands
-        // inside SRS-NFR-104's 2 seconds.
+        // (SRS-128.10), so leaving mid-spin loses nothing. The spin's
+        // backdrop covers the nav bar, so the nav's balance refreshes now
+        // (SRS-110.5, SRS-NFR-104) and is ready behind the pop-up without
+        // spoiling the spin.
         setNow(Date.now());
         setReward(data.reward);
         setShowSpin(true);
         setState({ kind: 'cooldown', readyAt: Date.now() + data.msRemaining });
+        notifyBalanceChanged();
       } else if (res.status === 409) {
         // Already opened elsewhere, e.g. in another tab (SRS-128.19).
         setNow(Date.now());
@@ -169,7 +170,7 @@ export default function DailyLoginBox() {
       ) : null}
 
       {reward !== null && showSpin ? (
-        <SlotReveal reward={reward} onStopped={notifyBalanceChanged} onClose={() => setShowSpin(false)} />
+        <SlotReveal reward={reward} onClose={() => setShowSpin(false)} />
       ) : null}
 
       {error ? (

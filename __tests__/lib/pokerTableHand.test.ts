@@ -122,6 +122,21 @@ describe('PokerTable pre-hand countdown', () => {
     expect(NEXT_HAND_DELAY_MS.showdown).toBe(10_000);
   });
 
+  it('waits longest after an all-in run-out, which the table plays out street by street', () => {
+    const table = tableWith([1, 2, 3], { 1: 100 });
+    table.startHand(pick(0));
+    play(table, [
+      [1, 'raise', 100], // all-in
+      [2, 'fold'],
+      [3, 'call'],
+    ]);
+    expect(table.getState().lastHandResult).toMatchObject({ reason: 'showdown', ranOut: true });
+
+    table.updateCountdown(0);
+    expect(table.getState(0).countdownMsRemaining).toBe(NEXT_HAND_DELAY_MS.runout);
+    expect(NEXT_HAND_DELAY_MS.runout).toBe(14_000);
+  });
+
   it('waits a little less after everyone else folds, and the usual time once players gather again', () => {
     const table = tableWith([1, 2, 3]);
     table.startHand(pick(0));

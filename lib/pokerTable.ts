@@ -108,9 +108,12 @@ export const HAND_START_COUNTDOWN_MS = 5_000;
 // After a hand ends, the countdown to the next one is longer, so everyone
 // can see who won what (and, after a showdown, the board and the revealed
 // hands) before the next deal clears them.
-export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'], number> = {
+// After an all-in run-out the hands are revealed first and the rest of the
+// board is then dealt street by street on screen, so it waits longer still.
+export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'] | 'runout', number> = {
   fold: 6_000,
   showdown: 10_000,
+  runout: 14_000,
 };
 // SRS-NFR-015 / SRS-12.10: how long a busted player has to buy back in or
 // leave before they're removed from their seat.
@@ -1115,7 +1118,7 @@ export class PokerTable {
    * if enough players are still seated with chips.
    */
   private finishHand(reason: 'fold' | 'showdown', ranOut = false) {
-    this.nextCountdownMs = NEXT_HAND_DELAY_MS[reason];
+    this.nextCountdownMs = NEXT_HAND_DELAY_MS[ranOut ? 'runout' : reason];
     this.collectBets();
     const pots = this.buildPots();
     const awards = new Map<SeatRecord, number>();

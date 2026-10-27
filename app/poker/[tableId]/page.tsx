@@ -25,7 +25,7 @@ import {
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
-import ActionCallout from '../ActionCallout';
+import ActionCallout, { calloutDuration } from '../ActionCallout';
 import {
   CardBackCover,
   DEAL_STAGGER_MS,
@@ -75,7 +75,10 @@ const cssVars = (vars: Record<string, string>) => vars as CSSProperties;
 
 // A board card that comes out of the deck face down, rises, flips over and
 // slams onto the felt with a shockwave (app/poker/tableAnimations.tsx).
-function SlamCard({ card, slam, from }: { card: Card; slam: Slam; from: { x: number; y: number } }) {
+function SlamCard(props: { card: Card; slam: Slam; from: { x: number; y: number } }) {
+  // Timed once, when the card first appears: later updates (the next action,
+  // a resize) mustn't move a card that's already mid-air.
+  const [{ card, slam, from }] = useState(props);
   return (
     <span className="poker-slam inline-block" style={cssVars({ ...offsetVars('from', from), ...slamVars(slam) })}>
       <PlayingCard card={card} />
@@ -208,6 +211,18 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   }, []);
   useEffect(() => () => hitTimersRef.current.forEach(clearTimeout), []);
 
+  // A brand-new action's callout (app/poker/ActionCallout.tsx) sweeps across
+  // the table first; cards that action brings out wait for it to pass, so
+  // they aren't hidden behind it. 0 when there's no new callout — like the
+  // action already on the table when the page loads, which ActionCallout
+  // doesn't play either.
+  const actionSeenRef = useRef<number | null | undefined>(undefined);
+  const latestAction = tableState?.lastAction ?? null;
+  const calloutWait =
+    latestAction && actionSeenRef.current !== undefined && latestAction.id !== actionSeenRef.current
+      ? calloutDuration(latestAction)
+      : 0;
+
   // New board cards during a hand. The board already out when the page
   // loads isn't news, so it doesn't shake anything.
   const boardSeenRef = useRef<{ hand: number; length: number } | null>(null);
@@ -218,9 +233,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     const seen = boardSeenRef.current;
     boardSeenRef.current = { hand: handNumberNow, length: inHandBoardLength };
     if (seen && seen.hand === handNumberNow && inHandBoardLength > seen.length) {
-      scheduleHits(boardHits(seen.length, inHandBoardLength));
+      scheduleHits(boardHits(seen.length, inHandBoardLength, calloutWait));
     }
-  }, [inHandBoardLength, handNumberNow, scheduleHits]);
+  }, [inHandBoardLength, handNumberNow, scheduleHits, calloutWait]);
 
   // The end of a hand: reveals, any run-out, then the winners — one
   // timeline for the animations and the shakes.
@@ -229,7 +244,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!finishedHand) return null;
     const seen = boardSeenRef.current;
     const boardBefore = seen && seen.hand === finishedHand.handNumber ? seen.length : finishedHand.board.length;
-    return showdownTimeline(finishedHand, boardBefore);
+    return showdownTimeline(finishedHand, boardBefore, calloutWait);
     // One timeline per finished hand; later broadcasts of it don't restart anything.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [finishedHand?.handNumber]);
@@ -239,6 +254,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     shookForHandRef.current = finishedHand.handNumber;
     scheduleHits(showdown.hits);
   }, [finishedHand, showdown, scheduleHits]);
+
+  // After the effects above have used this state's calloutWait.
+  useEffect(() => {
+    if (tableState) actionSeenRef.current = tableState.lastAction?.id ?? null;
+  }, [tableState]);
 
   // Folded cards on the muck pile: two per folded seat during a hand, then
   // kept on the table until the next hand gathers them into the deck.
@@ -744,7 +764,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         <SlamCard
                           key={`${tableState.handNumber}-${index}`}
                           card={tableState.board[index] as Card}
-                          slam={boardSlam(index)}
+                          slam={boardSlam(index, calloutWait)}
                           from={geometry.boardFromDeck(index)}
                         />
                       ) : (

@@ -65,3 +65,25 @@ describe('showdown timeline', () => {
     expect(timeline.hits).toEqual([]);
   });
 });
+
+describe('waiting for the action callout to pass', () => {
+  it('holds a new street back by the wait', () => {
+    expect(boardSlam(0, 1350).delay).toBe(boardSlam(0).delay + 1350);
+    expect(boardSlam(2, 1350).delay).toBe(boardSlam(2).delay + 1350);
+    expect(boardHits(0, 3, 1350).map((hit) => hit.at)).toEqual(boardHits(0, 3).map((hit) => hit.at + 1350));
+  });
+
+  it('holds the whole end of the hand back by the wait', () => {
+    const now = showdownTimeline(showdown({ ranOut: true }), 0);
+    const later = showdownTimeline(showdown({ ranOut: true }), 0, 1700);
+
+    expect(later.reveal(0, 0).delay).toBe(now.reveal(0, 0).delay + 1700);
+    expect(later.runout(4)?.delay).toBe((now.runout(4)?.delay as number) + 1700);
+    expect(later.winnerStart).toBe(now.winnerStart + 1700);
+    expect(later.hits.map((hit) => hit.at)).toEqual(now.hits.map((hit) => hit.at + 1700));
+  });
+
+  it('pays out after the fold callout when everyone else folded', () => {
+    expect(showdownTimeline(showdown({ reason: 'fold', shown: [], board: [] }), 0, 1500).winnerStart).toBe(1500);
+  });
+});

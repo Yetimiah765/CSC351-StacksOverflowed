@@ -134,7 +134,7 @@ describe('PokerTable pre-hand countdown', () => {
 
     table.updateCountdown(0);
     expect(table.getState(0).countdownMsRemaining).toBe(NEXT_HAND_DELAY_MS.runout);
-    expect(NEXT_HAND_DELAY_MS.runout).toBe(14_000);
+    expect(NEXT_HAND_DELAY_MS.runout).toBe(15_000);
   });
 
   it('waits a little less after everyone else folds, and the usual time once players gather again', () => {

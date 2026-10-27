@@ -179,17 +179,25 @@ const FLOP_STAGGER_MS = 220;
 const STREET_GAP_MS = 1500;
 const QUAKE = [5, 7, 11];
 
-/** A board card dealt during the hand: the flop one after another, the turn and river alone. */
-export function boardSlam(index: number): Slam {
+/**
+ * A board card dealt during the hand: the flop one after another, the turn
+ * and river alone. `wait` holds the street back, e.g. until the callout of
+ * the action that closed the betting has passed.
+ */
+export function boardSlam(index: number, wait = 0): Slam {
   const street = STREET_OF(index);
-  return { delay: street === 0 ? index * FLOP_STAGGER_MS : 0, duration: SLAM_MS[street] ?? 1000, power: (street + 1) as 1 | 2 | 3 };
+  return {
+    delay: wait + (street === 0 ? index * FLOP_STAGGER_MS : 0),
+    duration: SLAM_MS[street] ?? 1000,
+    power: (street + 1) as 1 | 2 | 3,
+  };
 }
 
-export function boardHits(fromIndex: number, toIndex: number): Hit[] {
+export function boardHits(fromIndex: number, toIndex: number, wait = 0): Hit[] {
   const hits: Hit[] = [];
   for (let index = fromIndex; index < toIndex; index++) {
     const street = STREET_OF(index);
-    hits.push({ at: impactTime(boardSlam(index)), strength: QUAKE[street] ?? 5, flash: street === 2 });
+    hits.push({ at: impactTime(boardSlam(index, wait)), strength: QUAKE[street] ?? 5, flash: street === 2 });
   }
   return hits;
 }
@@ -212,15 +220,17 @@ export interface ShowdownTimeline {
  * The end of a hand, in order: each shown hand slams down one after another
  * (winners hardest), then any board an all-in left undealt runs out street
  * by street, then the pot goes to the winners. `boardBefore` is how many
- * board cards were out before the hand ended.
+ * board cards were out before the hand ended; `wait` holds it all back, e.g.
+ * until the callout of the hand's last action has passed.
  */
 export function showdownTimeline(
   result: { reason: 'fold' | 'showdown'; ranOut: boolean; board: unknown[]; shown: { seatNumber: number }[]; awards: { seatNumber: number }[] },
-  boardBefore: number
+  boardBefore: number,
+  wait = 0
 ): ShowdownTimeline {
   const winners = new Set(result.awards.map((award) => award.seatNumber));
   const reveal = (handIndex: number, cardIndex: number): Slam => ({
-    delay: handIndex * REVEAL_STAGGER_MS + cardIndex * REVEAL_CARD_STAGGER_MS,
+    delay: wait + handIndex * REVEAL_STAGGER_MS + cardIndex * REVEAL_CARD_STAGGER_MS,
     duration: REVEAL_MS,
     power: 1,
   });
@@ -228,7 +238,7 @@ export function showdownTimeline(
     at: impactTime(reveal(handIndex, 1)),
     strength: winners.has(hand.seatNumber) ? 9 : 4,
   }));
-  const revealEnd = result.shown.length ? impactTime(reveal(result.shown.length - 1, 1)) + 300 : 0;
+  const revealEnd = result.shown.length ? impactTime(reveal(result.shown.length - 1, 1)) + 300 : wait;
 
   // Run-out: whichever streets weren't dealt yet, each STREET_GAP_MS apart.
   const runFrom = result.ranOut ? Math.min(boardBefore, result.board.length) : result.board.length;
@@ -252,7 +262,7 @@ export function showdownTimeline(
   return {
     reveal,
     runout,
-    winnerStart: result.reason === 'showdown' ? Math.max(revealEnd, runoutEnd) + 200 : 0,
+    winnerStart: result.reason === 'showdown' ? Math.max(revealEnd, runoutEnd) + 200 : wait,
     hits,
   };
 }

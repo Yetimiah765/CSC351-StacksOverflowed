@@ -113,7 +113,7 @@ export const HAND_START_COUNTDOWN_MS = 5_000;
 export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'] | 'runout', number> = {
   fold: 6_000,
   showdown: 10_000,
-  runout: 14_000,
+  runout: 15_000,
 };
 // SRS-NFR-015 / SRS-12.10: how long a busted player has to buy back in or
 // leave before they're removed from their seat.

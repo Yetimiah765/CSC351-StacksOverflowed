@@ -108,6 +108,14 @@ function kindOf(action: LastAction): Kind {
   return action.move;
 }
 
+/**
+ * How long `action`'s callout covers the table. Cards dealt or revealed
+ * because of that action wait this long, so the callout doesn't hide them.
+ */
+export function calloutDuration(action: LastAction): number {
+  return STYLES[kindOf(action)].duration;
+}
+
 function caption(action: LastAction, kind: Kind, name: string): string {
   switch (kind) {
     case 'fold':

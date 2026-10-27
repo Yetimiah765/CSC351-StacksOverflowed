@@ -1149,3 +1149,45 @@ describe('PokerTable missed blinds (SRS-11)', () => {
     expect(seat(table, 1)).toMatchObject({ missedSmallBlind: false, missedBigBlind: false });
   });
 });
+
+describe('PokerTable.restore (SRS-7.3, SRS-7.4)', () => {
+  const saved = {
+    dealerSeat: 3,
+    smallBlindSeat: 4,
+    bigBlindSeat: 1,
+    seats: [
+      { seatNumber: 1, playerId: p(1), username: 'P1', chipStack: 800 },
+      { seatNumber: 3, playerId: p(3), username: 'P3', chipStack: 1250, missedBigBlind: true },
+      { seatNumber: 4, playerId: p(4), username: 'P4', chipStack: 400 },
+      { seatNumber: 5, playerId: p(5), username: 'P5', chipStack: 0 },
+    ],
+  };
+
+  it('puts every saved player back in their seat with their saved stack', () => {
+    const table = new PokerTable('table-1', 6, 10, 5);
+    table.restore(saved);
+
+    const state = table.getState();
+    expect(state.seatedCount).toBe(4);
+    expect(seat(table, 1)).toMatchObject({ playerId: p(1), username: 'P1', chipStack: 800, inHand: false });
+    expect(seat(table, 3)).toMatchObject({ chipStack: 1250, missedBigBlind: true });
+    expect(isBustedSeat(seat(table, 5))).toBe(true);
+    expect(state.dealerSeat).toBe(3);
+    expect(state.phase).toBe('waiting');
+  });
+
+  it('carries the button on from the last hand that was dealt', () => {
+    const table = new PokerTable('table-1', 6, 10, 5);
+    table.restore({ ...saved, seats: saved.seats.map((s) => ({ ...s, missedBigBlind: false })) });
+    table.startHand(pick(0));
+
+    // Button was 3, so it moves to 4; seat 5 is busted and skipped.
+    expect(table.getState()).toMatchObject({ dealerSeat: 4, smallBlindSeat: 1, bigBlindSeat: 3 });
+  });
+
+  it('restores nobody, and keeps no button, for an empty table', () => {
+    const table = new PokerTable('table-1', 6, 10, 5);
+    table.restore({ dealerSeat: 2, smallBlindSeat: 3, bigBlindSeat: 4, seats: [] });
+    expect(table.getState()).toMatchObject({ seatedCount: 0, dealerSeat: null });
+  });
+});

@@ -285,6 +285,16 @@ export interface ActionResult {
 }
 
 /** A player removed at the end of a hand after asking to leave during it. */
+/** A seat as last saved to the database (poker_seats), for restore(). */
+export interface SavedSeat {
+  seatNumber: number;
+  playerId: string;
+  username: string;
+  chipStack: number;
+  missedSmallBlind?: boolean;
+  missedBigBlind?: boolean;
+}
+
 export interface Removal {
   playerId: string;
   chipStack: number;
@@ -1370,6 +1380,38 @@ export class PokerTable {
     seat.chipStack = chipStack;
     seat.bustedAt = null;
     return { ok: true };
+  }
+
+  /**
+   * SRS-7.3 / SRS-7.4: rebuilds the table from what was last saved — after
+   * a restart of the poker server. Stacks are only saved when a hand ends,
+   * so a hand a restart interrupted is simply gone: everyone in it is back
+   * to their stack from before it (its pot returned). The button and blind
+   * seats carry on from the last hand that was dealt, if anyone is seated.
+   * Call on a fresh table, before anyone joins.
+   */
+  restore(saved: {
+    dealerSeat: number | null;
+    smallBlindSeat: number | null;
+    bigBlindSeat: number | null;
+    seats: SavedSeat[];
+  }): void {
+    for (const savedSeat of saved.seats) {
+      const seat = this.seats[savedSeat.seatNumber - 1];
+      if (!seat) continue;
+      Object.assign(seat, emptySeat(seat.seatNumber), {
+        playerId: savedSeat.playerId,
+        username: savedSeat.username,
+        chipStack: savedSeat.chipStack,
+        missedSmallBlind: savedSeat.missedSmallBlind ?? false,
+        missedBigBlind: savedSeat.missedBigBlind ?? false,
+      });
+    }
+    if (saved.seats.length > 0) {
+      this.dealerSeat = saved.dealerSeat;
+      this.previousSmallBlindSeat = saved.smallBlindSeat;
+      this.previousBigBlindSeat = saved.bigBlindSeat;
+    }
   }
 
   /**

@@ -1,8 +1,9 @@
 // The poker lobby's tables. The realtime server (server/pokerRealtimeServer.ts)
 // builds one in-memory PokerTable per entry, and the pages read the same list
-// to label tables and to reject an unknown /poker/[tableId]. Like the
-// PokerTable instances themselves, these aren't stored in the poker_tables
-// table — see the note in CLAUDE.md about its different buy-in rule.
+// to label tables and to reject an unknown /poker/[tableId]. Each also has a
+// poker_tables row with the same id as its table_key, where its seats and
+// stacks are saved (lib/pokerPersistence.ts); keep the two in step — the
+// migration 2026-10-27_poker_persistent_stacks.sql and schema.sql seed them.
 
 import { DEFAULT_TABLE_SEATS } from './pokerTable';
 

@@ -1,12 +1,17 @@
 // Visual pieces shared by the poker lobby (app/poker/page.tsx) and a table
 // (app/poker/[tableId]/page.tsx), so the two pages look like one room.
 
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { Card } from '../../lib/pokerCards';
 import type { PokerTableConfig } from '../../lib/pokerTables';
 
 export type Stakes = PokerTableConfig['stakes'];
+
+// Players' equipped cosmetics (UR-120). The artwork is a large module, so it
+// loads after the page is up, like the nav bar's outline.
+const CosmeticArt = dynamic(() => import('../../components/cosmetics/CosmeticArt'), { ssr: false });
 
 // Each stakes tier is colored like a casino chip.
 export const STAKES_STYLES: Record<Stakes, { chip: string; chipEdge: string; accent: string; glow: string }> = {
@@ -49,6 +54,33 @@ export function StakesChip({ stakes, size = 'h-9 w-9' }: { stakes: Stakes; size?
     <span className={`relative inline-block shrink-0 rounded-full shadow-md shadow-black/50 ${size} ${style.chip}`}>
       <span className={`absolute inset-[3px] rounded-full border-[3px] border-dashed ${style.chipEdge}`} />
       <span className={`absolute inset-[30%] rounded-full border border-white/30 ${style.chip}`} />
+    </span>
+  );
+}
+
+/**
+ * A player's equipped chip cosmetic, or the table's stakes chip until it's
+ * known (or if they have none).
+ */
+export function PlayerChip({ artKey, stakes, size = 'h-9 w-9' }: { artKey?: string | null; stakes: Stakes; size?: string }) {
+  if (!artKey) return <StakesChip stakes={stakes} size={size} />;
+  return (
+    <span className={`inline-block shrink-0 drop-shadow-[0_2px_3px_rgba(0,0,0,0.5)] ${size}`}>
+      <CosmeticArt artKey={artKey} className="h-full w-full" />
+    </span>
+  );
+}
+
+/**
+ * A player's equipped profile outline, drawn around their round photo. Put
+ * it inside a `relative` box the size of the photo: the outline's drawing is
+ * 1.5x the photo, so it hangs a quarter of the photo's width past each side.
+ */
+export function ProfileOutline({ artKey }: { artKey?: string | null }) {
+  if (!artKey) return null;
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute -inset-[25%] z-20">
+      <CosmeticArt artKey={artKey} avatar={false} className="h-full w-full" />
     </span>
   );
 }
@@ -113,17 +145,30 @@ const CARD_SIZES = {
   lg: 'h-20 w-14 rounded-lg text-xl',
 };
 
-/** One playing card: face up when `card` is given, otherwise its back. */
+/**
+ * One playing card: face up when `card` is given, otherwise its back — the
+ * owner's equipped card back when `backArtKey` is given.
+ */
 export function PlayingCard({
   card,
   size = 'md',
   highlight = false,
+  backArtKey = null,
 }: {
   card?: Card | null;
   size?: keyof typeof CARD_SIZES;
   highlight?: boolean;
+  backArtKey?: string | null;
 }) {
   const sizeClass = CARD_SIZES[size];
+
+  if (!card && backArtKey) {
+    return (
+      <span aria-label="Face-down card" className={`${sizeClass} inline-block shrink-0 shadow-md shadow-black/60`}>
+        <CosmeticArt artKey={backArtKey} className="h-full w-full" />
+      </span>
+    );
+  }
 
   if (!card) {
     return (

@@ -43,6 +43,11 @@ describe('PokerTable', () => {
       canRaise: true,
       leaveRequested: false,
       lastAction: null,
+      bustedMsRemaining: null,
+      missedSmallBlind: false,
+      missedBigBlind: false,
+      postingMissedBlinds: false,
+      waitingForButton: false,
     });
   });
 
@@ -146,6 +151,11 @@ describe('PokerTable', () => {
       canRaise: true,
       leaveRequested: false,
       lastAction: null,
+      bustedMsRemaining: null,
+      missedSmallBlind: false,
+      missedBigBlind: false,
+      postingMissedBlinds: false,
+      waitingForButton: false,
     });
   });
 

@@ -29,6 +29,11 @@ describe('relayed action signatures', () => {
     expect(verifyRelayedAction(signed, SECRET, 'low-1', NOW + 1_000)).toEqual(action);
   });
 
+  it('accepts a signed buy-back', () => {
+    const rebuy = { ...action, action: 'rebuy' as const, move: undefined, amount: undefined, buyIn: 500 };
+    expect(verifyRelayedAction(signRelayedAction(rebuy, SECRET), SECRET, 'low-1', NOW)).toEqual(rebuy);
+  });
+
   it('rejects an unsigned action, like one a client broadcasts itself', () => {
     expect(verifyRelayedAction(action, SECRET, 'low-1', NOW)).toBeNull();
     expect(verifyRelayedAction({ requestId: 'x', action: 'join', token: 'abc' }, SECRET, 'low-1', NOW)).toBeNull();

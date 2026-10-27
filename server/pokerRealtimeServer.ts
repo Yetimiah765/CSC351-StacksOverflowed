@@ -80,6 +80,8 @@ interface TableEntry {
   channel: RealtimeChannel;
   /** Fires when this table's pre-hand countdown ends; null when none is running. */
   startTimer: ReturnType<typeof setTimeout> | null;
+  /** Fires when the next busted player runs out of time (SRS-12.10); null when nobody is busted. */
+  bustedTimer: ReturnType<typeof setTimeout> | null;
 }
 
 type AckResult = { ok: boolean; error?: string; seatNumber?: number; pending?: boolean };
@@ -149,6 +151,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     table: new PokerTable(config.id, config.maxSeats, config.bigBlind, config.smallBlind),
     channel: supabase.channel(pokerTableChannelName(config.id), CHANNEL_CONFIG),
     startTimer: null,
+    bustedTimer: null,
   }));
 
   // Players with a join being processed right now. A join awaits several
@@ -197,6 +200,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
   }
 
   function broadcastTable(entry: TableEntry) {
+    // Every change is broadcast, so this is where busted players' decision
+    // clocks start and stop (SRS-12.10), before the state that shows them.
+    scheduleBustedTimeout(entry);
     const state = entry.table.getState();
     // SRS-6.1: every player's hole cards ride along sealed for them alone.
     const holeCards: Record<string, string> = {};
@@ -205,6 +211,34 @@ function startServer(supabase: SupabaseClient, secret: string) {
     }
     const payload: PokerTableBroadcast = { ...state, holeCards };
     entry.channel.send({ type: 'broadcast', event: POKER_EVENT_STATE, payload });
+  }
+
+  // SRS-12.10: one timer per table, for whichever busted player runs out of
+  // time first. When it fires, everyone out of time is removed (they have no
+  // chips, so nothing to refund) and the new state is broadcast, which
+  // schedules the next one. The removed player's page sees its seat gone
+  // while busted and shows why (SRS-9.11).
+  function scheduleBustedTimeout(entry: TableEntry) {
+    const now = Date.now();
+    entry.table.trackBusted(now);
+    if (entry.bustedTimer) {
+      clearTimeout(entry.bustedTimer);
+      entry.bustedTimer = null;
+    }
+    const deadline = entry.table.nextBustedDeadline();
+    if (deadline === null) return;
+
+    entry.bustedTimer = setTimeout(() => {
+      entry.bustedTimer = null;
+      const removed = entry.table.removeTimedOutBusted(Date.now());
+      if (removed.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`${entry.config.name}: removed busted player(s) ${removed.join(', ')} after the decision timeout`);
+        refreshCountdown(entry);
+        broadcastLobby();
+      }
+      broadcastTable(entry);
+    }, Math.max(0, deadline - now));
   }
 
   // Players who asked to leave during a hand are removed when it ends
@@ -238,7 +272,8 @@ function startServer(supabase: SupabaseClient, secret: string) {
         }
         broadcastTable(entry);
         broadcastLobby();
-      }, HAND_START_COUNTDOWN_MS);
+        // 5 s, or longer straight after a hand so everyone sees the result.
+      }, entry.table.getState().countdownMsRemaining ?? HAND_START_COUNTDOWN_MS);
     } else if (change === 'cancelled' && entry.startTimer) {
       clearTimeout(entry.startTimer);
       entry.startTimer = null;
@@ -308,6 +343,65 @@ function startServer(supabase: SupabaseClient, secret: string) {
     }
   }
 
+  // SRS-12.4-12.7: a busted player buys back in at the same seat, for an
+  // amount in this table's buy-in range (SRS-NFR-021) and no more than their
+  // balance. Shares joinsInFlight with handleJoin, so a double click can't
+  // charge twice.
+  async function handleRebuy(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
+    const { playerId, buyIn } = action;
+    const { table } = entry;
+
+    if (joinsInFlight.has(playerId)) {
+      return { ok: false, error: 'Your previous buy-in is still being processed.' };
+    }
+    joinsInFlight.add(playerId);
+
+    try {
+      // Refuse before any money moves; table.rebuy() re-checks below.
+      const rebuyError = table.checkRebuy(String(playerId));
+      if (rebuyError) return { ok: false, error: rebuyError };
+
+      // SRS-12.6: out of range. SRS-12.7 (more than the balance) is checked
+      // by deductBalance() against the freshly-read balance.
+      const minBuyIn = MIN_BUY_IN_MULTIPLIER * table.bigBlind;
+      const maxBuyIn = MAX_BUY_IN_MULTIPLIER * table.bigBlind;
+      if (!Number.isInteger(buyIn) || (buyIn as number) < minBuyIn || (buyIn as number) > maxBuyIn) {
+        return { ok: false, error: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}.` };
+      }
+
+      const deduction = await deductBalance(supabase, playerId, buyIn as number);
+      if (!deduction.ok) return { ok: false, error: deduction.error };
+
+      const result = table.rebuy(String(playerId), buyIn as number);
+      if (result.ok) {
+        // Chips again: this player may complete the three needed to start.
+        refreshCountdown(entry);
+        broadcastTable(entry);
+        broadcastLobby();
+      } else {
+        // They left (or were removed) while we awaited — give the money back.
+        await refundBalance(supabase, playerId, buyIn as number);
+      }
+      return result;
+    } finally {
+      joinsInFlight.delete(playerId);
+    }
+  }
+
+  // SRS-11.6/11.9: a player who owes blinds elects to post them and be
+  // dealt into the next hand, or goes back to waiting for the big blind. The
+  // table refuses an election it can't allow; either way the next hand may
+  // now be able to start (or not).
+  function handlePostBlinds(entry: TableEntry, action: RelayedAction, post: boolean): AckResult {
+    const result = entry.table.setPostMissedBlinds(String(action.playerId), post);
+    if (result.ok) {
+      refreshCountdown(entry);
+      broadcastTable(entry);
+      broadcastLobby();
+    }
+    return result;
+  }
+
   async function handleLeave(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
     const { playerId } = action;
 
@@ -372,6 +466,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
       let result: AckResult;
       if (action.action === 'join') result = await handleJoin(entry, action);
       else if (action.action === 'leave') result = await handleLeave(entry, action);
+      else if (action.action === 'rebuy') result = await handleRebuy(entry, action);
+      else if (action.action === 'post-blinds') result = handlePostBlinds(entry, action, true);
+      else if (action.action === 'wait-for-big-blind') result = handlePostBlinds(entry, action, false);
       else result = await handleAct(entry, action);
 
       entry.channel.send({

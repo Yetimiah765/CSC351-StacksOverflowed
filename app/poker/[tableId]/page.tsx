@@ -2,13 +2,15 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
 import {
+  BUSTED_DECISION_TIMEOUT_MS,
   MAX_BUY_IN_MULTIPLIER,
   MIN_BUY_IN_MULTIPLIER,
   MIN_PLAYERS_TO_START,
   getBettingOptions,
+  isBustedSeat,
   type BettingMove,
   type HandResult,
   type Street,
@@ -20,13 +22,26 @@ import {
   type PokerHoleCardsRequest,
   type PokerTableBroadcast,
 } from '../../../lib/pokerRealtime';
+import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
+import ActionCallout from '../ActionCallout';
+import {
+  DEAL_STAGGER_MS,
+  DeckStack,
+  MuckPile,
+  SHUFFLE_MS,
+  offsetVars,
+  tableGeometry,
+  useElementSize,
+} from '../tableAnimations';
 import {
   ConnectionPill,
   EmptyCardSlot,
+  PlayerChip,
   PlayingCard,
   PokerRoomEyebrow,
+  ProfileOutline,
   Room,
   RoomMessage,
   STAKES_STYLES,
@@ -45,23 +60,31 @@ const STREET_LABELS: Record<Street, string> = {
   river: 'River',
 };
 
-// "P1 wins 120 with Two pair, Kings and Fours" / "P1 +60 (Flush, Ace-high) · P3 +60 (...)".
-function describeHandResult(result: HandResult): string {
-  const name = (award: HandResult['awards'][number]) => award.username ?? `Seat ${award.seatNumber}`;
-  const [first] = result.awards;
-  if (result.awards.length === 1 && first) {
-    return `${name(first)} wins ${first.amount}${first.handName ? ` with ${first.handName}` : ''}`;
-  }
-  return result.awards
-    .map((award) => `${name(award)} +${award.amount}${award.handName ? ` (${award.handName})` : ''}`)
-    .join(' · ');
+// CSS variables for the animations in app/globals.css (poker-*).
+const cssVars = (vars: Record<string, string>) => vars as CSSProperties;
+
+// The blinds a seat owes after missing them (SRS-11.12) — or, for a
+// newcomer the button is skipping, has chosen to post — or null.
+function owedBlindsLabel(seat: {
+  missedSmallBlind: boolean;
+  missedBigBlind: boolean;
+  waitingForButton: boolean;
+  postingMissedBlinds: boolean;
+}): 'SB' | 'BB' | 'SB+BB' | null {
+  if (seat.waitingForButton) return seat.postingMissedBlinds ? 'SB+BB' : null;
+  if (seat.missedSmallBlind && seat.missedBigBlind) return 'SB+BB';
+  if (seat.missedBigBlind) return 'BB';
+  if (seat.missedSmallBlind) return 'SB';
+  return null;
 }
 
 // The previous hand's board and outcome, shown in the middle of the felt
 // until the next hand is dealt.
+// Each winner gets a line: "P1 wins 120", then their hand ("Two pair, Kings
+// and Fours") after a showdown.
 function LastHandSummary({ result }: { result: HandResult }) {
   return (
-    <>
+    <div key={result.handNumber} className="poker-result-in flex flex-col items-center gap-1.5">
       {result.board.length > 0 ? (
         <div className="flex gap-1">
           {result.board.map((card) => (
@@ -69,9 +92,18 @@ function LastHandSummary({ result }: { result: HandResult }) {
           ))}
         </div>
       ) : null}
-      <p className="max-w-[75%] text-xs font-semibold text-amber-100 sm:text-sm">{describeHandResult(result)}</p>
+      <div className="max-w-[80%] space-y-0.5">
+        {result.awards.map((award) => (
+          <p key={award.seatNumber} className="text-sm font-bold text-amber-200 sm:text-base">
+            {award.username ?? `Seat ${award.seatNumber}`} wins <span className="tabular-nums">{award.amount}</span>
+            {award.handName ? (
+              <span className="block text-[11px] font-semibold text-amber-100/75 sm:text-xs">{award.handName}</span>
+            ) : null}
+          </p>
+        ))}
+      </div>
       {result.ranOut ? <p className="text-[10px] text-emerald-100/50">All-in — board run out</p> : null}
-    </>
+    </div>
   );
 }
 
@@ -87,12 +119,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const requestedCardsForHandRef = useRef<number | null>(null);
   const [joinError, setJoinError] = useState('');
   const [leaving, setLeaving] = useState(false);
+  const [rebuying, setRebuying] = useState(false);
+  const [choosingBlinds, setChoosingBlinds] = useState(false);
   // Asked to leave while in a hand: the server folds this player when it's
   // their turn and removes them when the hand ends (SRS-21.2/21.3).
   const [leavePending, setLeavePending] = useState(false);
   const [acting, setActing] = useState(false);
   const [actError, setActError] = useState('');
   const [avatars, setAvatars] = useState<Record<string, string | null>>({});
+  // Each seated player's equipped card back, chip and profile outline (UR-120).
+  const [cosmetics, setCosmetics] = useState<Record<string, EquippedArt>>({});
   // The open seat the player clicked; they pick one before buying in.
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
   // Empty until the table's bigBlind is known (from the first table:state),
@@ -104,9 +140,17 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // the server's relative countdownMsRemaining on every table:state, so a
   // clock that disagrees with the server's doesn't matter.
   const [countdownEndsAt, setCountdownEndsAt] = useState<number | null>(null);
+  // When this player, busted, will be removed unless they buy back in or
+  // leave (SRS-12.10) — rebuilt from their seat's bustedMsRemaining the same way.
+  const [bustedEndsAt, setBustedEndsAt] = useState<number | null>(null);
+  // Removed for not choosing in time; says why until they sit down again (SRS-9.11).
+  const [removedForTimeout, setRemovedForTimeout] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const fetchedAvatarsRef = useRef(new Set<string>());
+  // The table's size, for the deck/muck flight paths (app/poker/tableAnimations.tsx).
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableSize = useElementSize(tableRef);
 
   const {
     connected,
@@ -121,31 +165,50 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     }
   );
 
+  // Folded cards on the muck pile: two per folded seat during a hand, then
+  // kept on the table until the next hand gathers them into the deck.
+  const foldedCards =
+    tableState?.phase === 'in-hand' ? tableState.seats.filter((seat) => seat.folded).length * 2 : null;
+  const [heldMuck, setHeldMuck] = useState(0);
+  useEffect(() => {
+    if (foldedCards !== null) setHeldMuck(foldedCards);
+  }, [foldedCards]);
+
   // Tick while a countdown is running so the seconds left re-render.
   useEffect(() => {
-    if (countdownEndsAt === null) return;
+    if (countdownEndsAt === null && bustedEndsAt === null) return;
     setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(interval);
-  }, [countdownEndsAt]);
+  }, [countdownEndsAt, bustedEndsAt]);
 
   const countdownSeconds =
     countdownEndsAt === null ? null : Math.max(0, Math.ceil((countdownEndsAt - now) / 1000));
 
   // Avatars aren't carried through the table:state broadcast (a profile
   // photo as base64 can exceed Realtime's broadcast payload size limit), so
-  // each seated player's avatar is fetched separately as seats appear.
+  // each seated player's avatar is fetched separately as seats appear, along
+  // with their equipped cosmetics. Until those arrive, a seat shows the plain
+  // card backs and the table's stakes chip.
   useEffect(() => {
     if (!tableState) return;
 
     tableState.seats.forEach((seat) => {
-      if (!seat.playerId || fetchedAvatarsRef.current.has(seat.playerId)) return;
-      fetchedAvatarsRef.current.add(seat.playerId);
+      const playerId = seat.playerId;
+      if (!playerId || fetchedAvatarsRef.current.has(playerId)) return;
+      fetchedAvatarsRef.current.add(playerId);
 
-      fetch(`/api/players/${seat.playerId}/avatar`)
+      fetch(`/api/players/${playerId}/avatar`)
         .then((res) => res.json())
-        .then((data) => setAvatars((prev) => ({ ...prev, [seat.playerId as string]: data.avatarUrl ?? null })))
-        .catch(() => setAvatars((prev) => ({ ...prev, [seat.playerId as string]: null })));
+        .then((data) => setAvatars((prev) => ({ ...prev, [playerId]: data.avatarUrl ?? null })))
+        .catch(() => setAvatars((prev) => ({ ...prev, [playerId]: null })));
+
+      fetch(`/api/players/${playerId}/cosmetics`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: EquippedArt | null) => {
+          if (data) setCosmetics((prev) => ({ ...prev, [playerId]: data }));
+        })
+        .catch(() => {});
     });
   }, [tableState]);
 
@@ -161,6 +224,31 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!profile || !tableState) return null;
     return tableState.seats.find((seat) => seat.playerId === String(profile.playerId)) ?? null;
   }, [profile, tableState]);
+
+  // SRS-12.1/12.2: out of chips after a hand. The controls panel then offers
+  // to buy back in or leave.
+  const amBusted = Boolean(mySeat && isBustedSeat(mySeat));
+
+  useEffect(() => {
+    const msRemaining = mySeat?.bustedMsRemaining ?? null;
+    setBustedEndsAt(msRemaining === null ? null : Date.now() + msRemaining);
+  }, [mySeat]);
+  const bustedSeconds = bustedEndsAt === null ? null : Math.max(0, Math.ceil((bustedEndsAt - now) / 1000));
+
+  // A busted player's seat disappearing without them clicking Leave means
+  // the server removed them for not choosing in time (SRS-12.10).
+  const wasBustedRef = useRef(false);
+  useEffect(() => {
+    if (!tableState) return;
+    if (amBusted) {
+      wasBustedRef.current = true;
+    } else if (mySeat) {
+      wasBustedRef.current = false;
+    } else if (wasBustedRef.current) {
+      wasBustedRef.current = false;
+      if (!leaving) setRemovedForTimeout(true);
+    }
+  }, [tableState, amBusted, mySeat, leaving]);
 
   // Open this player's sealed hole cards once per hand. The sealed copy
   // changes with every broadcast (fresh IV), so this keys off the hand number.
@@ -242,6 +330,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     }
   }, [minBuyIn]);
 
+  // On going bust, start the buy-back amount at the minimum again and refresh
+  // the balance that caps it.
+  useEffect(() => {
+    if (!amBusted) return;
+    if (minBuyIn !== null) setBuyInText(String(minBuyIn));
+    void refreshBalance();
+    // Only when the player goes bust, not on every balance change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amBusted]);
+
   // When the player clicks away from a blank/non-numeric buy-in, put the
   // minimum back rather than leaving the field empty.
   function resetEmptyBuyIn() {
@@ -274,14 +372,43 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     });
     if (result.ok) {
       setSelectedSeat(null);
+      setRemovedForTimeout(false);
       await refreshBalance();
     } else {
       setJoinError(result.error || 'Unable to join the table.');
     }
   }
 
+  // SRS-12.4: a busted player buys back in at their seat. The server checks
+  // the amount against the table's range and their balance (SRS-12.6/12.7)
+  // and its reason for refusing is shown here (SRS-12.8).
+  async function handleRebuy() {
+    if (!connected || !token || !buyInValid || parsedBuyIn === null) return;
+    setJoinError('');
+    setRebuying(true);
+    const result = await sendAction(token, { tableId: params.tableId, action: 'rebuy', buyIn: parsedBuyIn });
+    setRebuying(false);
+    if (result.ok) await refreshBalance();
+    else setJoinError(result.error || 'Unable to buy back in.');
+  }
+
   // Leaving sends the player back to the lobby to pick another table —
   // right away between hands, or once the hand ends if they're in it.
+  // SRS-11.6: post the blinds this player owes to be dealt into the next
+  // hand, or (post = false) go back to waiting for the big blind. The server
+  // says why when it can't allow posting yet (SRS-11.9).
+  async function handlePostBlinds(post: boolean) {
+    if (!connected || !token) return;
+    setJoinError('');
+    setChoosingBlinds(true);
+    const result = await sendAction(token, {
+      tableId: params.tableId,
+      action: post ? 'post-blinds' : 'wait-for-big-blind',
+    });
+    setChoosingBlinds(false);
+    if (!result.ok) setJoinError(result.error || 'Unable to change that right now.');
+  }
+
   async function handleLeave() {
     if (!connected || !token) return;
     setJoinError('');
@@ -352,8 +479,102 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const myHoleCards = inHandPhase && myCards?.handNumber === tableState?.handNumber ? myCards.cards : null;
   const board = tableState?.board ?? [];
   const myHandName = myHoleCards && board.length >= 3 ? evaluateHand([...myHoleCards, ...board]).name : null;
+  // The amount input, range slider and quick-add buttons, shared by joining
+  // and a busted player's buy-back.
+  const buyInFields =
+    minBuyIn === null || maxBuyIn === null ? null : (
+      <>
+        <div>
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="buy-in-amount" className="text-xs uppercase tracking-wider text-slate-500">
+              Buy-in
+            </label>
+            <span className="text-xs tabular-nums text-slate-500">
+              {minBuyIn}&ndash;{maxBuyIn}
+            </span>
+          </div>
+          <div className="relative mt-1">
+            <input
+              id="buy-in-amount"
+              inputMode="numeric"
+              value={buyInText}
+              onChange={(e) => setBuyInText(e.target.value.trim())}
+              onBlur={resetEmptyBuyIn}
+              placeholder={String(minBuyIn)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-16 text-2xl font-semibold tabular-nums text-amber-200 outline-none transition focus:border-amber-300"
+            />
+            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+              chips
+            </span>
+          </div>
+          <input
+            type="range"
+            aria-label="Buy-in amount"
+            min={minBuyIn}
+            max={maxBuyIn}
+            step={config.bigBlind}
+            value={sliderValue}
+            onChange={(e) => setBuyInText(e.target.value)}
+            className="mt-3 w-full accent-amber-300"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setBuyInText(String(minBuyIn))}
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
+          >
+            Min
+          </button>
+          {QUICK_BUY_IN_INCREMENTS.map((amount) => (
+            <button
+              key={amount}
+              type="button"
+              onClick={() => addToBuyIn(amount)}
+              className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs tabular-nums text-slate-300 transition hover:border-amber-300/70"
+            >
+              +{amount}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setBuyInText(String(maxBuyIn))}
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
+          >
+            Max
+          </button>
+        </div>
+
+        {buyInError ? <p className="text-sm text-red-300">{buyInError}</p> : null}
+      </>
+    );
   // Between hands, the last hand's showdown stays on the table until the next deal.
   const lastResult = !inHandPhase ? tableState?.lastHandResult ?? null : null;
+  // Hole cards are dealt one at a time from the small blind clockwise
+  // (SRS-16.3); the deal animation follows the same order.
+  const smallBlindSeat = tableState?.smallBlindSeat ?? null;
+  const dealOrder =
+    tableState && inHandPhase && smallBlindSeat !== null
+      ? tableState.seats
+          .filter((seat) => seat.inHand || seat.folded)
+          .map((seat) => seat.seatNumber)
+          .sort(
+            (a, b) =>
+              ((a - smallBlindSeat + tableState.maxSeats) % tableState.maxSeats) -
+              ((b - smallBlindSeat + tableState.maxSeats) % tableState.maxSeats)
+          )
+      : [];
+  const myCosmetics = cosmetics[String(profile.playerId)];
+  const geometry = tableGeometry(tableSize);
+  const myOwedLabel = mySeat ? owedBlindsLabel(mySeat) : null;
+  // SRS-11.7/11.8: a live big blind and/or a dead small blind — both for a
+  // newcomer the button is skipping.
+  const myPostCost = !mySeat
+    ? 0
+    : mySeat.waitingForButton
+      ? config.bigBlind + config.smallBlind
+      : (mySeat.missedBigBlind ? config.bigBlind : 0) + (mySeat.missedSmallBlind ? config.smallBlind : 0);
 
   return (
     <Room>
@@ -409,7 +630,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           </div>
         </header>
 
-        <div className="relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px]">
+        <div ref={tableRef} className="relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px]">
           {/* Light over the table */}
           <div className="pointer-events-none absolute inset-x-[10%] -top-8 bottom-0 rounded-[50%] bg-[radial-gradient(ellipse_at_center,_rgba(52,211,153,0.12)_0%,_transparent_65%)]" />
 
@@ -433,13 +654,26 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   <div className="flex gap-1.5">
                     {Array.from({ length: 5 }, (_, index) =>
                       tableState.board[index] ? (
-                        <PlayingCard key={index} card={tableState.board[index]} />
+                        // A new street's cards slide out of the deck and turn over (the flop one after another).
+                        <span
+                          key={`${tableState.handNumber}-${index}`}
+                          className="poker-board-deal inline-block"
+                          style={cssVars({
+                            ...offsetVars('from', geometry.boardFromDeck(index)),
+                            '--delay': `${index < 3 ? index * 150 : 0}ms`,
+                          })}
+                        >
+                          <PlayingCard card={tableState.board[index]} />
+                        </span>
                       ) : (
                         <EmptyCardSlot key={index} />
                       )
                     )}
                   </div>
-                  <p className="flex items-center gap-2 rounded-full bg-black/35 px-4 py-1.5 text-xl font-bold tabular-nums text-amber-200 shadow-inner shadow-black/40 sm:text-2xl">
+                  <p
+                    key={tableState.pot}
+                    className="poker-pop flex items-center gap-2 rounded-full bg-black/35 px-4 py-1.5 text-xl font-bold tabular-nums text-amber-200 shadow-inner shadow-black/40 sm:text-2xl"
+                  >
                     <StakesChip stakes={config.stakes} size="h-5 w-5" />
                     Pot {tableState.pot}
                   </p>
@@ -496,6 +730,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             </div>
           </div>
 
+          {/* The deck (gathers and shuffles at each new hand) and the folded cards' muck pile. */}
+          {tableState ? <DeckStack geometry={geometry} handNumber={tableState.handNumber} /> : null}
+          <MuckPile geometry={geometry} count={foldedCards ?? heldMuck} />
+
           {tableState?.seats.map((seat, index) => {
             // Seats are placed by angle around an oval, starting at the top
             // and going clockwise, like sitting around a real table.
@@ -507,8 +745,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             const isPickable = canPickSeat && !seat.playerId;
             // Seated, but sat down after this hand was dealt (or out of chips).
             const sittingOut = Boolean(seat.playerId) && inHandPhase && !seat.inHand && !seat.folded;
+            const owedLabel = seat.playerId ? owedBlindsLabel(seat) : null;
             const isActive = inHandPhase && tableState.activeSeat === seat.seatNumber;
-            const isBusted = Boolean(seat.playerId) && seat.chipStack === 0 && !seat.inHand;
+            const isBusted = isBustedSeat(seat);
             // Cards at the seat: this player's own face up; everyone else
             // still in the hand face down; at showdown, the revealed hands.
             const shown = lastResult?.shown.find(
@@ -519,11 +758,24 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               ? shown.cards
               : isOwnSeat && myHoleCards && (seat.inHand || seat.folded)
                 ? myHoleCards
-                : inHandPhase && seat.inHand
+                : inHandPhase && (seat.inHand || seat.folded)
                   ? [null, null]
                   : null;
+            // Folded cards — this player's own too — go to the muck pile.
+            const mucked = inHandPhase && seat.folded;
+            const dealIndex = Math.max(dealOrder.indexOf(seat.seatNumber), 0);
+            const shownIndex = lastResult?.shown.findIndex((hand) => hand.seatNumber === seat.seatNumber) ?? -1;
+            // From this seat's cards to the deck (dealing) and to the muck pile (folding).
+            const cardsAt = geometry.seatCards(left, top);
+            const flightVars = {
+              ...offsetVars('deal', { x: geometry.deck.x - cardsAt.x, y: geometry.deck.y - cardsAt.y }),
+              ...offsetVars('muck', { x: geometry.muck.x - cardsAt.x, y: geometry.muck.y - cardsAt.y }),
+            };
+            const award = lastResult?.awards.find((candidate) => candidate.seatNumber === seat.seatNumber);
+            const awardIndex = award && lastResult ? lastResult.awards.indexOf(award) : 0;
             // The button stays on its seat between hands, like a real table.
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
+            const seatCosmetics = seat.playerId ? cosmetics[seat.playerId] : undefined;
             // Only until the seat acts: after that the bet is theirs, not just the blind.
             const blindLabel = !inHandPhase || seat.hasActed
               ? null
@@ -539,14 +791,49 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 {seat.bet > 0 ? (
                   <div
                     style={{ left: `${50 + 28 * Math.cos(angle)}%`, top: `${50 + 24 * Math.sin(angle)}%` }}
-                    className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border border-white/10 bg-black/60 py-0.5 pl-0.5 pr-2.5 shadow-lg shadow-black/50"
+                    className="absolute z-20 -translate-x-1/2 -translate-y-1/2"
                   >
-                    <StakesChip stakes={config.stakes} size="h-5 w-5" />
-                    <span className="text-xs font-semibold tabular-nums text-amber-100">{seat.bet}</span>
-                    {blindLabel ? (
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
-                    ) : null}
+                    {/* Slides out from the seat each time the bet changes. */}
+                    <div
+                      key={`${tableState.handNumber}-${tableState.street}-${seat.bet}`}
+                      style={cssVars({ '--from-x': `${Math.cos(angle) * 110}px`, '--from-y': `${Math.sin(angle) * 70}px` })}
+                      className="poker-chip-in flex items-center gap-1.5 rounded-full border border-white/10 bg-black/60 py-0.5 pl-0.5 pr-2.5 shadow-lg shadow-black/50"
+                    >
+                      <PlayerChip artKey={seatCosmetics?.chip} stakes={config.stakes} size="h-5 w-5" />
+                      <span className="text-xs font-semibold tabular-nums text-amber-100">{seat.bet}</span>
+                      {blindLabel ? (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
+                      ) : null}
+                    </div>
                   </div>
+                ) : null}
+
+                {/* The pot sliding over to a winner, one winner after another. */}
+                {award && lastResult ? (
+                  <span
+                    key={`won-${lastResult.handNumber}`}
+                    style={cssVars({
+                      '--to-left': `${50 + 28 * Math.cos(angle)}%`,
+                      '--to-top': `${50 + 24 * Math.sin(angle)}%`,
+                      '--delay': `${300 + awardIndex * 350}ms`,
+                    })}
+                    className="poker-pot-to-winner pointer-events-none absolute z-30 flex -translate-x-1/2 -translate-y-1/2 -space-x-3"
+                  >
+                    <StakesChip stakes={config.stakes} size="h-6 w-6" />
+                    <StakesChip stakes={config.stakes} size="h-6 w-6" />
+                    <StakesChip stakes={config.stakes} size="h-6 w-6" />
+                  </span>
+                ) : null}
+
+                {/* Blinds owed (SRS-11.12): missed while not dealt in, until they're dealt back in */}
+                {owedLabel ? (
+                  <span
+                    title={`Owes the ${owedLabel === 'SB+BB' ? 'small and big blind' : owedLabel === 'SB' ? 'small blind' : 'big blind'}`}
+                    style={{ left: `${50 + 34 * Math.cos(angle - 0.38)}%`, top: `${50 + 31 * Math.sin(angle - 0.38)}%` }}
+                    className="absolute z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-dashed border-amber-300 bg-slate-950/90 px-1 text-[9px] font-black text-amber-200 shadow-[0_2px_8px_rgba(0,0,0,0.6)]"
+                  >
+                    {owedLabel}
+                  </span>
                 ) : null}
 
                 {/* Dealer button (SRS-13.5) */}
@@ -568,55 +855,101 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 >
                   {seatCards ? (
                     <div className="absolute -right-5 top-0 z-20 flex -space-x-2.5 sm:-right-6">
-                      {seatCards.map((card, cardIndex) => (
-                        <span key={cardIndex} className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}>
-                          <PlayingCard card={card} size="sm" highlight={Boolean(shown && wonLastHand)} />
-                        </span>
-                      ))}
+                      {seatCards.map((card, cardIndex) => {
+                        // Dealt from the deck once it's shuffled, one card at a time
+                        // in deal order (this player's own arrive face up); thrown
+                        // onto the muck on a fold; at showdown flipped over, hand by
+                        // hand in the order they're shown.
+                        const motion = mucked ? 'muck' : shown ? 'reveal' : 'deal';
+                        const delay =
+                          motion === 'deal'
+                            ? SHUFFLE_MS + (cardIndex * dealOrder.length + dealIndex) * DEAL_STAGGER_MS
+                            : motion === 'reveal'
+                              ? Math.max(shownIndex, 0) * 450 + cardIndex * 120
+                              : 0;
+                        return (
+                          <span
+                            key={`${tableState.handNumber}-${motion}-${card ?? 'back'}-${cardIndex}`}
+                            className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}
+                          >
+                            <span
+                              className={`inline-block ${motion === 'deal' ? 'poker-deal' : motion === 'muck' ? 'poker-muck' : 'poker-flip'}`}
+                              style={cssVars({ ...flightVars, '--delay': `${delay}ms` })}
+                            >
+                              <PlayingCard
+                                card={card}
+                                size="sm"
+                                highlight={Boolean(shown && wonLastHand)}
+                                backArtKey={seatCosmetics?.card}
+                              />
+                            </span>
+                          </span>
+                        );
+                      })}
                     </div>
                   ) : null}
-                  <button
-                    type="button"
-                    disabled={!isPickable}
-                    onClick={() => setSelectedSeat(seat.seatNumber)}
-                    aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
-                    aria-pressed={isPickable ? isSelected : undefined}
-                    className={`relative z-10 h-14 w-14 shrink-0 overflow-hidden rounded-full transition disabled:cursor-default sm:h-16 sm:w-16 ${
-                      isActive
-                        ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
-                        : seat.playerId
-                          ? isOwnSeat
-                            ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
-                            : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
-                          : isSelected
-                            ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
-                            : isPickable
-                              ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
-                              : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
-                    }`}
-                  >
-                    {seat.playerId ? (
-                      avatars[seat.playerId] ? (
-                        <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
-                      ) : (
-                        <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
-                          {seat.username?.[0]?.toUpperCase()}
-                        </span>
-                      )
-                    ) : (
-                      <span
-                        className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
-                          isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
-                        }`}
-                      >
-                        {isPickable ? 'Sit' : seat.seatNumber}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* Name plate */}
+                  {/* "+120" over a winner, once the pot reaches them. */}
+                  {award && lastResult ? (
+                    <span
+                      key={`won-${lastResult.handNumber}`}
+                      style={cssVars({ '--delay': `${1300 + awardIndex * 350}ms` })}
+                      className="poker-win-float pointer-events-none absolute bottom-full left-1/2 z-40 mb-1 whitespace-nowrap rounded-full bg-amber-300 px-2.5 py-0.5 text-sm font-black tabular-nums text-slate-950 shadow-lg shadow-black/50"
+                    >
+                      +{award.amount}
+                    </span>
+                  ) : null}
+                  {/* The equipped profile outline hangs outside the photo, so it
+                      sits beside the button rather than in its clipped circle. */}
                   <div
-                    className={`-mt-2 min-w-[76px] max-w-[96px] rounded-lg border px-2 pb-1 pt-2.5 text-center shadow-lg shadow-black/50 ${
+                    className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award ? 'poker-win-glow' : ''}`}
+                    style={award ? cssVars({ animationDelay: `${1300 + awardIndex * 350}ms` }) : undefined}
+                  >
+                    <button
+                      type="button"
+                      disabled={!isPickable}
+                      onClick={() => setSelectedSeat(seat.seatNumber)}
+                      aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
+                      aria-pressed={isPickable ? isSelected : undefined}
+                      className={`h-full w-full overflow-hidden rounded-full transition disabled:cursor-default ${
+                        isActive
+                          ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
+                          : seat.playerId
+                            ? seatCosmetics?.outline
+                              ? 'border-2 border-transparent bg-slate-900 shadow-lg shadow-black/60'
+                              : isOwnSeat
+                                ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
+                                : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
+                            : isSelected
+                              ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
+                              : isPickable
+                                ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
+                                : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
+                      }`}
+                    >
+                      {seat.playerId ? (
+                        avatars[seat.playerId] ? (
+                          <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
+                            {seat.username?.[0]?.toUpperCase()}
+                          </span>
+                        )
+                      ) : (
+                        <span
+                          className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
+                            isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
+                          }`}
+                        >
+                          {isPickable ? 'Sit' : seat.seatNumber}
+                        </span>
+                      )}
+                    </button>
+                    {seat.playerId ? <ProfileOutline artKey={seatCosmetics?.outline} /> : null}
+                  </div>
+
+                  {/* Name plate, dropped a little to clear an outline */}
+                  <div
+                    className={`${seat.playerId && seatCosmetics?.outline ? 'relative z-30 mt-1.5' : '-mt-2'} min-w-[76px] max-w-[96px] rounded-lg border px-2 pb-1 pt-2.5 text-center shadow-lg shadow-black/50 ${
                       seat.playerId
                         ? isOwnSeat
                           ? 'border-emerald-300/40 bg-slate-950/95'
@@ -641,7 +974,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     </p>
                     {seat.chipStack !== null ? (
                       <p className="flex items-center justify-center gap-1 text-[11px] font-semibold tabular-nums text-amber-300">
-                        <span className="h-2 w-2 rounded-full border border-dashed border-white/70 bg-amber-500" />
+                        {seatCosmetics?.chip ? (
+                          <PlayerChip artKey={seatCosmetics.chip} stakes={config.stakes} size="h-3.5 w-3.5" />
+                        ) : (
+                          <span className="h-2 w-2 rounded-full border border-dashed border-white/70 bg-amber-500" />
+                        )}
                         {seat.chipStack}
                       </p>
                     ) : null}
@@ -655,15 +992,34 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       </p>
                     ) : isActive ? (
                       // SRS-3.2: active turn indicator.
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">To act</p>
+                      <p key="to-act" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                        To act
+                      </p>
                     ) : seat.allIn ? (
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-red-300">All-in</p>
+                      <p key="all-in" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-red-300">
+                        All-in
+                      </p>
                     ) : seat.folded ? (
-                      <p className="text-[10px] uppercase tracking-wider text-slate-400">Folded</p>
+                      <p key="folded" className="poker-pop-in text-[10px] uppercase tracking-wider text-slate-400">
+                        Folded
+                      </p>
                     ) : seat.lastAction ? (
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">{seat.lastAction}</p>
+                      <p
+                        key={`action-${seat.lastAction}`}
+                        className="poker-pop-in text-[10px] font-semibold uppercase tracking-wider text-sky-300"
+                      >
+                        {seat.lastAction}
+                      </p>
                     ) : isBusted ? (
                       <p className="text-[10px] uppercase tracking-wider text-slate-400">Out of chips</p>
+                    ) : (owedLabel || seat.waitingForButton) && !seat.inHand ? (
+                      <p className="text-[10px] uppercase tracking-wider text-amber-300/80">
+                        {seat.postingMissedBlinds
+                          ? 'Posting next hand'
+                          : seat.waitingForButton
+                            ? 'Sits out a hand'
+                            : 'Waiting for BB'}
+                      </p>
                     ) : sittingOut ? (
                       <p className="text-[10px] uppercase tracking-wider text-slate-400">Next hand</p>
                     ) : null}
@@ -672,20 +1028,37 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               </Fragment>
             );
           })}
+
+          {/* Every action gets a comic callout across the table. Mounted with the
+              first state, so the action already on the table isn't replayed. */}
+          {tableState ? (
+            <ActionCallout
+              action={tableState.lastAction}
+              actionKey={tableState.lastAction ? String(tableState.lastAction.id) : null}
+              ownSeatNumber={mySeat?.seatNumber ?? null}
+            />
+          ) : null}
         </div>
 
         {/* Controls */}
         <div className="mx-auto mt-8 max-w-3xl rounded-3xl border border-white/5 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-6 shadow-2xl shadow-black/50">
           <div className="flex flex-col gap-6 md:flex-row md:items-start">
             <div className="flex items-center gap-3 md:w-56 md:shrink-0">
-              <div className="h-12 w-12 shrink-0 overflow-hidden rounded-full border-2 border-emerald-300/60 bg-slate-900">
-                {profile.profilePhotoDataUrl ? (
-                  <img src={profile.profilePhotoDataUrl} alt="" className="h-full w-full object-cover" />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center text-base font-semibold text-slate-300">
-                    {profile.username?.[0]?.toUpperCase()}
-                  </span>
-                )}
+              <div className={`relative h-12 w-12 shrink-0 ${myCosmetics?.outline ? 'm-3' : ''}`}>
+                <div
+                  className={`h-full w-full overflow-hidden rounded-full border-2 bg-slate-900 ${
+                    myCosmetics?.outline ? 'border-transparent' : 'border-emerald-300/60'
+                  }`}
+                >
+                  {profile.profilePhotoDataUrl ? (
+                    <img src={profile.profilePhotoDataUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-base font-semibold text-slate-300">
+                      {profile.username?.[0]?.toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <ProfileOutline artKey={myCosmetics?.outline} />
               </div>
               <div className="min-w-0">
                 <p className="truncate font-semibold text-slate-100">{profile.username}</p>
@@ -696,6 +1069,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             </div>
 
             <div className="flex-1 md:border-l md:border-white/10 md:pl-6">
+              {removedForTimeout && !mySeat ? (
+                // SRS-9.11: why they lost their seat.
+                <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  You were removed from your seat because you didn&apos;t buy back in or leave within{' '}
+                  {BUSTED_DECISION_TIMEOUT_MS / 1000} seconds of running out of chips.
+                </p>
+              ) : null}
               {!mySeat ? (
                 leaving ? (
                   <p className="py-3 text-center text-slate-300">Returning to the lobby…</p>
@@ -760,69 +1140,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       </li>
                     </ol>
 
-                    <div>
-                      <div className="flex items-baseline justify-between">
-                        <label htmlFor="buy-in-amount" className="text-xs uppercase tracking-wider text-slate-500">
-                          Buy-in
-                        </label>
-                        <span className="text-xs tabular-nums text-slate-500">
-                          {minBuyIn}&ndash;{maxBuyIn}
-                        </span>
-                      </div>
-                      <div className="relative mt-1">
-                        <input
-                          id="buy-in-amount"
-                          inputMode="numeric"
-                          value={buyInText}
-                          onChange={(e) => setBuyInText(e.target.value.trim())}
-                          onBlur={resetEmptyBuyIn}
-                          placeholder={String(minBuyIn)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-16 text-2xl font-semibold tabular-nums text-amber-200 outline-none transition focus:border-amber-300"
-                        />
-                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
-                          chips
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        aria-label="Buy-in amount"
-                        min={minBuyIn}
-                        max={maxBuyIn}
-                        step={config.bigBlind}
-                        value={sliderValue}
-                        onChange={(e) => setBuyInText(e.target.value)}
-                        className="mt-3 w-full accent-amber-300"
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setBuyInText(String(minBuyIn))}
-                        className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
-                      >
-                        Min
-                      </button>
-                      {QUICK_BUY_IN_INCREMENTS.map((amount) => (
-                        <button
-                          key={amount}
-                          type="button"
-                          onClick={() => addToBuyIn(amount)}
-                          className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs tabular-nums text-slate-300 transition hover:border-amber-300/70"
-                        >
-                          +{amount}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setBuyInText(String(maxBuyIn))}
-                        className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
-                      >
-                        Max
-                      </button>
-                    </div>
-
-                    {buyInError ? <p className="text-sm text-red-300">{buyInError}</p> : null}
+                    {buyInFields}
 
                     <button
                       type="button"
@@ -840,31 +1158,144 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 )
               ) : (
                 <div className="space-y-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wider text-slate-500">
-                        Your stack · Seat {mySeat.seatNumber}
-                      </p>
-                      <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
-                        <StakesChip stakes={config.stakes} size="h-7 w-7" />
-                        {mySeat.chipStack}
-                      </p>
+                  {amBusted ? (
+                    // SRS-12.2: buy back in, or leave (SRS-12.3).
+                    <div className="space-y-4 rounded-2xl border border-red-400/30 bg-red-500/[0.05] p-4">
+                      <div>
+                        <p className="text-lg font-semibold text-red-200">You&apos;re out of chips</p>
+                        <p className="text-sm text-slate-400">
+                          Buy back in to keep your seat ({mySeat.seatNumber}), or leave the table. You&apos;ll sit out
+                          until you buy back in.
+                        </p>
+                        {bustedSeconds !== null ? (
+                          <p className="mt-1 text-sm font-semibold text-amber-200">
+                            Choose within <span className="tabular-nums">{bustedSeconds}s</span> or you&apos;ll be
+                            removed from the table.
+                          </p>
+                        ) : null}
+                      </div>
+                      {canAffordBuyIn ? (
+                        <>
+                          {buyInFields}
+                          <div className="flex flex-col gap-3 sm:flex-row">
+                            <button
+                              type="button"
+                              onClick={handleRebuy}
+                              disabled={!connected || !buyInValid || rebuying || leaving}
+                              className="flex-1 rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+                            >
+                              {rebuying
+                                ? 'Buying back in…'
+                                : buyInValid
+                                  ? `Buy back in with ${parsedBuyIn} chips`
+                                  : 'Buy back in'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleLeave}
+                              disabled={leaving || rebuying}
+                              className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {leaving ? 'Leaving…' : 'Leave table'}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-slate-300">
+                            Buying back in takes at least <span className="font-semibold text-amber-300">{minBuyIn}</span>{' '}
+                            (your balance: {profile.balance}).
+                          </p>
+                          <div className="flex flex-col gap-3 sm:flex-row">
+                            <Link
+                              href="/shop"
+                              className="flex-1 rounded-xl border border-white/10 bg-slate-800 px-5 py-3 text-center font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                            >
+                              Get free coins in the shop
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={handleLeave}
+                              disabled={leaving}
+                              className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {leaving ? 'Leaving…' : 'Leave table'}
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleLeave}
-                      disabled={leaving || leavePending}
-                      className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {leaving
-                        ? 'Leaving…'
-                        : leavePending
-                          ? 'Leaving after this hand'
-                          : mySeat.inHand && inHandPhase
-                            ? 'Leave'
-                            : 'Leave table'}
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-wider text-slate-500">
+                          Your stack · Seat {mySeat.seatNumber}
+                        </p>
+                        <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
+                          <PlayerChip artKey={myCosmetics?.chip} stakes={config.stakes} size="h-7 w-7" />
+                          {mySeat.chipStack}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleLeave}
+                        disabled={leaving || leavePending}
+                        className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {leaving
+                          ? 'Leaving…'
+                          : leavePending
+                            ? 'Leaving after this hand'
+                            : mySeat.inHand && inHandPhase
+                              ? 'Leave'
+                              : 'Leave table'}
+                      </button>
+                    </div>
+                  )}
+
+                  {(myOwedLabel || mySeat.waitingForButton) && !amBusted && !mySeat.inHand ? (
+                    // SRS-11.5/11.6: wait for the big blind, or post what's owed to play the next hand. A
+                    // newcomer the button is about to skip posts both blinds, or sits one hand out.
+                    <div className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
+                      <div>
+                        <p className="font-semibold text-amber-200">
+                          {mySeat.waitingForButton
+                            ? 'The button is about to reach your seat'
+                            : `You owe the ${myOwedLabel === 'SB+BB' ? 'small and big blind' : myOwedLabel === 'SB' ? 'small blind' : 'big blind'}`}
+                        </p>
+                        <p className="text-sm text-slate-400">
+                          {mySeat.postingMissedBlinds
+                            ? `You'll post ${myPostCost} and be dealt into the next hand.`
+                            : mySeat.waitingForButton
+                              ? `The button skips new players, so you'll sit out the next hand and be dealt in free after that — or post both blinds (${myPostCost}) to play it.`
+                              : `You'll be dealt in when the big blind reaches your seat — or post ${myPostCost} to play the next hand.`}
+                        </p>
+                        {(mySeat.waitingForButton || (mySeat.missedSmallBlind && mySeat.missedBigBlind)) &&
+                        !mySeat.postingMissedBlinds ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Posting puts in a live big blind ({config.bigBlind}) that counts toward your bet, plus a dead small
+                            blind ({config.smallBlind}) that goes straight into the pot.
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handlePostBlinds(!mySeat.postingMissedBlinds)}
+                        disabled={!connected || choosingBlinds}
+                        className={`w-full rounded-xl px-6 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          mySeat.postingMissedBlinds
+                            ? 'border border-white/10 bg-slate-800 text-slate-200 hover:border-amber-300/60'
+                            : 'bg-amber-300 text-slate-950 shadow-lg shadow-amber-500/20 hover:bg-amber-200'
+                        }`}
+                      >
+                        {mySeat.postingMissedBlinds
+                          ? mySeat.waitingForButton
+                            ? 'Sit out one hand instead'
+                            : 'Wait for the big blind instead'
+                          : `Post ${myPostCost} and play next hand`}
+                      </button>
+                    </div>
+                  ) : null}
 
                   {myHoleCards ? (
                     <div className="flex items-center gap-4">
@@ -912,7 +1343,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     <p className="text-xs text-slate-500">
                       Leaving during a hand folds you when it&apos;s your turn; you leave once the hand ends.
                     </p>
-                  ) : inHandPhase && !mySeat.folded && !mySeat.inHand ? (
+                  ) : inHandPhase && !mySeat.folded && !mySeat.inHand && !amBusted && !myOwedLabel ? (
                     <p className="text-xs text-slate-500">You sat down mid-hand, so you&apos;ll be dealt in next hand.</p>
                   ) : null}
 

@@ -46,7 +46,9 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 **Clear player:** An eligible player who has no missed-blind marker recorded under SRS-11.1 through SRS-11.4.
 
-**Dealt-in player:** A player included in a given hand per SRS-13.4: every clear player, the player occupying the big blind seat, and every player whose missed-blind election was accepted under SRS-11.6.
+**New player:** A player seated at a table whose dealer button had already been assigned, from that seating until the next hand start or the table next entering a waiting state (SRS-11.15). A new player owes no blinds (SRS-11.3) but cannot receive the dealer button (SRS-13.2).
+
+**Dealt-in player:** A player included in a given hand per SRS-13.4: every clear player except a new player skipped by the button under SRS-11.13, the player occupying the big blind seat, every player whose missed-blind election was accepted under SRS-11.6, and every new player whose election was accepted under SRS-11.14.
 
 **In-hand player:** A dealt-in player who has not folded in the current hand.
 
@@ -320,7 +322,7 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 **UR-011, JN – Missed Blind Handling**
 
-*User story: As a player, I want any player who misses the small or big blind, for any reason, to either post the missed blinds or wait for the big blind before being dealt back in, so that no one can avoid paying blinds by disconnecting, busting, or joining mid-orbit.*
+*User story: As a player, I want any player who misses the small or big blind while seated to either post the missed blinds or wait for the big blind before being dealt back in, and a newly seated player not to take the dealer button before paying any blinds, so that no one can avoid paying blinds by disconnecting, busting, or sitting down just before the button.*
 
 **SRS-11.1, Record missed big blind.** At each hand start after a table's first hand, the system shall record a missed big blind for each seated player who is not dealt in and whose seat lies, in clockwise order, after the previous hand's big blind seat and at or before the current hand's big blind seat.
 
@@ -330,7 +332,7 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *Traces to: UR-011*
 
-**SRS-11.3, New players owe the big blind.** Upon seating a player at a table whose dealer button has already been assigned, the system shall record a missed big blind for that player.
+**SRS-11.3, New players owe no blinds.** Upon seating a player at a table whose dealer button has already been assigned, the system shall mark that player a new player and shall not record a missed-blind marker for that player.
 
 *Traces to: UR-011*
 
@@ -367,6 +369,22 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 *Traces to: UR-011*
 
 **SRS-11.12, Display blind-owed indicator.** The system shall display an indicator, visible to every seated player, on the seat of any player with a missed-blind marker.
+
+*Traces to: UR-011*
+
+**SRS-11.13, Button skips new players.** At each hand start, the system shall not deal in a new player whose seat lies, in clockwise order, after the previous hand's button seat and before the current hand's button seat, unless that player's election under SRS-11.14 was accepted.
+
+*Traces to: UR-011*
+
+**SRS-11.14, New player posts both blinds.** Upon a new player whose seat the button would skip in the next hand per SRS-11.13 electing, before hand start, to post both blinds, the system shall deal that player into that hand, deducting the configured big blind amount from that player's stack as a live round contribution and the configured small blind amount into the pot as a dead contribution. SRS-11.9 does not apply to this election.
+
+*Traces to: UR-011*
+
+**SRS-11.15, Clear new-player status.** At each hand start, and upon a table entering a waiting state per SRS-20.2, the system shall clear every player's new-player status.
+
+*Traces to: UR-011*
+
+**SRS-11.16, Present new-player choice.** While a new player's seat would be skipped by the button in the next hand per SRS-11.13, the system shall present that player with the choice to post both blinds per SRS-11.14 or to sit out that hand.
 
 *Traces to: UR-011*
 
@@ -424,7 +442,7 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *Traces to: UR-013*
 
-**SRS-13.2, Button rotation.** At each later hand start, the system shall move the dealer button to the first seat clockwise of the previous hand's button seat that holds a clear player.
+**SRS-13.2, Button rotation.** At each later hand start, the system shall move the dealer button to the first seat clockwise of the previous hand's button seat that holds a clear player who is not a new player.
 
 *Traces to: UR-013*
 
@@ -432,7 +450,7 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *Traces to: UR-013*
 
-**SRS-13.4, Dealt-in players.** The system shall deal into each hand every clear player, the player in the big blind seat, and every player whose election was accepted under SRS-11.6.
+**SRS-13.4, Dealt-in players.** The system shall deal into each hand every clear player except a new player skipped by the button under SRS-11.13, the player in the big blind seat, every player whose election was accepted under SRS-11.6, and every new player whose election was accepted under SRS-11.14.
 
 *Traces to: UR-013*
 
@@ -750,7 +768,7 @@ flowchart LR
 
 *Traces to: UR-009, UR-012*
 
-**SRS-NFR-021, Buy-in range.** The configured minimum buy-in shall be 40 times the big blind, and the configured maximum buy-in shall be 100 times the big blind.
+**SRS-NFR-021, Buy-in range.** The configured minimum buy-in shall be 50 times the big blind, and the configured maximum buy-in shall be 200 times the big blind.
 
 *Traces to: UR-001, UR-012*
 

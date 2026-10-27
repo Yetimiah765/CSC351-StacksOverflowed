@@ -11,11 +11,11 @@ function getToken(request: Request): string | null {
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
-const ACTIONS = ['join', 'leave', 'act'];
+const ACTIONS = ['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind'];
 const MOVES: BettingMove[] = ['fold', 'check', 'call', 'bet', 'raise'];
 const isOptionalNumber = (value: unknown) => value === undefined || typeof value === 'number';
 
-// A poker player's join/leave/act. The session token is checked here, over
+// A poker player's join/leave/act/rebuy, or their choice to post missed blinds or wait for the big blind. The session token is checked here, over
 // HTTPS, and the action is then broadcast on the table's Realtime channel
 // with the resolved player_id and a signature the poker realtime server
 // verifies (lib/pokerSecure.ts) — so the token itself never goes over the

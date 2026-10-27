@@ -38,7 +38,7 @@ export interface PokerActionRequest {
   /** The client's id for matching the server's ack on the table channel. */
   requestId: string;
   action: RelayedActionType;
-  /** Chosen buy-in amount; only meaningful for a 'join' action. */
+  /** Chosen buy-in amount, for a 'join' or a busted player's 'rebuy' (SRS-12.4). */
   buyIn?: number;
   /** The seat the player picked; only meaningful for a 'join' action. */
   seatNumber?: number;

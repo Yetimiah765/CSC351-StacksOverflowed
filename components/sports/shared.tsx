@@ -106,8 +106,8 @@ export function TeamCrest({ name, size = 'sm', className = '' }: { name: string;
 export function LogoNotice() {
   return (
     <p className="mt-10 text-center text-xs text-slate-600">
-      Team names and logos are trademarks of their respective owners. Stacks Overflowed is not affiliated with the NFL or the
-      NBA. Logos courtesy of ESPN.
+      Team names and logos are trademarks of their respective owners. Stacks Overflowed is not affiliated with the NFL, the NBA,
+      or the NHL. Logos courtesy of ESPN.
     </p>
   );
 }

@@ -1962,6 +1962,34 @@ Traces to: UR-215
 
 Traces to: UR-215
 
+**UR-216, SP \- View Sports Leaderboard**
+
+**User story:** As a player, I want to see which players have won the most from sports betting this week, so that I can compare my results with other players and compete for the top spot.
+
+**SRS-216.1, Display weekly leaderboard.** The system shall display a ranked list of players ordered by their net sports-betting winnings for the current leaderboard week.
+
+Traces to: UR-216
+
+**SRS-216.2, Define the leaderboard week.** The system shall define a leaderboard week as Monday 00:00 through Sunday 23:59 Eastern Time and shall begin a new leaderboard at the start of each week.
+
+Traces to: UR-216
+
+**SRS-216.3, Calculate net winnings.** The system shall calculate a player's net winnings for a week as the total payouts minus the total amounts wagered for that player's sports wagers and public bets decided during that week. Cancelled and refunded bets shall count as zero.
+
+Traces to: UR-216
+
+**SRS-216.4, Display the player's own rank.** The system shall display the logged-in player's own rank and net winnings for the week, including when the player does not appear among the players listed at the top of the leaderboard.
+
+Traces to: UR-216
+
+**SRS-216.5, Display biggest single win.** The system shall display the players with the largest payouts from a single sports wager or public bet decided during the week.
+
+Traces to: UR-216
+
+**SRS-216.6, Display previous week's results.** The system shall allow the player to view the final leaderboard of the previous leaderboard week.
+
+Traces to: UR-216
+
 # **8\. Roulette**
 
 ## **Definitions**

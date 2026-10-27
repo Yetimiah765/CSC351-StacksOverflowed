@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HAND_START_COUNTDOWN_MS, PokerTable, getBettingOptions } from '../../lib/pokerTable';
+import { HAND_START_COUNTDOWN_MS, NEXT_HAND_DELAY_MS, PokerTable, getBettingOptions } from '../../lib/pokerTable';
 import { createDeck } from '../../lib/pokerCards';
 
 // Seats players by seat number at a 6-seat table with 5/10 blinds. `stacks`
@@ -83,6 +83,52 @@ describe('PokerTable pre-hand countdown', () => {
     const state = table.getState(1_000 + 2_000);
     expect(state.phase).toBe('countdown');
     expect(state.countdownMsRemaining).toBe(HAND_START_COUNTDOWN_MS - 2_000);
+  });
+
+  it('waits longer after a showdown, so everyone can see the result', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0));
+    play(table, [
+      [1, 'call'],
+      [2, 'call'],
+      [3, 'check'],
+    ]);
+    for (let street = 0; street < 3; street++) {
+      play(table, [
+        [2, 'check'],
+        [3, 'check'],
+        [1, 'check'],
+      ]);
+    }
+    expect(table.getState().lastHandResult?.reason).toBe('showdown');
+
+    expect(table.updateCountdown(0)).toBe('started');
+    expect(table.getState(0).countdownMsRemaining).toBe(NEXT_HAND_DELAY_MS.showdown);
+    expect(NEXT_HAND_DELAY_MS.showdown).toBe(10_000);
+  });
+
+  it('waits a little less after everyone else folds, and the usual time once players gather again', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0));
+    play(table, [
+      [1, 'fold'],
+      [2, 'fold'],
+    ]);
+
+    table.leave(p(1));
+    expect(table.updateCountdown(0)).toBeNull(); // two players: no countdown, and the longer delay is spent
+    table.join(p(4), 'P4', 1000, null, 4);
+    expect(table.updateCountdown(0)).toBe('started');
+    expect(table.getState(0).countdownMsRemaining).toBe(HAND_START_COUNTDOWN_MS);
+
+    const other = tableWith([1, 2, 3]);
+    other.startHand(pick(0));
+    play(other, [
+      [1, 'fold'],
+      [2, 'fold'],
+    ]);
+    other.updateCountdown(0);
+    expect(other.getState(0).countdownMsRemaining).toBe(NEXT_HAND_DELAY_MS.fold);
   });
 
   it('does not restart a countdown that is already running', () => {

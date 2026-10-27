@@ -96,3 +96,79 @@ body {
     display: none !important;
   }
 }
+
+/* Poker table (app/poker/[tableId]/page.tsx). Each animated element is
+   re-keyed when the thing it shows changes, so the animation plays again.
+   Directions come from CSS variables the page sets per seat:
+   --deal-x/--deal-y point from a seat to the middle of the table,
+   --from-x/--from-y from a bet back to its seat, --to-left/--to-top are a
+   winner's position, and --delay staggers cards. */
+@keyframes poker-deal {
+  from { opacity: 0; transform: translate(var(--deal-x, 0), var(--deal-y, 0)) rotate(-30deg) scale(0.6); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes poker-flip {
+  0% { opacity: 0.4; transform: perspective(500px) rotateY(90deg) scale(0.9); }
+  100% { opacity: 1; transform: perspective(500px) rotateY(0deg) scale(1); }
+}
+@keyframes poker-muck {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translate(var(--deal-x, 0), var(--deal-y, 0)) rotate(40deg) scale(0.5); }
+}
+@keyframes poker-chip-in {
+  from { opacity: 0; transform: translate(var(--from-x, 0), var(--from-y, 0)) scale(0.7); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes poker-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+@keyframes poker-pop-in {
+  0% { opacity: 0; transform: scale(0.6); }
+  70% { opacity: 1; transform: scale(1.1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes poker-result-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to { opacity: 1; transform: none; }
+}
+/* Chips sliding from the pot in the middle to a winner's seat. */
+@keyframes poker-pot-to-winner {
+  0% { left: 50%; top: 50%; opacity: 0; }
+  15% { left: 50%; top: 50%; opacity: 1; }
+  85% { left: var(--to-left); top: var(--to-top); opacity: 1; }
+  100% { left: var(--to-left); top: var(--to-top); opacity: 0; }
+}
+/* "+120" rising over a winner's seat. */
+@keyframes poker-win-float {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(0.8); }
+  15% { opacity: 1; transform: translate(-50%, 0) scale(1.1); }
+  25% { transform: translate(-50%, 0) scale(1); }
+  85% { opacity: 1; transform: translate(-50%, -22px); }
+  100% { opacity: 0; transform: translate(-50%, -30px); }
+}
+@keyframes poker-win-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(252, 211, 77, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(252, 211, 77, 0.45), 0 0 28px 6px rgba(252, 211, 77, 0.55); }
+}
+
+.poker-deal { animation: poker-deal 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) var(--delay, 0ms) both; }
+.poker-flip { animation: poker-flip 0.45s ease-out var(--delay, 0ms) both; }
+.poker-muck { animation: poker-muck 0.5s ease-in forwards; }
+.poker-chip-in { animation: poker-chip-in 0.4s ease-out both; }
+.poker-pop { animation: poker-pop 0.45s ease-out; }
+.poker-pop-in { animation: poker-pop-in 0.3s ease-out both; }
+.poker-result-in { animation: poker-result-in 0.5s ease-out both; }
+.poker-pot-to-winner { animation: poker-pot-to-winner 1.3s ease-in-out var(--delay, 0ms) both; }
+.poker-win-float { animation: poker-win-float 2.8s ease-out var(--delay, 0ms) both; }
+.poker-win-glow { animation: poker-win-glow 1.1s ease-in-out 3; border-radius: 9999px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .poker-deal, .poker-flip, .poker-chip-in, .poker-pop, .poker-pop-in, .poker-result-in, .poker-win-glow {
+    animation: none !important;
+  }
+  /* These only exist to move; the result line already says the same. */
+  .poker-muck { animation: none !important; opacity: 0; }
+  .poker-pot-to-winner, .poker-win-float { display: none !important; }
+}

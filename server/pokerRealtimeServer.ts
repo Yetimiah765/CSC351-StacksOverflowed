@@ -238,7 +238,8 @@ function startServer(supabase: SupabaseClient, secret: string) {
         }
         broadcastTable(entry);
         broadcastLobby();
-      }, HAND_START_COUNTDOWN_MS);
+        // 5 s, or longer straight after a hand so everyone sees the result.
+      }, entry.table.getState().countdownMsRemaining ?? HAND_START_COUNTDOWN_MS);
     } else if (change === 'cancelled' && entry.startTimer) {
       clearTimeout(entry.startTimer);
       entry.startTimer = null;

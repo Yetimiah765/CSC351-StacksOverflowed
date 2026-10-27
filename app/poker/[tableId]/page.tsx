@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
 import {
   MAX_BUY_IN_MULTIPLIER,
@@ -48,23 +48,16 @@ const STREET_LABELS: Record<Street, string> = {
   river: 'River',
 };
 
-// "P1 wins 120 with Two pair, Kings and Fours" / "P1 +60 (Flush, Ace-high) · P3 +60 (...)".
-function describeHandResult(result: HandResult): string {
-  const name = (award: HandResult['awards'][number]) => award.username ?? `Seat ${award.seatNumber}`;
-  const [first] = result.awards;
-  if (result.awards.length === 1 && first) {
-    return `${name(first)} wins ${first.amount}${first.handName ? ` with ${first.handName}` : ''}`;
-  }
-  return result.awards
-    .map((award) => `${name(award)} +${award.amount}${award.handName ? ` (${award.handName})` : ''}`)
-    .join(' · ');
-}
+// CSS variables for the animations in app/globals.css (poker-*).
+const cssVars = (vars: Record<string, string>) => vars as CSSProperties;
 
 // The previous hand's board and outcome, shown in the middle of the felt
 // until the next hand is dealt.
+// Each winner gets a line: "P1 wins 120", then their hand ("Two pair, Kings
+// and Fours") after a showdown.
 function LastHandSummary({ result }: { result: HandResult }) {
   return (
-    <>
+    <div key={result.handNumber} className="poker-result-in flex flex-col items-center gap-1.5">
       {result.board.length > 0 ? (
         <div className="flex gap-1">
           {result.board.map((card) => (
@@ -72,9 +65,18 @@ function LastHandSummary({ result }: { result: HandResult }) {
           ))}
         </div>
       ) : null}
-      <p className="max-w-[75%] text-xs font-semibold text-amber-100 sm:text-sm">{describeHandResult(result)}</p>
+      <div className="max-w-[80%] space-y-0.5">
+        {result.awards.map((award) => (
+          <p key={award.seatNumber} className="text-sm font-bold text-amber-200 sm:text-base">
+            {award.username ?? `Seat ${award.seatNumber}`} wins <span className="tabular-nums">{award.amount}</span>
+            {award.handName ? (
+              <span className="block text-[11px] font-semibold text-amber-100/75 sm:text-xs">{award.handName}</span>
+            ) : null}
+          </p>
+        ))}
+      </div>
       {result.ranOut ? <p className="text-[10px] text-emerald-100/50">All-in — board run out</p> : null}
-    </>
+    </div>
   );
 }
 
@@ -369,6 +371,20 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const myHandName = myHoleCards && board.length >= 3 ? evaluateHand([...myHoleCards, ...board]).name : null;
   // Between hands, the last hand's showdown stays on the table until the next deal.
   const lastResult = !inHandPhase ? tableState?.lastHandResult ?? null : null;
+  // Hole cards are dealt one at a time from the small blind clockwise
+  // (SRS-16.3); the deal animation follows the same order.
+  const smallBlindSeat = tableState?.smallBlindSeat ?? null;
+  const dealOrder =
+    tableState && inHandPhase && smallBlindSeat !== null
+      ? tableState.seats
+          .filter((seat) => seat.inHand || seat.folded)
+          .map((seat) => seat.seatNumber)
+          .sort(
+            (a, b) =>
+              ((a - smallBlindSeat + tableState.maxSeats) % tableState.maxSeats) -
+              ((b - smallBlindSeat + tableState.maxSeats) % tableState.maxSeats)
+          )
+      : [];
   const myCosmetics = cosmetics[String(profile.playerId)];
 
   return (
@@ -449,13 +465,23 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   <div className="flex gap-1.5">
                     {Array.from({ length: 5 }, (_, index) =>
                       tableState.board[index] ? (
-                        <PlayingCard key={index} card={tableState.board[index]} />
+                        // A new street's cards flip over (the flop one after another).
+                        <span
+                          key={`${tableState.handNumber}-${index}`}
+                          className="poker-flip inline-block"
+                          style={cssVars({ '--delay': `${index < 3 ? index * 150 : 0}ms` })}
+                        >
+                          <PlayingCard card={tableState.board[index]} />
+                        </span>
                       ) : (
                         <EmptyCardSlot key={index} />
                       )
                     )}
                   </div>
-                  <p className="flex items-center gap-2 rounded-full bg-black/35 px-4 py-1.5 text-xl font-bold tabular-nums text-amber-200 shadow-inner shadow-black/40 sm:text-2xl">
+                  <p
+                    key={tableState.pot}
+                    className="poker-pop flex items-center gap-2 rounded-full bg-black/35 px-4 py-1.5 text-xl font-bold tabular-nums text-amber-200 shadow-inner shadow-black/40 sm:text-2xl"
+                  >
                     <StakesChip stakes={config.stakes} size="h-5 w-5" />
                     Pot {tableState.pot}
                   </p>
@@ -535,9 +561,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               ? shown.cards
               : isOwnSeat && myHoleCards && (seat.inHand || seat.folded)
                 ? myHoleCards
-                : inHandPhase && seat.inHand
+                : inHandPhase && (seat.inHand || seat.folded)
                   ? [null, null]
                   : null;
+            const mucked = inHandPhase && seat.folded && !isOwnSeat;
+            const dealIndex = Math.max(dealOrder.indexOf(seat.seatNumber), 0);
+            const shownIndex = lastResult?.shown.findIndex((hand) => hand.seatNumber === seat.seatNumber) ?? -1;
+            // From this seat toward the middle of the table, for dealing and mucking.
+            const towardMiddle = { '--deal-x': `${-Math.cos(angle) * 150}px`, '--deal-y': `${-Math.sin(angle) * 110}px` };
+            const award = lastResult?.awards.find((candidate) => candidate.seatNumber === seat.seatNumber);
+            const awardIndex = award && lastResult ? lastResult.awards.indexOf(award) : 0;
             // The button stays on its seat between hands, like a real table.
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
             const seatCosmetics = seat.playerId ? cosmetics[seat.playerId] : undefined;
@@ -556,14 +589,38 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 {seat.bet > 0 ? (
                   <div
                     style={{ left: `${50 + 28 * Math.cos(angle)}%`, top: `${50 + 24 * Math.sin(angle)}%` }}
-                    className="absolute z-20 flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border border-white/10 bg-black/60 py-0.5 pl-0.5 pr-2.5 shadow-lg shadow-black/50"
+                    className="absolute z-20 -translate-x-1/2 -translate-y-1/2"
                   >
-                    <PlayerChip artKey={seatCosmetics?.chip} stakes={config.stakes} size="h-5 w-5" />
-                    <span className="text-xs font-semibold tabular-nums text-amber-100">{seat.bet}</span>
-                    {blindLabel ? (
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
-                    ) : null}
+                    {/* Slides out from the seat each time the bet changes. */}
+                    <div
+                      key={`${tableState.handNumber}-${tableState.street}-${seat.bet}`}
+                      style={cssVars({ '--from-x': `${Math.cos(angle) * 110}px`, '--from-y': `${Math.sin(angle) * 70}px` })}
+                      className="poker-chip-in flex items-center gap-1.5 rounded-full border border-white/10 bg-black/60 py-0.5 pl-0.5 pr-2.5 shadow-lg shadow-black/50"
+                    >
+                      <PlayerChip artKey={seatCosmetics?.chip} stakes={config.stakes} size="h-5 w-5" />
+                      <span className="text-xs font-semibold tabular-nums text-amber-100">{seat.bet}</span>
+                      {blindLabel ? (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
+                      ) : null}
+                    </div>
                   </div>
+                ) : null}
+
+                {/* The pot sliding over to a winner, one winner after another. */}
+                {award && lastResult ? (
+                  <span
+                    key={`won-${lastResult.handNumber}`}
+                    style={cssVars({
+                      '--to-left': `${50 + 28 * Math.cos(angle)}%`,
+                      '--to-top': `${50 + 24 * Math.sin(angle)}%`,
+                      '--delay': `${300 + awardIndex * 350}ms`,
+                    })}
+                    className="poker-pot-to-winner pointer-events-none absolute z-30 flex -translate-x-1/2 -translate-y-1/2 -space-x-3"
+                  >
+                    <StakesChip stakes={config.stakes} size="h-6 w-6" />
+                    <StakesChip stakes={config.stakes} size="h-6 w-6" />
+                    <StakesChip stakes={config.stakes} size="h-6 w-6" />
+                  </span>
                 ) : null}
 
                 {/* Dealer button (SRS-13.5) */}
@@ -585,21 +642,56 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 >
                   {seatCards ? (
                     <div className="absolute -right-5 top-0 z-20 flex -space-x-2.5 sm:-right-6">
-                      {seatCards.map((card, cardIndex) => (
-                        <span key={cardIndex} className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}>
-                          <PlayingCard
-                            card={card}
-                            size="sm"
-                            highlight={Boolean(shown && wonLastHand)}
-                            backArtKey={seatCosmetics?.card}
-                          />
-                        </span>
-                      ))}
+                      {seatCards.map((card, cardIndex) => {
+                        // Face down: dealt out from the middle in deal order, or
+                        // mucked back toward it on a fold. Face up: flipped over —
+                        // at showdown, hand by hand in the order they're shown.
+                        const motion = mucked ? 'muck' : !card ? 'deal' : shown ? 'reveal' : 'flip';
+                        const delay =
+                          motion === 'deal'
+                            ? (cardIndex * dealOrder.length + dealIndex) * 90
+                            : motion === 'reveal'
+                              ? Math.max(shownIndex, 0) * 450 + cardIndex * 120
+                              : motion === 'flip'
+                                ? cardIndex * 120
+                                : 0;
+                        return (
+                          <span
+                            key={`${tableState.handNumber}-${motion}-${cardIndex}`}
+                            className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}
+                          >
+                            <span
+                              className={`inline-block ${motion === 'deal' ? 'poker-deal' : motion === 'muck' ? 'poker-muck' : 'poker-flip'}`}
+                              style={cssVars({ ...towardMiddle, '--delay': `${delay}ms` })}
+                            >
+                              <PlayingCard
+                                card={card}
+                                size="sm"
+                                highlight={Boolean(shown && wonLastHand)}
+                                backArtKey={seatCosmetics?.card}
+                              />
+                            </span>
+                          </span>
+                        );
+                      })}
                     </div>
+                  ) : null}
+                  {/* "+120" over a winner, once the pot reaches them. */}
+                  {award && lastResult ? (
+                    <span
+                      key={`won-${lastResult.handNumber}`}
+                      style={cssVars({ '--delay': `${1300 + awardIndex * 350}ms` })}
+                      className="poker-win-float pointer-events-none absolute bottom-full left-1/2 z-40 mb-1 whitespace-nowrap rounded-full bg-amber-300 px-2.5 py-0.5 text-sm font-black tabular-nums text-slate-950 shadow-lg shadow-black/50"
+                    >
+                      +{award.amount}
+                    </span>
                   ) : null}
                   {/* The equipped profile outline hangs outside the photo, so it
                       sits beside the button rather than in its clipped circle. */}
-                  <div className="relative z-10 h-14 w-14 shrink-0 sm:h-16 sm:w-16">
+                  <div
+                    className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award ? 'poker-win-glow' : ''}`}
+                    style={award ? cssVars({ animationDelay: `${1300 + awardIndex * 350}ms` }) : undefined}
+                  >
                     <button
                       type="button"
                       disabled={!isPickable}
@@ -688,13 +780,24 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       </p>
                     ) : isActive ? (
                       // SRS-3.2: active turn indicator.
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-amber-300">To act</p>
+                      <p key="to-act" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                        To act
+                      </p>
                     ) : seat.allIn ? (
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-red-300">All-in</p>
+                      <p key="all-in" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-red-300">
+                        All-in
+                      </p>
                     ) : seat.folded ? (
-                      <p className="text-[10px] uppercase tracking-wider text-slate-400">Folded</p>
+                      <p key="folded" className="poker-pop-in text-[10px] uppercase tracking-wider text-slate-400">
+                        Folded
+                      </p>
                     ) : seat.lastAction ? (
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">{seat.lastAction}</p>
+                      <p
+                        key={`action-${seat.lastAction}`}
+                        className="poker-pop-in text-[10px] font-semibold uppercase tracking-wider text-sky-300"
+                      >
+                        {seat.lastAction}
+                      </p>
                     ) : isBusted ? (
                       <p className="text-[10px] uppercase tracking-wider text-slate-400">Out of chips</p>
                     ) : sittingOut ? (

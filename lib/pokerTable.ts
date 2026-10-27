@@ -93,6 +93,13 @@ export const MIN_PLAYERS_TO_START = 3;
 // How long a table counts down once it has enough players, before the hand
 // starts — long enough for one more player to grab a seat.
 export const HAND_START_COUNTDOWN_MS = 5_000;
+// After a hand ends, the countdown to the next one is longer, so everyone
+// can see who won what (and, after a showdown, the board and the revealed
+// hands) before the next deal clears them.
+export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'], number> = {
+  fold: 6_000,
+  showdown: 10_000,
+};
 
 /**
  * waiting: fewer than MIN_PLAYERS_TO_START seated with chips (SRS-20.2/20.5).
@@ -353,6 +360,8 @@ export class PokerTable {
   /** The current-round part of those, so SRS-19.5 can compare against them. */
   private deadRoundBets: number[] = [];
   private pendingRemovals: Removal[] = [];
+  /** How long the next countdown runs if it starts right after a hand (NEXT_HAND_DELAY_MS). */
+  private nextCountdownMs: number | null = null;
 
   /** smallBlind defaults to half the big blind, rounded down (minimum 1). */
   constructor(
@@ -463,14 +472,20 @@ export class PokerTable {
    * Starts or cancels the pre-hand countdown to match how many players with
    * chips are seated. Call after every join/leave and after a hand ends; the
    * caller starts or clears its timer (and calls startHand() when it fires)
-   * based on the return value.
+   * based on the return value — for as long as the state's
+   * countdownMsRemaining says: HAND_START_COUNTDOWN_MS, or
+   * NEXT_HAND_DELAY_MS when it starts straight after a hand.
    */
   updateCountdown(now: number): 'started' | 'cancelled' | null {
+    if (this.phase === 'in-hand') return null;
     const eligibleCount = this.seats.filter((seat) => this.isEligible(seat)).length;
+    // Only the first call after a hand ends gets the longer delay.
+    const length = this.nextCountdownMs ?? HAND_START_COUNTDOWN_MS;
+    this.nextCountdownMs = null;
 
     if (this.phase === 'waiting' && eligibleCount >= MIN_PLAYERS_TO_START) {
       this.phase = 'countdown';
-      this.countdownEndsAt = now + HAND_START_COUNTDOWN_MS;
+      this.countdownEndsAt = now + length;
       return 'started';
     }
 
@@ -856,6 +871,7 @@ export class PokerTable {
    * if enough players are still seated with chips.
    */
   private finishHand(reason: 'fold' | 'showdown', ranOut = false) {
+    this.nextCountdownMs = NEXT_HAND_DELAY_MS[reason];
     this.collectBets();
     const pots = this.buildPots();
     const awards = new Map<SeatRecord, number>();

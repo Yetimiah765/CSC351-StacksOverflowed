@@ -691,13 +691,17 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // and bottom and 4% from the sides; a seat reaches ~110px tall, ~110px wide).
   // Seats also grow with the table (up to 30%), so they need more room
   // around it: sized once, then again with the seats' scale.
-  const TABLE_ASPECT = 1.9;
+  // The oval is 1.9 times as wide as it's tall when there's room, and gets
+  // rounder (down to 1.4) when width runs short, so it still fills the height.
+  const WIDEST_TABLE = 1.9;
+  const ROUNDEST_TABLE = 1.4;
   const seatScaleFor = (tableWidth: number) => Math.min(1.3, Math.max(1, tableWidth / 950));
   const fitTable = (scale: number) => {
-    const byHeight = (tableArea.height - 120 * scale) / 0.88;
-    const byWidth = (tableArea.width - 110 * scale) / 0.92 / TABLE_ASPECT;
-    const height = Math.max(260, Math.min(byHeight, byWidth, 700));
-    return { width: Math.round(height * TABLE_ASPECT), height: Math.round(height) };
+    const maxWidth = (tableArea.width - 110 * scale) / 0.92;
+    const maxHeight = (tableArea.height - 120 * scale) / 0.88;
+    const height = Math.max(260, Math.min(maxHeight, maxWidth / ROUNDEST_TABLE, 700));
+    const width = Math.min(maxWidth, height * WIDEST_TABLE);
+    return { width: Math.round(width), height: Math.round(height) };
   };
   let fittedTable: { width: number; height: number } | null = null;
   if (fitScreen && tableArea.width > 0 && tableArea.height > 0) {
@@ -720,7 +724,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     // One screen on a laptop or desktop: a slim top bar, the table filling the
     // middle, and the controls docked underneath. Narrower screens scroll.
     <main className="flex min-h-page flex-col gap-3 bg-slate-950 bg-[radial-gradient(ellipse_at_top,_#14532d_0%,_#052e16_35%,_#020617_75%)] px-4 pb-4 pt-3 text-slate-100 sm:px-6 lg:h-[calc(100vh-4rem)]">
-      <header className="mx-auto flex w-full max-w-7xl shrink-0 flex-wrap items-center justify-between gap-3">
+      <header className="flex w-full shrink-0 flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-3">
           {!mySeat ? (
             <Link
@@ -773,8 +777,12 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
         </div>
       </header>
 
-      {/* The table, as big as the room between the top bar and the dock allows. */}
-      <div ref={tableAreaRef} className="relative flex w-full flex-1 items-center justify-center px-8 py-12 sm:px-10 lg:min-h-0 lg:p-0">
+      {/* On a wide screen: you and your cards on the left, the table in the
+          middle, your actions on the right. Stacked on a phone: the table,
+          then your actions, then you. */}
+      <div className="flex w-full flex-1 flex-col gap-4 lg:min-h-0 lg:flex-row lg:items-center">
+      {/* The table, as big as the room between the side panels allows. */}
+      <div ref={tableAreaRef} className="relative flex w-full flex-1 items-center justify-center px-8 py-12 sm:px-10 lg:order-2 lg:min-h-0 lg:self-stretch lg:p-0">
         <div
           ref={tableRef}
           className={`relative ${fittedTable ? '' : 'h-[340px] w-full max-w-3xl sm:h-[440px]'} ${
@@ -1289,11 +1297,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
         </div>
       </div>
 
-      {/* Controls, docked under the table */}
-      <section className="mx-auto w-full max-w-6xl shrink-0 rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-4 shadow-2xl shadow-black/60">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-stretch">
-          {/* Who you are: photo, balance, and your stack with Leave */}
-          <div className="flex flex-wrap items-center gap-4 lg:w-60 lg:shrink-0 lg:flex-col lg:flex-nowrap lg:items-start lg:justify-center lg:border-r lg:border-white/10 lg:pr-4">
+        {/* Left: who you are — photo, balance, stack and Leave — and your cards */}
+        <aside className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-4 shadow-2xl shadow-black/60 order-3 flex flex-col gap-4 lg:order-1 lg:w-60 lg:shrink-0">
+          <div className="flex flex-wrap items-center gap-4 lg:flex-col lg:flex-nowrap lg:items-stretch">
             <div className="flex min-w-0 items-center gap-3">
               <div className={`relative h-11 w-11 shrink-0 ${myCosmetics?.outline ? 'm-2.5' : ''}`}>
                 <div
@@ -1319,7 +1325,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               </div>
             </div>
             {mySeat && !amBusted ? (
-              <div className="ml-auto flex items-center gap-4 lg:ml-0 lg:w-full lg:justify-between">
+              <div className="ml-auto flex items-center gap-4 lg:ml-0 lg:justify-between lg:border-t lg:border-white/10 lg:pt-4">
                 <div>
                   <p className="text-[10px] uppercase tracking-wider text-slate-500">Stack · Seat {mySeat.seatNumber}</p>
                   <p className="flex items-center gap-1.5 text-2xl font-bold tabular-nums text-amber-300">
@@ -1351,9 +1357,25 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               </div>
             ) : null}
           </div>
+          {mySeat && myHoleCards ? (
+            <div className="flex items-center gap-3 lg:flex-col lg:items-stretch lg:border-t lg:border-white/10 lg:pt-4">
+              <div className="flex gap-1.5">
+                {myHoleCards.map((card) => (
+                  <PlayingCard key={card} card={card} size="lg" />
+                ))}
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wider text-slate-500">Your hand</p>
+                <p className="font-semibold leading-tight text-slate-100">
+                  {mySeat.folded ? 'Folded' : myHandName ?? 'Waiting for the flop'}
+                </p>
+              </div>
+            </div>
+          ) : null}
+        </aside>
 
-          {/* What you can do right now */}
-          <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
+        {/* Right: what you can do right now */}
+        <aside className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-4 shadow-2xl shadow-black/60 order-2 flex flex-col gap-3 lg:order-3 lg:max-h-full lg:w-80 lg:shrink-0 lg:overflow-y-auto">
             {removedForTimeout && !mySeat ? (
               // SRS-9.11: why they lost their seat.
               <p className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
@@ -1402,7 +1424,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 </div>
               ) : (
                 // Pick a seat on the table, choose a buy-in, sit down.
-                <div className="grid gap-4 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center">
+                <div className="grid gap-4">
                   <ol className="flex flex-wrap gap-x-6 gap-y-2 text-sm lg:flex-col">
                     <li className={selectedSeat === null ? 'text-amber-200' : 'text-emerald-300'}>
                       <span
@@ -1430,7 +1452,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     type="button"
                     onClick={handleJoin}
                     disabled={!connected || !buyInValid || selectedSeat === null}
-                    className="rounded-xl bg-emerald-400 px-6 py-4 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none lg:w-56"
+                    className="rounded-xl bg-emerald-400 px-6 py-4 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
                   >
                     {selectedSeat === null
                       ? 'Pick a seat to join'
@@ -1458,9 +1480,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       you buy back in.
                     </p>
                     {canAffordBuyIn ? (
-                      <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                      <div className="mt-3 grid gap-3">
                         <div className="min-w-0 space-y-2">{buyInFields}</div>
-                        <div className="flex gap-2 lg:flex-col">
+                        <div className="flex gap-2">
                           <button
                             type="button"
                             onClick={handleRebuy}
@@ -1507,7 +1529,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 {(myOwedLabel || mySeat.waitingForButton) && !amBusted && !mySeat.inHand ? (
                   // SRS-11.5/11.6: wait for the big blind, or post what's owed to play the next hand. A
                   // newcomer the button is about to skip posts both blinds, or sits one hand out.
-                  <div className="flex flex-col gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div className="flex flex-col gap-3 rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
                     <div className="min-w-0">
                       <p className="font-semibold text-amber-200">
                         {mySeat.waitingForButton
@@ -1549,24 +1571,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 ) : null}
 
                 {!amBusted ? (
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-                    {myHoleCards ? (
-                      <div className="flex shrink-0 items-center gap-3">
-                        <div className="flex gap-1.5">
-                          {myHoleCards.map((card) => (
-                            <PlayingCard key={card} card={card} size="lg" />
-                          ))}
-                        </div>
-                        <div className="w-32">
-                          <p className="text-[10px] uppercase tracking-wider text-slate-500">Your hand</p>
-                          <p className="font-semibold leading-tight text-slate-100">
-                            {mySeat.folded ? 'Folded' : myHandName ?? 'Waiting for the flop'}
-                          </p>
-                        </div>
-                      </div>
-                    ) : null}
-
-                    <div className="min-w-0 flex-1">
+                  <div>
+                    <div>
                       {isMyTurn && bettingOptions && tableState ? (
                         <div className="rounded-2xl border border-amber-300/40 bg-amber-300/[0.06] p-3 shadow-[0_0_28px_rgba(252,211,77,0.12)]">
                           <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-amber-200">Your turn</p>
@@ -1608,9 +1614,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             {pageError ? (
               <p className="rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{pageError}</p>
             ) : null}
-          </div>
-        </div>
-      </section>
+        </aside>
+      </div>
     </main>
   );
 }

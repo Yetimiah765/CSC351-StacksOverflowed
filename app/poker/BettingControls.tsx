@@ -49,16 +49,16 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
 
   const rangeText = minTo === maxTo ? `All-in only: ${maxTo}` : `${minTo}–${maxTo}`;
 
-  // One row on a wide screen: Fold, Check/Call, then the amount (typed or
-  // slid, with shortcuts) and Bet/Raise; stacked on a narrow one.
+  // Fold and Check/Call side by side, then the amount (typed or slid, with
+  // shortcuts) and Bet/Raise — narrow enough for the table's side panel.
   return (
-    <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-      <div className="grid grid-cols-2 gap-2 lg:flex lg:shrink-0">
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
           disabled={disabled}
           onClick={() => onAct('fold')}
-          className="rounded-xl border border-red-400/40 bg-red-500/10 px-5 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50 lg:w-20"
+          className="rounded-xl border border-red-400/40 bg-red-500/10 px-5 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Fold
         </button>
@@ -66,14 +66,14 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
           type="button"
           disabled={disabled}
           onClick={() => onAct(canCheck ? 'check' : 'call')}
-          className="rounded-xl bg-sky-500 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50 lg:min-w-[7rem]"
+          className="rounded-xl bg-sky-500 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {canCheck ? 'Check' : `Call ${callAmount}`}
         </button>
       </div>
 
       {aggressive ? (
-        <div className="flex min-w-0 flex-1 flex-col gap-2 rounded-2xl border border-white/5 bg-black/25 p-3">
+        <div className="flex min-w-0 flex-col gap-2 rounded-2xl border border-white/5 bg-black/25 p-3">
           <div className="flex items-center gap-3">
             <label htmlFor="raise-amount" className="sr-only">
               {aggressive === 'bet' ? 'Bet amount' : 'Raise to'}
@@ -101,14 +101,6 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
             ) : (
               <span className="flex-1" />
             )}
-            <button
-              type="button"
-              disabled={disabled || !amountValid}
-              onClick={() => onAct(aggressive, parsedAmount as number)}
-              className="shrink-0 rounded-xl bg-amber-400 px-5 py-2.5 font-semibold text-slate-950 shadow-lg shadow-amber-500/25 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
-            >
-              {amountValid ? (isAllIn ? `All-in ${parsedAmount}` : `${verb} ${parsedAmount}`) : verb}
-            </button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             {quickAmounts.map(({ label, amount }) => (
@@ -123,6 +115,14 @@ export default function BettingControls({ options, potTotal, seatBet, disabled, 
             ))}
             <span className="ml-auto text-xs tabular-nums text-slate-500">{rangeText}</span>
           </div>
+            <button
+              type="button"
+              disabled={disabled || !amountValid}
+              onClick={() => onAct(aggressive, parsedAmount as number)}
+              className="w-full rounded-xl bg-amber-400 px-5 py-3 font-semibold text-slate-950 shadow-lg shadow-amber-500/25 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+            >
+              {amountValid ? (isAllIn ? `All-in ${parsedAmount}` : `${verb} ${parsedAmount}`) : verb}
+            </button>
           {amountText && !amountValid ? (
             // SRS-15.10: say what range is allowed.
             <p className="text-sm text-red-300">

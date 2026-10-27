@@ -187,7 +187,7 @@ describe('GET /api/shop/boxes', () => {
     expect(neon.rewards.every((r: { owned: boolean }) => r.owned === false)).toBe(true);
   });
 
-  it('marks the rewards a logged-in player already owns', async () => {
+  it('marks the rewards a logged-in player already owns (SRS-122.6)', async () => {
     tables.player_cosmetics.defaultResult = { data: [{ cosmetic_id: 5 }], error: null };
 
     const body = await (await getBoxes(req('/api/shop/boxes'))).json();
@@ -211,8 +211,9 @@ describe('POST /api/shop/buy', () => {
     tables.blind_boxes.maybeSingleResult = { data: neonBox, error: null };
   });
 
-  it('returns 401 without a token', async () => {
+  it('returns 401 without a token (SRS-124.8)', async () => {
     expect((await buy(req('/api/shop/buy', 'POST', { boxId: 1 }, null))).status).toBe(401);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('requires a boxId', async () => {
@@ -283,6 +284,15 @@ describe('POST /api/shop/buy', () => {
 
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe('This box costs 350 coins and you have 100.');
+  });
+
+  it('refuses an account pending deletion (SRS-124.8)', async () => {
+    rpc.mockResolvedValue({ data: { status: 'not_active' }, error: null });
+
+    const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
+
+    expect(response.status).toBe(403);
+    expect((await response.json()).error).toBe('This account is pending deletion.');
   });
 
   it('refuses a box that is no longer on sale (SRS-122.4)', async () => {

@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { BlackjackState } from '../../../lib/blackjack';
+import { NEXT_HAND_DELAY_MS, type BlackjackState } from '../../../lib/blackjack';
 
 // Hands in play, kept in this server's memory and keyed by player_id, until
 // the database gets somewhere to store them (blackjack_hands has no columns
@@ -20,11 +20,24 @@ export interface StoredHand {
 const memory = globalThis as typeof globalThis & {
   __blackjackHands?: Map<number, StoredHand>;
   __blackjackBusy?: Set<number>;
+  __blackjackNextDeal?: Map<number, number>;
 };
 const hands = (memory.__blackjackHands ??= new Map<number, StoredHand>());
 // Players with a Deal or a move in flight, so two quick requests (two
 // Deals, or a double click) can't both run.
 const busy = (memory.__blackjackBusy ??= new Set<number>());
+// When each player may be dealt their next hand (ms since the epoch).
+const nextDeal = (memory.__blackjackNextDeal ??= new Map<number, number>());
+
+/** Starts the wait before the player's next hand, after one ends. */
+export function startNextHandDelay(playerId: number) {
+  nextDeal.set(playerId, Date.now() + NEXT_HAND_DELAY_MS);
+}
+
+/** Milliseconds left before the player's next hand can be dealt; 0 if none. */
+export function nextHandWait(playerId: number): number {
+  return Math.max(0, (nextDeal.get(playerId) ?? 0) - Date.now());
+}
 
 export function getHand(playerId: number): StoredHand | undefined {
   return hands.get(playerId);
@@ -57,6 +70,7 @@ export function finishBusy(playerId: number) {
 export function clearHands() {
   hands.clear();
   busy.clear();
+  nextDeal.clear();
 }
 
 // PostgREST calls can't share a transaction, so balance changes are an

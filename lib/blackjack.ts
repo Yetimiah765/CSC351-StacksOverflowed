@@ -50,6 +50,12 @@ export const BLACKJACK_CHIPS = [10, 25, 50, 100] as const;
 // Smallest bet a hand can be dealt with: the smallest chip.
 export const MIN_BLACKJACK_BET = BLACKJACK_CHIPS[0];
 
+/**
+ * The wait after a hand ends before the next one can be dealt, so a late
+ * click or a reload from the last hand can't collide with the new one.
+ */
+export const NEXT_HAND_DELAY_MS = 5_000;
+
 export type BetCheck = { ok: true; amount: number } | { ok: false; error: string };
 
 /**

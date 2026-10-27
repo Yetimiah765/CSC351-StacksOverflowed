@@ -342,6 +342,38 @@ describe('POST /api/blackjack/deal', () => {
   it('returns 401 without a session', async () => {
     expect((await deal(req('/deal', { bet: 50 }, null))).status).toBe(401);
   });
+
+  it('waits 5 seconds after a hand ends before dealing the next, taking nothing', async () => {
+    signedIn();
+    handInPlay(['Ts', '7h'], ['Kd', '6c'], ['8s']);
+    await act(req('/action', { handId: 4, move: 'hit', step: 0 }));
+    signedIn();
+
+    const response = await deal(req('/deal', { bet: 50 }));
+    const body = await response.json();
+
+    expect(response.status).toBe(429);
+    expect(body.error).toMatch(/Wait 5 seconds before the next hand/);
+    expect(body.wait).toBeGreaterThan(4_000);
+    expect(tables.players.update).not.toHaveBeenCalled();
+    expect(handsTable.rows).toHaveLength(1);
+  });
+
+  it('deals again once the 5 seconds are up', async () => {
+    signedIn();
+    handInPlay(['Ts', '7h'], ['Kd', '6c'], ['8s']);
+    await act(req('/action', { handId: 4, move: 'hit', step: 0 }));
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5_001);
+    signedIn();
+    hasBalance(1000);
+    hasBalance(950);
+
+    try {
+      expect((await deal(req('/deal', { bet: 50 }))).status).toBe(200);
+    } finally {
+      clock.mockRestore();
+    }
+  });
 });
 
 describe('POST /api/blackjack/action', () => {

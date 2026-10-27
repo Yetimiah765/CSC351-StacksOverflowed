@@ -9,7 +9,7 @@ import {
   totalStake,
 } from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
-import { changeBalance, finishBusy, getHand, removeHand, saveHand, startBusy } from '../hands';
+import { changeBalance, finishBusy, getHand, removeHand, saveHand, startBusy, startNextHandDelay } from '../hands';
 import { recordRound, refundLostRounds, saveStake } from '../record';
 
 // Hit, Stand, Double, or Split (SRS-903.1, SRS-904.1, SRS-910, SRS-911) on
@@ -88,6 +88,7 @@ export async function POST(request: Request) {
 
     // Kept in memory until its row is closed, so it can't be taken for a lost
     // round meanwhile. If it can't be saved, the open row returns the bets.
+    startNextHandDelay(playerId!);
     const saved = await recordRound(supabase, playerId!, handId, stored.bet, state, outcome, stored.startedAt);
     removeHand(playerId!);
     if (!saved) {

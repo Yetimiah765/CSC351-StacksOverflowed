@@ -2,7 +2,15 @@ import { randomInt } from 'crypto';
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { checkBlackjackBet, dealHand, handView } from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
-import { changeBalance, finishBusy, getHand, saveHand, startBusy } from '../hands';
+import {
+  changeBalance,
+  finishBusy,
+  getHand,
+  nextHandWait,
+  saveHand,
+  startBusy,
+  startNextHandDelay,
+} from '../hands';
 import { openRound, recordRound, refundLostRounds } from '../record';
 
 // Deal (SRS-901.1, SRS-902.1). Body: { bet }. Returns any bets of rounds the
@@ -10,7 +18,8 @@ import { openRound, recordRound, refundLostRounds } from '../record';
 // blackjack_hands row, then shuffles with crypto.randomInt (SRS-NFR-5) and
 // deals. A deal that is already a blackjack for either side is settled and
 // paid at once; otherwise the hand is kept in memory (../hands.ts) for the
-// player's moves. Returns { hand, balance }.
+// player's moves. Returns { hand, balance }. A deal within NEXT_HAND_DELAY_MS
+// of the last hand ending is refused (429, with `wait` in ms).
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -31,6 +40,15 @@ export async function POST(request: Request) {
 
   if (getHand(playerId!) || !startBusy(playerId!)) {
     return Response.json({ error: 'Finish your current hand first.' }, { status: 409 });
+  }
+  const wait = nextHandWait(playerId!);
+  if (wait > 0) {
+    finishBusy(playerId!);
+    const seconds = Math.ceil(wait / 1000);
+    return Response.json(
+      { error: `Wait ${seconds} second${seconds === 1 ? '' : 's'} before the next hand.`, wait },
+      { status: 429 }
+    );
   }
 
   try {
@@ -57,6 +75,7 @@ export async function POST(request: Request) {
     // A blackjack on the deal: save it to the history (SRS-909.1) and pay
     // back the bet plus any winnings now. If it can't be saved, the open
     // row returns the bet instead.
+    startNextHandDelay(playerId!);
     if (!(await recordRound(supabase, playerId!, handId, bet, state, outcome, startedAt))) {
       return Response.json({ error: 'The hand could not be saved, so your bet will be returned.' }, { status: 500 });
     }

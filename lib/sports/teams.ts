@@ -5,7 +5,7 @@
 // team's initials (components/sports/shared.tsx).
 
 export type TeamInfo = {
-  league: 'NFL' | 'NBA';
+  league: 'NFL' | 'NBA' | 'NHL';
   // ESPN's team code, used in the logo URL.
   code: string;
   // Official team colors, as hex.
@@ -78,7 +78,41 @@ export const TEAMS: Record<string, TeamInfo> = {
   'San Antonio Spurs': { league: 'NBA', code: 'sa', primary: '#C4CED4', secondary: '#000000' },
   'Toronto Raptors': { league: 'NBA', code: 'tor', primary: '#CE1141', secondary: '#000000' },
   'Utah Jazz': { league: 'NBA', code: 'utah', primary: '#002B5C', secondary: '#F9A01B' },
-  'Washington Wizards': { league: 'NBA', code: 'wsh', primary: '#002B5C', secondary: '#E31837' },
+  'Washington Wizards': { league: 'NBA', code: 'wsh', primary: '#002B5C', secondary: '#E31837' },  // NHL (Arizona Coyotes kept so older games still get a logo; the API still
+  // lists them alongside the Utah Mammoth).
+  'Anaheim Ducks': { league: 'NHL', code: 'ana', primary: '#F47A38', secondary: '#B9975B' },
+  'Arizona Coyotes': { league: 'NHL', code: 'ari', primary: '#8C2633', secondary: '#E2D6B5' },
+  'Boston Bruins': { league: 'NHL', code: 'bos', primary: '#FFB81C', secondary: '#000000' },
+  'Buffalo Sabres': { league: 'NHL', code: 'buf', primary: '#003087', secondary: '#FFB81C' },
+  'Calgary Flames': { league: 'NHL', code: 'cgy', primary: '#C8102E', secondary: '#F1BE48' },
+  'Carolina Hurricanes': { league: 'NHL', code: 'car', primary: '#CE1126', secondary: '#000000' },
+  'Chicago Blackhawks': { league: 'NHL', code: 'chi', primary: '#CF0A2C', secondary: '#000000' },
+  'Colorado Avalanche': { league: 'NHL', code: 'col', primary: '#6F263D', secondary: '#236192' },
+  'Columbus Blue Jackets': { league: 'NHL', code: 'cbj', primary: '#002654', secondary: '#CE1126' },
+  'Dallas Stars': { league: 'NHL', code: 'dal', primary: '#006847', secondary: '#8F8F8C' },
+  'Detroit Red Wings': { league: 'NHL', code: 'det', primary: '#CE1126', secondary: '#FFFFFF' },
+  'Edmonton Oilers': { league: 'NHL', code: 'edm', primary: '#041E42', secondary: '#FF4C00' },
+  'Florida Panthers': { league: 'NHL', code: 'fla', primary: '#C8102E', secondary: '#041E42' },
+  'Los Angeles Kings': { league: 'NHL', code: 'la', primary: '#111111', secondary: '#A2AAAD' },
+  'Minnesota Wild': { league: 'NHL', code: 'min', primary: '#154734', secondary: '#A6192E' },
+  'Montréal Canadiens': { league: 'NHL', code: 'mtl', primary: '#AF1E2D', secondary: '#192168' },
+  'Nashville Predators': { league: 'NHL', code: 'nsh', primary: '#FFB81C', secondary: '#041E42' },
+  'New Jersey Devils': { league: 'NHL', code: 'nj', primary: '#CE1126', secondary: '#000000' },
+  'New York Islanders': { league: 'NHL', code: 'nyi', primary: '#00539B', secondary: '#F47D30' },
+  'New York Rangers': { league: 'NHL', code: 'nyr', primary: '#0038A8', secondary: '#CE1126' },
+  'Ottawa Senators': { league: 'NHL', code: 'ott', primary: '#C52032', secondary: '#000000' },
+  'Philadelphia Flyers': { league: 'NHL', code: 'phi', primary: '#F74902', secondary: '#000000' },
+  'Pittsburgh Penguins': { league: 'NHL', code: 'pit', primary: '#000000', secondary: '#FCB514' },
+  'San Jose Sharks': { league: 'NHL', code: 'sj', primary: '#006D75', secondary: '#EA7200' },
+  'Seattle Kraken': { league: 'NHL', code: 'sea', primary: '#001628', secondary: '#99D9D9' },
+  'St Louis Blues': { league: 'NHL', code: 'stl', primary: '#002F87', secondary: '#FCB514' },
+  'Tampa Bay Lightning': { league: 'NHL', code: 'tb', primary: '#002868', secondary: '#FFFFFF' },
+  'Toronto Maple Leafs': { league: 'NHL', code: 'tor', primary: '#00205B', secondary: '#FFFFFF' },
+  'Utah Mammoth': { league: 'NHL', code: 'utah', primary: '#6CACE4', secondary: '#000000' },
+  'Vancouver Canucks': { league: 'NHL', code: 'van', primary: '#00205B', secondary: '#00843D' },
+  'Vegas Golden Knights': { league: 'NHL', code: 'vgk', primary: '#B4975A', secondary: '#333F42' },
+  'Washington Capitals': { league: 'NHL', code: 'wsh', primary: '#C8102E', secondary: '#041E42' },
+  'Winnipeg Jets': { league: 'NHL', code: 'wpg', primary: '#041E42', secondary: '#004C97' },
 };
 
 export function teamInfo(name: string): TeamInfo | null {

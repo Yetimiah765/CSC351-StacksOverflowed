@@ -27,18 +27,18 @@ export function hashSessionToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-// SRS-101.2: first/last names allow letters, spaces, apostrophes, and
-// hyphens, matching chk_players_first_name / chk_players_last_name.
+// SRS-101.2 / SRS-101.3: first/last names allow letters, spaces, apostrophes,
+// and hyphens, matching chk_players_first_name / chk_players_last_name.
 const NAME_PATTERN = /^[A-Za-z][A-Za-z' -]*$/;
 
 // players.first_name / last_name are VARCHAR(50).
 export const NAME_MAX_LENGTH = 50;
 
-// SRS-101.3 / SRS-101.4: usernames are 6-10 characters, letters and numbers
+// SRS-101.4 / SRS-101.5: usernames are 6-10 characters, letters and numbers
 // only, matching the CHECK on usernames.username.
 const USERNAME_PATTERN = /^[A-Za-z0-9]{6,10}$/;
 
-// SRS-101.7: passwords are at least 8 characters, letters and numbers only,
+// SRS-101.8: passwords are at least 8 characters, letters and numbers only,
 // with at least one of each.
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,}$/;
 

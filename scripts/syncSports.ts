@@ -9,8 +9,8 @@
 
 import { config as loadEnv } from 'dotenv';
 import { getSupabaseClient } from '../lib/supabase';
-import { getOddsApiClient } from '../lib/oddsApi';
-import { configuredSportKeys, syncSports } from '../lib/sports/sync';
+import { getOddsApiClient, getSecondOddsApiClient } from '../lib/oddsApi';
+import { configuredSportKeys, mergeSyncSummaries, secondSportKeys, syncSports, type SyncSummary } from '../lib/sports/sync';
 import { settleWagers } from '../lib/sports/settle';
 import { selectShowdowns, settleShowdowns } from '../lib/sports/showdown';
 import { notifyShowdownChanged } from '../lib/sports/showdownRealtime';
@@ -28,14 +28,22 @@ async function main() {
   const oddsApi = getOddsApiClient();
   if (!oddsApi) throw new Error('ODDS_API_KEY is not configured.');
 
-  const sports = configuredSportKeys();
   const includeScores = !process.argv.includes('--odds-only');
-  console.log(`Syncing ${includeScores ? 'odds and scores' : 'odds only'} for ${sports.join(', ')}...`);
+  // Each key syncs its own sports on its own credits; the second is optional.
+  const feeds = [{ name: 'ODDS_API_KEY', client: oddsApi, sports: configuredSportKeys() }];
+  const second = getSecondOddsApiClient();
+  if (second) feeds.push({ name: 'ODDS_API_KEY_2', client: second, sports: secondSportKeys() });
 
-  const summary = await syncSports(supabase, oddsApi, sports, new Date(), { includeScores });
-  console.log(`Saved ${summary.events} events, ${summary.markets} markets, ${summary.options} options.`);
-  if (summary.skipped.length > 0) console.log(`Skipped (not in season): ${summary.skipped.join(', ')}`);
-  if (summary.quota) console.log(`Odds API credits left this month: ${summary.quota.remaining}`);
+  let summary: SyncSummary | null = null;
+  for (const feed of feeds) {
+    console.log(`Syncing ${includeScores ? 'odds and scores' : 'odds only'} for ${feed.sports.join(', ')}...`);
+    const result = await syncSports(supabase, feed.client, feed.sports, new Date(), { includeScores });
+    console.log(`Saved ${result.events} events, ${result.markets} markets, ${result.options} options.`);
+    if (result.skipped.length > 0) console.log(`Skipped (not in season): ${result.skipped.join(', ')}`);
+    if (result.quota) console.log(`${feed.name} credits left this month: ${result.quota.remaining}`);
+    summary = summary ? mergeSyncSummaries(summary, result) : result;
+  }
+  if (!summary) return;
 
   // Settle even if part of the sync failed: scores saved earlier still count.
   const settled = await settleWagers(supabase);

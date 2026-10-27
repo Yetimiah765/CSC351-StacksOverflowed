@@ -8,8 +8,7 @@ const ITEM_HEIGHT_PX = 80; // matches h-20 on each reel and reel item
 
 // Each reel passes through the amounts a few more times than the one before
 // it and stops later, so they land left to right like a slot machine. The
-// last one stops at 1.5 s, so the balance can update when it does and still
-// be inside SRS-NFR-104's 2 seconds.
+// last one stops at 1.5 s.
 const REELS = [
   { cycles: 4, durationMs: 900 },
   { cycles: 5, durationMs: 1200 },
@@ -23,16 +22,14 @@ const RESULT_DELAY_MS = 250;
 
 // The Daily Login Box reveal (SRS-128.10): a pop-up with three reels that
 // all stop on the reward. It is only shown after the reward has been saved
-// (SRS-128.9), so closing the tab mid-spin loses nothing. onStopped runs
-// once, when the last reel stops; the shop page refreshes the nav bar's
-// balance then, so the balance doesn't give the reward away mid-spin.
+// (SRS-128.9), so closing the tab mid-spin loses nothing. Its backdrop
+// covers the nav bar, so the shop page refreshes the nav's balance as soon
+// as the reward is saved without the balance giving the reward away.
 export default function SlotReveal({
   reward,
-  onStopped,
   onClose,
 }: {
   reward: number;
-  onStopped: () => void;
   onClose: () => void;
 }) {
   // Visitors who turn off animations see the result right away. The window
@@ -43,8 +40,6 @@ export default function SlotReveal({
   const [stopped, setStopped] = useState(instant);
   const [done, setDone] = useState(instant);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const onStoppedRef = useRef(onStopped);
-  onStoppedRef.current = onStopped;
 
   // The last reel's animationend marks the stop. The reels use a CSS
   // animation (reel-spin in app/globals.css), which is timed by the clock
@@ -58,9 +53,7 @@ export default function SlotReveal({
   }, [instant]);
 
   useEffect(() => {
-    if (!stopped) return;
-    onStoppedRef.current();
-    if (instant) return;
+    if (!stopped || instant) return;
     const timer = setTimeout(() => setDone(true), RESULT_DELAY_MS);
     return () => clearTimeout(timer);
   }, [stopped, instant]);

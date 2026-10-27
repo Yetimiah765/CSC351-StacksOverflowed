@@ -124,3 +124,11 @@ export function getOddsApiClient(): OddsApiClient | null {
   const apiKey = process.env.ODDS_API_KEY || '';
   return apiKey ? createOddsApiClient(apiKey) : null;
 }
+
+// An optional second key, on a teammate's own Odds API account, that carries
+// its own sports (ODDS_API_SPORTS_2, see lib/sports/sync.ts) on its own
+// monthly credits. Null when it isn't set.
+export function getSecondOddsApiClient(): OddsApiClient | null {
+  const apiKey = process.env.ODDS_API_KEY_2 || '';
+  return apiKey ? createOddsApiClient(apiKey) : null;
+}

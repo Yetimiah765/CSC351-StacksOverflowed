@@ -3,11 +3,15 @@
 #
 # Needs these repository secrets (Settings -> Secrets and variables -> Actions):
 #   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ODDS_API_KEY
-# and optionally the repository variable ODDS_API_SPORTS (defaults to NFL).
+# and optionally the repository variable ODDS_API_SPORTS (defaults to NFL + NBA).
+# Optional second key: the secret ODDS_API_KEY_2 (a teammate's own Odds API
+# account) syncs the sports in the variable ODDS_API_SPORTS_2 (defaults to NHL)
+# on its own 500 monthly credits. Leave it unset and only the first key runs.
 #
 # The free Odds API tier is 500 credits a month. Odds cost 3 credits per
 # sport and scores 2, so with 2 sports (NFL + NBA) this schedule uses about
-# 16 a day, roughly 480 a month.
+# 16 a day, roughly 480 a month. With NHL alone on the second key that key
+# uses about 8 a day, roughly 250 a month.
 #   06:00 UTC: odds + scores (catches the previous night's final scores,
 #              well inside the API's 3-day scores window)
 #   20:00 UTC: odds only (refreshes lines before the evening games)
@@ -52,3 +56,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
           ODDS_API_SPORTS: ${{ vars.ODDS_API_SPORTS }}
+          ODDS_API_KEY_2: ${{ secrets.ODDS_API_KEY_2 }}
+          ODDS_API_SPORTS_2: ${{ vars.ODDS_API_SPORTS_2 }}

@@ -64,29 +64,29 @@ function percent(part: number, whole: number) {
 function TeamPanel({
   team,
   pool,
-  side,
   winner,
   mine,
 }: {
   team: ShowdownTeam;
   pool: number;
-  side: 'Away' | 'Home';
   winner: boolean | null;
   mine: boolean;
 }) {
   return (
     <div className={`flex flex-col items-center text-center ${winner === false ? 'opacity-50' : ''}`}>
-      {winner ? (
-        <span className="mb-1 rounded-full bg-amber-300 px-2 py-0.5 text-[0.65rem] font-bold uppercase text-slate-950">Winner</span>
-      ) : null}
       <p className="text-sm font-semibold leading-tight sm:text-base">{team.name}</p>
-      <p className="text-xs text-slate-500">
-        {side}
-        {mine ? <span className="text-emerald-300"> · your side</span> : null}
+      {/* Same height on both sides, badge or not, so the numbers line up. */}
+      <p className="mt-1 flex h-5 gap-1">
+        {winner ? (
+          <span className="rounded-full bg-amber-300 px-2 py-0.5 text-[0.65rem] font-bold uppercase text-slate-950">Winner</span>
+        ) : null}
+        {mine ? (
+          <span className="rounded-full bg-sky-400/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase text-sky-300">You</span>
+        ) : null}
       </p>
-      <p className="mt-2 text-lg font-bold tabular-nums sm:text-xl">{team.total.toLocaleString()}</p>
-      <p className="text-xs text-slate-400">
-        coins · {team.players} {team.players === 1 ? 'player' : 'players'} · {percent(team.total, pool)}%
+      <p className="mt-1 text-lg font-bold tabular-nums sm:text-xl">{team.total.toLocaleString()}</p>
+      <p className="text-xs tabular-nums text-slate-400" title={`${team.players} ${team.players === 1 ? 'player' : 'players'}`}>
+        {percent(team.total, pool)}% · 👤 {team.players}
       </p>
     </div>
   );
@@ -113,9 +113,7 @@ function SplitBar({ away, home, pool }: { away: ShowdownTeam; home: ShowdownTeam
           <div className="w-full bg-[repeating-linear-gradient(90deg,#334155_0_8px,#1e293b_8px_16px)]" />
         )}
       </div>
-      <p className="mt-2 text-center text-xs text-slate-500">
-        {pool > 0 ? 'Share of the pool on each side' : 'No bets yet. Be the first to pick a side.'}
-      </p>
+      {pool > 0 ? null : <p className="mt-2 text-center text-xs text-slate-500">No bets yet</p>}
     </div>
   );
 }
@@ -147,7 +145,7 @@ function BetForm({
 
   let amountError = '';
   if (amountText && !check.ok) amountError = check.error;
-  else if (amount !== null && balance !== null && amount > balance) amountError = "You don't have enough coins for this bet.";
+  else if (amount !== null && balance !== null && amount > balance) amountError = 'Not enough coins.';
 
   // "If it ended now": the player's whole stake after this bet, against their
   // side's total and the pool after it.
@@ -172,22 +170,21 @@ function BetForm({
           kind: 'success',
           text:
             data.entryAmount > amount
-              ? `Added ${amount.toLocaleString()} coins. You now have ${Number(data.entryAmount).toLocaleString()} on ${team.name}.`
-              : `You're in! ${amount.toLocaleString()} coins on ${team.name}.`,
+              ? `+${amount.toLocaleString()} · ${Number(data.entryAmount).toLocaleString()} on ${team.name}`
+              : `You're in! ${amount.toLocaleString()} on ${team.name}`,
         });
       } else {
         setError(data.error || 'Could not place your bet.');
       }
     } catch {
-      setError('Could not reach the server. Your coins were not taken. Please try again.');
+      setError("Couldn't connect. No coins were taken.");
     }
     setStage('edit');
   }
 
   return (
     <div className="mt-5 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-      <p className="text-sm font-medium text-slate-300">{mineTeamId === null ? 'Pick a side' : 'Add to your side'}</p>
-      <div className="mt-2 grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-2 gap-2">
         {[showdown.away, showdown.home].map((t) => {
           const locked = mineTeamId !== null && mineTeamId !== t.id;
           const selected = teamId === t.id;
@@ -198,32 +195,29 @@ function BetForm({
               disabled={locked || stage !== 'edit'}
               onClick={() => setTeamId(t.id)}
               aria-pressed={selected}
+              title={locked ? 'You can only add to your side' : undefined}
               className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
                 selected
-                  ? 'border-emerald-300 bg-emerald-400 text-slate-950'
-                  : 'border-slate-700 bg-slate-800 text-slate-100 hover:border-emerald-400/70'
+                  ? 'border-sky-300 bg-sky-400 text-slate-950'
+                  : 'border-slate-700 bg-slate-800 text-slate-100 hover:border-sky-400/70'
               } disabled:cursor-not-allowed disabled:border-slate-800 disabled:bg-slate-900 disabled:text-slate-600`}
             >
+              {locked ? <span aria-hidden="true">🔒 </span> : null}
               {t.name}
             </button>
           );
         })}
       </div>
-      {mineTeamId !== null ? (
-        <p className="mt-2 text-xs text-slate-500">You can only add to the side you picked.</p>
-      ) : null}
 
-      <label htmlFor={`showdown-amount-${showdown.id}`} className="mt-4 block text-sm text-slate-300">
-        Coins (minimum {MIN_WAGER})
-      </label>
       <input
         id={`showdown-amount-${showdown.id}`}
+        aria-label={`Coins, minimum ${MIN_WAGER}`}
         inputMode="numeric"
         value={amountText}
         disabled={stage !== 'edit'}
         onChange={(e) => setAmountText(e.target.value.trim())}
-        placeholder={String(MIN_WAGER)}
-        className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-emerald-400 disabled:opacity-60"
+        placeholder={`Coins (min ${MIN_WAGER})`}
+        className="mt-3 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition placeholder:text-base placeholder:text-slate-600 focus:border-sky-400 disabled:opacity-60"
       />
       <div className="mt-2 flex flex-wrap gap-2">
         {QUICK_AMOUNTS.map((value) => (
@@ -232,7 +226,7 @@ function BetForm({
             type="button"
             disabled={stage !== 'edit'}
             onClick={() => setAmountText(String(value))}
-            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-emerald-400/70 disabled:opacity-60"
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-sky-400/70 disabled:opacity-60"
           >
             {value}
           </button>
@@ -241,10 +235,8 @@ function BetForm({
       {amountError ? <p className="mt-2 text-sm text-red-300">{amountError}</p> : null}
 
       {preview !== null && team ? (
-        <p className="mt-3 text-sm text-slate-300">
-          If <span className="font-semibold">{team.name}</span> win and the pool stays as it is, you&apos;d get{' '}
-          <span className="font-semibold text-emerald-300">{preview.toLocaleString()} coins</span>.
-          <span className="block text-xs text-slate-500">The final amount depends on how everyone else bets before kickoff.</span>
+        <p className="mt-3 text-sm text-slate-300" title="Changes as others bet before kickoff">
+          Win ≈ <span className="font-semibold text-emerald-300">{preview.toLocaleString()}</span>
         </p>
       ) : null}
 
@@ -253,23 +245,22 @@ function BetForm({
           type="button"
           disabled={!team || amount === null || !!amountError}
           onClick={() => setStage('confirm')}
-          className="mt-4 w-full rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-4 w-full rounded-xl bg-sky-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {mineTeamId === null ? 'Join the Showdown' : 'Add coins'}
+          {mineTeamId === null ? 'Join' : 'Add coins'}
         </button>
       ) : (
-        <div className="mt-4 rounded-xl border border-emerald-700/60 bg-emerald-950/40 p-4">
+        <div className="mt-4 rounded-xl border border-sky-700/60 bg-sky-950/40 p-4">
           <p className="text-sm text-slate-200">
-            Put <span className="font-semibold">{amount?.toLocaleString()} coins</span> on{' '}
-            <span className="font-semibold">{team?.name}</span>? The coins come out of your balance now, and Showdown bets
-            can&apos;t be cancelled or switched to the other side.
+            <span className="font-semibold">{amount?.toLocaleString()}</span> on <span className="font-semibold">{team?.name}</span>?
+            <span className="block text-xs text-slate-400">Final. No cancelling or switching sides.</span>
           </p>
           <div className="mt-3 flex gap-2">
             <button
               type="button"
               onClick={place}
               disabled={stage === 'placing'}
-              className="flex-1 rounded-xl bg-emerald-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:opacity-60"
+              className="flex-1 rounded-xl bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300 disabled:opacity-60"
             >
               {stage === 'placing' ? 'Placing…' : 'Confirm'}
             </button>
@@ -294,37 +285,31 @@ function YourEntry({ showdown }: { showdown: Showdown }) {
   if (!mine) return null;
   const team = mine.teamId === showdown.home.id ? showdown.home : showdown.away;
 
-  let line: React.ReactNode;
+  let result: React.ReactNode;
   if (showdown.outcome === 'Settled') {
     const won = showdown.winningTeamId === mine.teamId;
-    line = won ? (
-      <>
-        <span className="font-semibold text-emerald-300">You won!</span> {(mine.payout ?? 0).toLocaleString()} coins paid to your
-        balance (+{((mine.payout ?? 0) - mine.amount).toLocaleString()}).
-      </>
+    result = won ? (
+      <span className="font-semibold text-emerald-300">Won +{((mine.payout ?? 0) - mine.amount).toLocaleString()}</span>
     ) : (
-      <>
-        <span className="font-semibold text-red-300">You lost</span> {mine.amount.toLocaleString()} coins.
-      </>
+      <span className="font-semibold text-red-300">Lost {mine.amount.toLocaleString()}</span>
     );
   } else if (showdown.outcome === 'Refunded') {
-    line = <>Refunded: your {mine.amount.toLocaleString()} coins were returned.</>;
+    result = <span className="text-slate-300">Refunded {mine.amount.toLocaleString()}</span>;
   } else {
-    line = (
-      <>
-        If they win and the pool stays as it is:{' '}
-        <span className="font-semibold text-emerald-300">{mine.projectedPayout.toLocaleString()} coins</span>
-      </>
+    result = (
+      <span className="text-slate-300" title="If they win and the pool stays as it is">
+        Win ≈ <span className="font-semibold text-emerald-300">{mine.projectedPayout.toLocaleString()}</span>
+      </span>
     );
   }
 
   return (
-    <div className="mt-5 rounded-2xl border border-emerald-800/60 bg-emerald-950/30 p-4 text-sm">
-      <p>
-        You&apos;re backing <span className="font-semibold">{team.name}</span> with{' '}
-        <span className="font-semibold tabular-nums">{mine.amount.toLocaleString()} coins</span>.
-      </p>
-      <p className="mt-1 text-slate-300">{line}</p>
+    <div className="mt-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-sky-800/60 bg-sky-950/30 px-4 py-3 text-sm">
+      <span>
+        Your bet: <span className="font-semibold tabular-nums">{mine.amount.toLocaleString()}</span> on{' '}
+        <span className="font-semibold">{team.name}</span>
+      </span>
+      <span className="tabular-nums">{result}</span>
     </div>
   );
 }
@@ -354,12 +339,11 @@ function ShowdownCard({
           </span>
           <span className="rounded-md bg-slate-800 px-1.5 py-0.5 font-semibold text-slate-300">{showdown.league}</span>
           {formatDateTime(showdown.startTime)}
-          {countdown ? <span className="text-emerald-300">· {countdown}</span> : null}
+          {countdown ? <span className="text-sky-300">· {countdown}</span> : null}
         </span>
         <span className="flex items-center gap-2">
-          {showdown.outcome === 'Refunded' ? <span className="text-slate-400">Refunded</span> : null}
           {showdown.open ? (
-            <span className="rounded-full border border-emerald-600 bg-emerald-500/10 px-2.5 py-0.5 text-emerald-200">Open</span>
+            <span className="rounded-full border border-sky-600 bg-sky-500/10 px-2.5 py-0.5 text-sky-200">Open</span>
           ) : (
             <StatusBadge status={showdown.status} />
           )}
@@ -371,7 +355,7 @@ function ShowdownCard({
       </div>
 
       <div className="mt-5 grid grid-cols-[1fr_auto_1fr] items-start gap-2 sm:gap-6">
-        <TeamPanel team={showdown.away} pool={showdown.pool} side="Away" winner={winnerOf(showdown.away)} mine={showdown.mine?.teamId === showdown.away.id} />
+        <TeamPanel team={showdown.away} pool={showdown.pool} winner={winnerOf(showdown.away)} mine={showdown.mine?.teamId === showdown.away.id} />
         <div className="flex flex-col items-center">
           {showScore ? (
             <p className="mb-2 text-lg font-bold tabular-nums">
@@ -380,9 +364,8 @@ function ShowdownCard({
           ) : null}
           <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Pool</p>
           <p className="text-xl font-bold tabular-nums text-emerald-300 sm:text-2xl">{showdown.pool.toLocaleString()}</p>
-          <p className="text-[0.65rem] text-slate-500">coins</p>
         </div>
-        <TeamPanel team={showdown.home} pool={showdown.pool} side="Home" winner={winnerOf(showdown.home)} mine={showdown.mine?.teamId === showdown.home.id} />
+        <TeamPanel team={showdown.home} pool={showdown.pool} winner={winnerOf(showdown.home)} mine={showdown.mine?.teamId === showdown.home.id} />
       </div>
 
       <SplitBar away={showdown.away} home={showdown.home} pool={showdown.pool} />
@@ -394,15 +377,67 @@ function ShowdownCard({
         ) : (
           <Link
             href="/login"
-            className="mt-5 block w-full rounded-xl bg-emerald-400 px-6 py-3 text-center font-semibold text-slate-950 transition hover:bg-emerald-300"
+            className="mt-5 block w-full rounded-xl bg-sky-400 px-6 py-3 text-center font-semibold text-slate-950 transition hover:bg-sky-300"
           >
-            Log in to join the Showdown
+            Log in to play
           </Link>
         )
       ) : showdown.outcome === 'Pending' ? (
-        <p className="mt-5 text-center text-sm text-slate-400">Betting closed at kickoff. The pool pays out after the final score.</p>
+        <p className="mt-5 text-center text-sm text-slate-400">🔒 Betting closed</p>
       ) : null}
     </article>
+  );
+}
+
+// SRS-215.1 for the Showdown: how a public bet is won (SRS-214.1), refunded
+// (SRS-214.3), and limited (SRS-212.1–212.3), behind the Rules button.
+const RULES = [
+  `Back one team with ${MIN_WAGER}+ coins.`,
+  'Add more any time before kickoff, same side only.',
+  'When the game ends, winners split the whole pool by how much they put in.',
+  'Ties, cancelled games, or no one on the winning side: everyone is refunded.',
+  'Bets are final. No cancelling or switching sides.',
+];
+
+function RulesDialog({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="showdown-rules-title"
+        className="w-full max-w-md rounded-3xl border border-amber-400/30 bg-slate-900 p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="showdown-rules-title" className="text-2xl font-black uppercase italic tracking-tight">
+          Rules
+        </h2>
+        <ol className="mt-4 space-y-2 text-sm text-slate-300">
+          {RULES.map((rule, i) => (
+            <li key={rule} className="flex gap-2">
+              <span className="font-semibold text-amber-300">{i + 1}.</span>
+              {rule}
+            </li>
+          ))}
+        </ol>
+        <button
+          type="button"
+          autoFocus
+          onClick={onClose}
+          className="mt-6 w-full rounded-xl bg-amber-300 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-amber-200"
+        >
+          Got it
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -412,6 +447,7 @@ export default function ShowdownPage() {
   const [token, setToken] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
+  const [showRules, setShowRules] = useState(false);
 
   useEffect(() => {
     setToken(localStorage.getItem('player_token'));
@@ -463,33 +499,27 @@ export default function ShowdownPage() {
           <Link href="/sports" className="text-sm text-slate-400 hover:text-slate-200">
             ← Sportsbook
           </Link>
-          <span
-            className={`flex items-center gap-1.5 text-xs ${live ? 'text-emerald-300' : 'text-slate-500'}`}
-            title={live ? 'Pools update the moment anyone bets' : 'Reconnecting… pools still refresh every 15 seconds'}
-          >
-            <span className={`h-2 w-2 rounded-full ${live ? 'animate-pulse bg-emerald-400' : 'bg-slate-600'}`} aria-hidden="true" />
-            {live ? 'Live' : 'Connecting…'}
+          <span className="flex items-center gap-3">
+            <span
+              className={`flex items-center gap-1.5 text-xs ${live ? 'text-emerald-300' : 'text-slate-500'}`}
+              title={live ? 'Pools update the moment anyone bets' : 'Reconnecting… pools still refresh every 15 seconds'}
+            >
+              <span className={`h-2 w-2 rounded-full ${live ? 'animate-pulse bg-emerald-400' : 'bg-slate-600'}`} aria-hidden="true" />
+              {live ? 'Live' : 'Connecting…'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowRules(true)}
+              className="rounded-full border border-amber-400/40 px-3 py-1 text-xs font-semibold text-amber-300 transition hover:border-amber-300 hover:text-amber-200"
+            >
+              Rules
+            </button>
           </span>
         </div>
+        {showRules ? <RulesDialog onClose={() => setShowRules(false)} /> : null}
 
-        <header className="relative mt-4 overflow-hidden rounded-3xl border border-amber-400/30 bg-gradient-to-br from-amber-500/20 via-slate-900 to-slate-950 p-6 sm:p-8">
-          <p className="text-sm uppercase tracking-[0.3em] text-amber-300">One game. Two sides. One pool.</p>
-          <h1 className="mt-3 text-4xl font-black uppercase italic tracking-tight sm:text-5xl">The Showdown</h1>
-          <p className="mt-3 max-w-xl text-slate-300">
-            Each sport gets one featured game. Pick a side, and when the game ends the winners split the whole pool, in
-            proportion to how much they put in.
-          </p>
-          <ol className="mt-5 grid gap-2 text-sm text-slate-300 sm:grid-cols-3">
-            <li className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-4 py-3">
-              <span className="font-semibold text-amber-300">1.</span> Back one team, {MIN_WAGER}+ coins.
-            </li>
-            <li className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-4 py-3">
-              <span className="font-semibold text-amber-300">2.</span> Add more any time before kickoff (same side only).
-            </li>
-            <li className="rounded-2xl border border-slate-700/60 bg-slate-950/50 px-4 py-3">
-              <span className="font-semibold text-amber-300">3.</span> Winners split the pool. Ties are refunded.
-            </li>
-          </ol>
+        <header className="relative mt-4 overflow-hidden rounded-3xl border border-amber-400/30 bg-gradient-to-br from-amber-500/20 via-slate-900 to-slate-950 px-6 py-8 sm:px-8 sm:py-10">
+          <h1 className="text-4xl font-black uppercase italic tracking-tight sm:text-5xl">The Showdown</h1>
         </header>
 
         {notice ? (
@@ -509,7 +539,7 @@ export default function ShowdownPage() {
           {showdowns && showdowns.length === 0 ? (
             <div className="rounded-3xl border border-slate-800 bg-slate-900/80 p-8 text-center">
               <p className="text-lg font-medium">No Showdowns right now</p>
-              <p className="mt-2 text-sm text-slate-400">A new one is picked for each sport after the last one kicks off.</p>
+              <p className="mt-2 text-sm text-slate-400">Check back soon.</p>
             </div>
           ) : null}
           {showdowns?.map((showdown) => (

@@ -45,6 +45,10 @@ export function startBusy(playerId: number): boolean {
   return true;
 }
 
+export function isBusy(playerId: number): boolean {
+  return busy.has(playerId);
+}
+
 export function finishBusy(playerId: number) {
   busy.delete(playerId);
 }

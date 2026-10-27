@@ -111,6 +111,10 @@ function makeHandsTable() {
           filters.push((row) => row[column] === value);
           return query;
         },
+        lte(column: keyof HandRow, value: string) {
+          filters.push((row) => new Date(row[column] as string) <= new Date(value));
+          return query;
+        },
         is(column: keyof HandRow, value: null) {
           filters.push((row) => row[column] === value);
           return query;
@@ -190,7 +194,7 @@ function handRow(row: Partial<HandRow>): HandRow {
     bet_amount: 50,
     result: null,
     net_amount: null,
-    started_at: '2026-10-27T18:00:00.000Z',
+    started_at: '2026-10-01T18:00:00.000Z',
     completed_at: null,
     ...row,
   };
@@ -744,6 +748,25 @@ describe('Returning the bets of lost hands', () => {
     expect(tables.players.update).toHaveBeenNthCalledWith(1, { balance: 1000 });
     expect(tables.players.update).toHaveBeenNthCalledWith(2, { balance: 950 });
     expect(handsTable.rows[0]).toMatchObject({ hand_id: 3, result: 'Push' });
+  });
+
+  it('GET leaves a round dealt in the last 30 seconds alone: it may still be being dealt', async () => {
+    signedIn();
+    handsTable.rows.push(handRow({ started_at: new Date(Date.now() - 5_000).toISOString() }));
+
+    expect(await (await GET(req(''))).json()).toEqual({ hand: null, refunded: 0 });
+    expect(handsTable.rows[0]).toMatchObject({ completed_at: null });
+  });
+
+  it("GET doesn't hold up a move played at the same time", async () => {
+    signedIn();
+    signedIn();
+    handInPlay(['Ts', '2h'], ['Kd', '6c'], ['5s', '9d']);
+
+    const [load, hit] = await Promise.all([GET(req('')), act(req('/action', { handId: 4, move: 'hit', step: 0 }))]);
+
+    expect(load.status).toBe(200);
+    expect(hit.status).toBe(200);
   });
 
   it("doesn't return another player's bets", async () => {

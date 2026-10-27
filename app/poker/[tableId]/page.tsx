@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
 import {
+  BUSTED_DECISION_TIMEOUT_MS,
   MAX_BUY_IN_MULTIPLIER,
   MIN_BUY_IN_MULTIPLIER,
   MIN_PLAYERS_TO_START,
   getBettingOptions,
+  isBustedSeat,
   type BettingMove,
   type HandResult,
   type Street,
@@ -60,6 +62,21 @@ function describeHandResult(result: HandResult): string {
     .join(' · ');
 }
 
+// The blinds a seat owes after missing them (SRS-11.12) — or, for a
+// newcomer the button is skipping, has chosen to post — or null.
+function owedBlindsLabel(seat: {
+  missedSmallBlind: boolean;
+  missedBigBlind: boolean;
+  waitingForButton: boolean;
+  postingMissedBlinds: boolean;
+}): 'SB' | 'BB' | 'SB+BB' | null {
+  if (seat.waitingForButton) return seat.postingMissedBlinds ? 'SB+BB' : null;
+  if (seat.missedSmallBlind && seat.missedBigBlind) return 'SB+BB';
+  if (seat.missedBigBlind) return 'BB';
+  if (seat.missedSmallBlind) return 'SB';
+  return null;
+}
+
 // The previous hand's board and outcome, shown in the middle of the felt
 // until the next hand is dealt.
 function LastHandSummary({ result }: { result: HandResult }) {
@@ -90,6 +107,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const requestedCardsForHandRef = useRef<number | null>(null);
   const [joinError, setJoinError] = useState('');
   const [leaving, setLeaving] = useState(false);
+  const [rebuying, setRebuying] = useState(false);
+  const [choosingBlinds, setChoosingBlinds] = useState(false);
   // Asked to leave while in a hand: the server folds this player when it's
   // their turn and removes them when the hand ends (SRS-21.2/21.3).
   const [leavePending, setLeavePending] = useState(false);
@@ -109,6 +128,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // the server's relative countdownMsRemaining on every table:state, so a
   // clock that disagrees with the server's doesn't matter.
   const [countdownEndsAt, setCountdownEndsAt] = useState<number | null>(null);
+  // When this player, busted, will be removed unless they buy back in or
+  // leave (SRS-12.10) — rebuilt from their seat's bustedMsRemaining the same way.
+  const [bustedEndsAt, setBustedEndsAt] = useState<number | null>(null);
+  // Removed for not choosing in time; says why until they sit down again (SRS-9.11).
+  const [removedForTimeout, setRemovedForTimeout] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const fetchedAvatarsRef = useRef(new Set<string>());
@@ -128,11 +152,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
 
   // Tick while a countdown is running so the seconds left re-render.
   useEffect(() => {
-    if (countdownEndsAt === null) return;
+    if (countdownEndsAt === null && bustedEndsAt === null) return;
     setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(interval);
-  }, [countdownEndsAt]);
+  }, [countdownEndsAt, bustedEndsAt]);
 
   const countdownSeconds =
     countdownEndsAt === null ? null : Math.max(0, Math.ceil((countdownEndsAt - now) / 1000));
@@ -176,6 +200,31 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     if (!profile || !tableState) return null;
     return tableState.seats.find((seat) => seat.playerId === String(profile.playerId)) ?? null;
   }, [profile, tableState]);
+
+  // SRS-12.1/12.2: out of chips after a hand. The controls panel then offers
+  // to buy back in or leave.
+  const amBusted = Boolean(mySeat && isBustedSeat(mySeat));
+
+  useEffect(() => {
+    const msRemaining = mySeat?.bustedMsRemaining ?? null;
+    setBustedEndsAt(msRemaining === null ? null : Date.now() + msRemaining);
+  }, [mySeat]);
+  const bustedSeconds = bustedEndsAt === null ? null : Math.max(0, Math.ceil((bustedEndsAt - now) / 1000));
+
+  // A busted player's seat disappearing without them clicking Leave means
+  // the server removed them for not choosing in time (SRS-12.10).
+  const wasBustedRef = useRef(false);
+  useEffect(() => {
+    if (!tableState) return;
+    if (amBusted) {
+      wasBustedRef.current = true;
+    } else if (mySeat) {
+      wasBustedRef.current = false;
+    } else if (wasBustedRef.current) {
+      wasBustedRef.current = false;
+      if (!leaving) setRemovedForTimeout(true);
+    }
+  }, [tableState, amBusted, mySeat, leaving]);
 
   // Open this player's sealed hole cards once per hand. The sealed copy
   // changes with every broadcast (fresh IV), so this keys off the hand number.
@@ -257,6 +306,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     }
   }, [minBuyIn]);
 
+  // On going bust, start the buy-back amount at the minimum again and refresh
+  // the balance that caps it.
+  useEffect(() => {
+    if (!amBusted) return;
+    if (minBuyIn !== null) setBuyInText(String(minBuyIn));
+    void refreshBalance();
+    // Only when the player goes bust, not on every balance change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [amBusted]);
+
   // When the player clicks away from a blank/non-numeric buy-in, put the
   // minimum back rather than leaving the field empty.
   function resetEmptyBuyIn() {
@@ -289,14 +348,43 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     });
     if (result.ok) {
       setSelectedSeat(null);
+      setRemovedForTimeout(false);
       await refreshBalance();
     } else {
       setJoinError(result.error || 'Unable to join the table.');
     }
   }
 
+  // SRS-12.4: a busted player buys back in at their seat. The server checks
+  // the amount against the table's range and their balance (SRS-12.6/12.7)
+  // and its reason for refusing is shown here (SRS-12.8).
+  async function handleRebuy() {
+    if (!connected || !token || !buyInValid || parsedBuyIn === null) return;
+    setJoinError('');
+    setRebuying(true);
+    const result = await sendAction(token, { tableId: params.tableId, action: 'rebuy', buyIn: parsedBuyIn });
+    setRebuying(false);
+    if (result.ok) await refreshBalance();
+    else setJoinError(result.error || 'Unable to buy back in.');
+  }
+
   // Leaving sends the player back to the lobby to pick another table —
   // right away between hands, or once the hand ends if they're in it.
+  // SRS-11.6: post the blinds this player owes to be dealt into the next
+  // hand, or (post = false) go back to waiting for the big blind. The server
+  // says why when it can't allow posting yet (SRS-11.9).
+  async function handlePostBlinds(post: boolean) {
+    if (!connected || !token) return;
+    setJoinError('');
+    setChoosingBlinds(true);
+    const result = await sendAction(token, {
+      tableId: params.tableId,
+      action: post ? 'post-blinds' : 'wait-for-big-blind',
+    });
+    setChoosingBlinds(false);
+    if (!result.ok) setJoinError(result.error || 'Unable to change that right now.');
+  }
+
   async function handleLeave() {
     if (!connected || !token) return;
     setJoinError('');
@@ -367,9 +455,87 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const myHoleCards = inHandPhase && myCards?.handNumber === tableState?.handNumber ? myCards.cards : null;
   const board = tableState?.board ?? [];
   const myHandName = myHoleCards && board.length >= 3 ? evaluateHand([...myHoleCards, ...board]).name : null;
+  // The amount input, range slider and quick-add buttons, shared by joining
+  // and a busted player's buy-back.
+  const buyInFields =
+    minBuyIn === null || maxBuyIn === null ? null : (
+      <>
+        <div>
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="buy-in-amount" className="text-xs uppercase tracking-wider text-slate-500">
+              Buy-in
+            </label>
+            <span className="text-xs tabular-nums text-slate-500">
+              {minBuyIn}&ndash;{maxBuyIn}
+            </span>
+          </div>
+          <div className="relative mt-1">
+            <input
+              id="buy-in-amount"
+              inputMode="numeric"
+              value={buyInText}
+              onChange={(e) => setBuyInText(e.target.value.trim())}
+              onBlur={resetEmptyBuyIn}
+              placeholder={String(minBuyIn)}
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-16 text-2xl font-semibold tabular-nums text-amber-200 outline-none transition focus:border-amber-300"
+            />
+            <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
+              chips
+            </span>
+          </div>
+          <input
+            type="range"
+            aria-label="Buy-in amount"
+            min={minBuyIn}
+            max={maxBuyIn}
+            step={config.bigBlind}
+            value={sliderValue}
+            onChange={(e) => setBuyInText(e.target.value)}
+            className="mt-3 w-full accent-amber-300"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setBuyInText(String(minBuyIn))}
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
+          >
+            Min
+          </button>
+          {QUICK_BUY_IN_INCREMENTS.map((amount) => (
+            <button
+              key={amount}
+              type="button"
+              onClick={() => addToBuyIn(amount)}
+              className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs tabular-nums text-slate-300 transition hover:border-amber-300/70"
+            >
+              +{amount}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => setBuyInText(String(maxBuyIn))}
+            className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
+          >
+            Max
+          </button>
+        </div>
+
+        {buyInError ? <p className="text-sm text-red-300">{buyInError}</p> : null}
+      </>
+    );
   // Between hands, the last hand's showdown stays on the table until the next deal.
   const lastResult = !inHandPhase ? tableState?.lastHandResult ?? null : null;
   const myCosmetics = cosmetics[String(profile.playerId)];
+  const myOwedLabel = mySeat ? owedBlindsLabel(mySeat) : null;
+  // SRS-11.7/11.8: a live big blind and/or a dead small blind — both for a
+  // newcomer the button is skipping.
+  const myPostCost = !mySeat
+    ? 0
+    : mySeat.waitingForButton
+      ? config.bigBlind + config.smallBlind
+      : (mySeat.missedBigBlind ? config.bigBlind : 0) + (mySeat.missedSmallBlind ? config.smallBlind : 0);
 
   return (
     <Room>
@@ -523,8 +689,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             const isPickable = canPickSeat && !seat.playerId;
             // Seated, but sat down after this hand was dealt (or out of chips).
             const sittingOut = Boolean(seat.playerId) && inHandPhase && !seat.inHand && !seat.folded;
+            const owedLabel = seat.playerId ? owedBlindsLabel(seat) : null;
             const isActive = inHandPhase && tableState.activeSeat === seat.seatNumber;
-            const isBusted = Boolean(seat.playerId) && seat.chipStack === 0 && !seat.inHand;
+            const isBusted = isBustedSeat(seat);
             // Cards at the seat: this player's own face up; everyone else
             // still in the hand face down; at showdown, the revealed hands.
             const shown = lastResult?.shown.find(
@@ -564,6 +731,17 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">{blindLabel}</span>
                     ) : null}
                   </div>
+                ) : null}
+
+                {/* Blinds owed (SRS-11.12): missed while not dealt in, until they're dealt back in */}
+                {owedLabel ? (
+                  <span
+                    title={`Owes the ${owedLabel === 'SB+BB' ? 'small and big blind' : owedLabel === 'SB' ? 'small blind' : 'big blind'}`}
+                    style={{ left: `${50 + 34 * Math.cos(angle - 0.38)}%`, top: `${50 + 31 * Math.sin(angle - 0.38)}%` }}
+                    className="absolute z-20 flex h-6 min-w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-dashed border-amber-300 bg-slate-950/90 px-1 text-[9px] font-black text-amber-200 shadow-[0_2px_8px_rgba(0,0,0,0.6)]"
+                  >
+                    {owedLabel}
+                  </span>
                 ) : null}
 
                 {/* Dealer button (SRS-13.5) */}
@@ -697,6 +875,14 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">{seat.lastAction}</p>
                     ) : isBusted ? (
                       <p className="text-[10px] uppercase tracking-wider text-slate-400">Out of chips</p>
+                    ) : (owedLabel || seat.waitingForButton) && !seat.inHand ? (
+                      <p className="text-[10px] uppercase tracking-wider text-amber-300/80">
+                        {seat.postingMissedBlinds
+                          ? 'Posting next hand'
+                          : seat.waitingForButton
+                            ? 'Sits out a hand'
+                            : 'Waiting for BB'}
+                      </p>
                     ) : sittingOut ? (
                       <p className="text-[10px] uppercase tracking-wider text-slate-400">Next hand</p>
                     ) : null}
@@ -736,6 +922,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             </div>
 
             <div className="flex-1 md:border-l md:border-white/10 md:pl-6">
+              {removedForTimeout && !mySeat ? (
+                // SRS-9.11: why they lost their seat.
+                <p className="mb-4 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                  You were removed from your seat because you didn&apos;t buy back in or leave within{' '}
+                  {BUSTED_DECISION_TIMEOUT_MS / 1000} seconds of running out of chips.
+                </p>
+              ) : null}
               {!mySeat ? (
                 leaving ? (
                   <p className="py-3 text-center text-slate-300">Returning to the lobby…</p>
@@ -800,69 +993,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       </li>
                     </ol>
 
-                    <div>
-                      <div className="flex items-baseline justify-between">
-                        <label htmlFor="buy-in-amount" className="text-xs uppercase tracking-wider text-slate-500">
-                          Buy-in
-                        </label>
-                        <span className="text-xs tabular-nums text-slate-500">
-                          {minBuyIn}&ndash;{maxBuyIn}
-                        </span>
-                      </div>
-                      <div className="relative mt-1">
-                        <input
-                          id="buy-in-amount"
-                          inputMode="numeric"
-                          value={buyInText}
-                          onChange={(e) => setBuyInText(e.target.value.trim())}
-                          onBlur={resetEmptyBuyIn}
-                          placeholder={String(minBuyIn)}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-16 text-2xl font-semibold tabular-nums text-amber-200 outline-none transition focus:border-amber-300"
-                        />
-                        <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-sm text-slate-500">
-                          chips
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        aria-label="Buy-in amount"
-                        min={minBuyIn}
-                        max={maxBuyIn}
-                        step={config.bigBlind}
-                        value={sliderValue}
-                        onChange={(e) => setBuyInText(e.target.value)}
-                        className="mt-3 w-full accent-amber-300"
-                      />
-                    </div>
-
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setBuyInText(String(minBuyIn))}
-                        className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
-                      >
-                        Min
-                      </button>
-                      {QUICK_BUY_IN_INCREMENTS.map((amount) => (
-                        <button
-                          key={amount}
-                          type="button"
-                          onClick={() => addToBuyIn(amount)}
-                          className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs tabular-nums text-slate-300 transition hover:border-amber-300/70"
-                        >
-                          +{amount}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setBuyInText(String(maxBuyIn))}
-                        className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 transition hover:border-amber-300/70"
-                      >
-                        Max
-                      </button>
-                    </div>
-
-                    {buyInError ? <p className="text-sm text-red-300">{buyInError}</p> : null}
+                    {buyInFields}
 
                     <button
                       type="button"
@@ -880,31 +1011,144 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 )
               ) : (
                 <div className="space-y-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-xs uppercase tracking-wider text-slate-500">
-                        Your stack · Seat {mySeat.seatNumber}
-                      </p>
-                      <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
-                        <PlayerChip artKey={myCosmetics?.chip} stakes={config.stakes} size="h-7 w-7" />
-                        {mySeat.chipStack}
-                      </p>
+                  {amBusted ? (
+                    // SRS-12.2: buy back in, or leave (SRS-12.3).
+                    <div className="space-y-4 rounded-2xl border border-red-400/30 bg-red-500/[0.05] p-4">
+                      <div>
+                        <p className="text-lg font-semibold text-red-200">You&apos;re out of chips</p>
+                        <p className="text-sm text-slate-400">
+                          Buy back in to keep your seat ({mySeat.seatNumber}), or leave the table. You&apos;ll sit out
+                          until you buy back in.
+                        </p>
+                        {bustedSeconds !== null ? (
+                          <p className="mt-1 text-sm font-semibold text-amber-200">
+                            Choose within <span className="tabular-nums">{bustedSeconds}s</span> or you&apos;ll be
+                            removed from the table.
+                          </p>
+                        ) : null}
+                      </div>
+                      {canAffordBuyIn ? (
+                        <>
+                          {buyInFields}
+                          <div className="flex flex-col gap-3 sm:flex-row">
+                            <button
+                              type="button"
+                              onClick={handleRebuy}
+                              disabled={!connected || !buyInValid || rebuying || leaving}
+                              className="flex-1 rounded-xl bg-emerald-400 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500 disabled:shadow-none"
+                            >
+                              {rebuying
+                                ? 'Buying back in…'
+                                : buyInValid
+                                  ? `Buy back in with ${parsedBuyIn} chips`
+                                  : 'Buy back in'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleLeave}
+                              disabled={leaving || rebuying}
+                              className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {leaving ? 'Leaving…' : 'Leave table'}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm text-slate-300">
+                            Buying back in takes at least <span className="font-semibold text-amber-300">{minBuyIn}</span>{' '}
+                            (your balance: {profile.balance}).
+                          </p>
+                          <div className="flex flex-col gap-3 sm:flex-row">
+                            <Link
+                              href="/shop"
+                              className="flex-1 rounded-xl border border-white/10 bg-slate-800 px-5 py-3 text-center font-semibold text-slate-200 transition hover:border-emerald-400/60"
+                            >
+                              Get free coins in the shop
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={handleLeave}
+                              disabled={leaving}
+                              className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {leaving ? 'Leaving…' : 'Leave table'}
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleLeave}
-                      disabled={leaving || leavePending}
-                      className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {leaving
-                        ? 'Leaving…'
-                        : leavePending
-                          ? 'Leaving after this hand'
-                          : mySeat.inHand && inHandPhase
-                            ? 'Leave'
-                            : 'Leave table'}
-                    </button>
-                  </div>
+                  ) : (
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-xs uppercase tracking-wider text-slate-500">
+                          Your stack · Seat {mySeat.seatNumber}
+                        </p>
+                        <p className="mt-1 flex items-center gap-2 text-3xl font-bold tabular-nums text-amber-300">
+                          <PlayerChip artKey={myCosmetics?.chip} stakes={config.stakes} size="h-7 w-7" />
+                          {mySeat.chipStack}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleLeave}
+                        disabled={leaving || leavePending}
+                        className="rounded-xl border border-red-400/40 bg-red-500/10 px-6 py-3 font-semibold text-red-200 transition hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {leaving
+                          ? 'Leaving…'
+                          : leavePending
+                            ? 'Leaving after this hand'
+                            : mySeat.inHand && inHandPhase
+                              ? 'Leave'
+                              : 'Leave table'}
+                      </button>
+                    </div>
+                  )}
+
+                  {(myOwedLabel || mySeat.waitingForButton) && !amBusted && !mySeat.inHand ? (
+                    // SRS-11.5/11.6: wait for the big blind, or post what's owed to play the next hand. A
+                    // newcomer the button is about to skip posts both blinds, or sits one hand out.
+                    <div className="space-y-3 rounded-2xl border border-amber-300/30 bg-amber-300/[0.04] p-4">
+                      <div>
+                        <p className="font-semibold text-amber-200">
+                          {mySeat.waitingForButton
+                            ? 'The button is about to reach your seat'
+                            : `You owe the ${myOwedLabel === 'SB+BB' ? 'small and big blind' : myOwedLabel === 'SB' ? 'small blind' : 'big blind'}`}
+                        </p>
+                        <p className="text-sm text-slate-400">
+                          {mySeat.postingMissedBlinds
+                            ? `You'll post ${myPostCost} and be dealt into the next hand.`
+                            : mySeat.waitingForButton
+                              ? `The button skips new players, so you'll sit out the next hand and be dealt in free after that — or post both blinds (${myPostCost}) to play it.`
+                              : `You'll be dealt in when the big blind reaches your seat — or post ${myPostCost} to play the next hand.`}
+                        </p>
+                        {(mySeat.waitingForButton || (mySeat.missedSmallBlind && mySeat.missedBigBlind)) &&
+                        !mySeat.postingMissedBlinds ? (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Posting puts in a live big blind ({config.bigBlind}) that counts toward your bet, plus a dead small
+                            blind ({config.smallBlind}) that goes straight into the pot.
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handlePostBlinds(!mySeat.postingMissedBlinds)}
+                        disabled={!connected || choosingBlinds}
+                        className={`w-full rounded-xl px-6 py-3 font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          mySeat.postingMissedBlinds
+                            ? 'border border-white/10 bg-slate-800 text-slate-200 hover:border-amber-300/60'
+                            : 'bg-amber-300 text-slate-950 shadow-lg shadow-amber-500/20 hover:bg-amber-200'
+                        }`}
+                      >
+                        {mySeat.postingMissedBlinds
+                          ? mySeat.waitingForButton
+                            ? 'Sit out one hand instead'
+                            : 'Wait for the big blind instead'
+                          : `Post ${myPostCost} and play next hand`}
+                      </button>
+                    </div>
+                  ) : null}
 
                   {myHoleCards ? (
                     <div className="flex items-center gap-4">
@@ -952,7 +1196,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     <p className="text-xs text-slate-500">
                       Leaving during a hand folds you when it&apos;s your turn; you leave once the hand ends.
                     </p>
-                  ) : inHandPhase && !mySeat.folded && !mySeat.inHand ? (
+                  ) : inHandPhase && !mySeat.folded && !mySeat.inHand && !amBusted && !myOwedLabel ? (
                     <p className="text-xs text-slate-500">You sat down mid-hand, so you&apos;ll be dealt in next hand.</p>
                   ) : null}
 

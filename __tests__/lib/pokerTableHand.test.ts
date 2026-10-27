@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { HAND_START_COUNTDOWN_MS, PokerTable, getBettingOptions } from '../../lib/pokerTable';
+import {
+  BUSTED_DECISION_TIMEOUT_MS,
+  HAND_START_COUNTDOWN_MS,
+  PokerTable,
+  getBettingOptions,
+  isBustedSeat,
+} from '../../lib/pokerTable';
 import { createDeck } from '../../lib/pokerCards';
 
 // Seats players by seat number at a 6-seat table with 5/10 blinds. `stacks`
@@ -46,6 +52,14 @@ function stackDeck(dealOrder: number[], holes: Record<number, string>, board: st
     boardCards[4],
     ...spare,
   ];
+}
+
+/** Folds whoever has the turn until the hand ends. */
+function foldHand(table: PokerTable) {
+  while (table.getState().phase === 'in-hand') {
+    const { activeSeat, seats } = table.getState();
+    expect(table.act(seats[(activeSeat as number) - 1].playerId as string, 'fold')).toEqual({ ok: true });
+  }
 }
 
 /** Plays `moves` in order, failing the test on the first rejected one. */
@@ -724,5 +738,319 @@ describe('PokerTable leaving during a hand', () => {
 
     expect(table.leave(p(4))).toEqual({ ok: true, seatNumber: 4, chipStack: 500 });
     expect(table.getState().phase).toBe('in-hand');
+  });
+});
+
+describe('PokerTable busted players', () => {
+  // Button 1 goes all-in for 100 with kings; seat 2 calls with aces and wins,
+  // seat 3 folds — so seat 1 ends the hand with 0 chips.
+  function bustSeatOne(): PokerTable {
+    const table = tableWith([1, 2, 3], { 1: 100 });
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Kh Kd', 2: 'Ah Ad', 3: '7c 2d' }, '3c 8s 9d 4h Jc'));
+    play(table, [
+      [1, 'raise', 100], // all-in
+      [2, 'call'],
+      [3, 'fold'],
+    ]);
+    return table;
+  }
+
+  it('marks a player busted once the hand they lost all their chips in ends (SRS-12.1)', () => {
+    const table = tableWith([1, 2, 3], { 1: 100 });
+    table.startHand(pick(0), stackDeck([2, 3, 1], { 1: 'Kh Kd', 2: 'Ah Ad', 3: '7c 2d' }, '3c 8s 9d 4h Jc'));
+    play(table, [[1, 'raise', 100]]);
+
+    // All-in, but the hand isn't over: not busted yet.
+    expect(isBustedSeat(seat(table, 1))).toBe(false);
+
+    play(table, [
+      [2, 'call'],
+      [3, 'fold'],
+    ]);
+    expect(table.getState().phase).toBe('waiting');
+    expect(seat(table, 1).chipStack).toBe(0);
+    expect(isBustedSeat(seat(table, 1))).toBe(true);
+    expect(isBustedSeat(seat(table, 2))).toBe(false);
+  });
+
+  it('does not deal a busted player in (SRS-12.9)', () => {
+    const table = bustSeatOne();
+    table.join(p(4), 'P4', 1000, null, 4);
+    table.startHand(pick(0));
+
+    expect(seat(table, 1).inHand).toBe(false);
+    expect(isBustedSeat(seat(table, 1))).toBe(true);
+    expect(seat(table, 4).inHand).toBe(true);
+  });
+
+  it('lets a busted player buy back in at the same seat, clearing busted (SRS-12.4/12.5)', () => {
+    const table = bustSeatOne();
+
+    expect(table.checkRebuy(p(1))).toBeNull();
+    expect(table.rebuy(p(1), 500)).toEqual({ ok: true });
+    expect(seat(table, 1)).toMatchObject({ playerId: p(1), chipStack: 500 });
+    expect(isBustedSeat(seat(table, 1))).toBe(false);
+
+    table.startHand(pick(0));
+    expect(seat(table, 1).inHand).toBe(true);
+  });
+
+  it('deals a player who buys back in mid-hand into the next hand, not this one', () => {
+    const table = bustSeatOne();
+    table.join(p(4), 'P4', 1000, null, 4);
+    table.startHand(pick(0));
+
+    expect(table.rebuy(p(1), 500)).toEqual({ ok: true });
+    expect(seat(table, 1).inHand).toBe(false);
+    expect(seat(table, 1).chipStack).toBe(500);
+  });
+
+  it('refuses a buy-back from a player who still has chips or is not seated', () => {
+    const table = bustSeatOne();
+
+    expect(table.rebuy(p(2), 500)).toEqual({ ok: false, error: 'You can only buy back in once you are out of chips.' });
+    expect(table.rebuy(p(9), 500)).toEqual({ ok: false, error: 'You are not seated at this table.' });
+    expect(table.rebuy(p(1), 0).ok).toBe(false);
+    expect(seat(table, 2).chipStack).toBe(1110);
+  });
+
+  it('lets a busted player leave, freeing the seat with nothing to refund (SRS-12.3)', () => {
+    const table = bustSeatOne();
+
+    expect(table.leave(p(1))).toEqual({ ok: true, seatNumber: 1, chipStack: 0 });
+    expect(seat(table, 1).playerId).toBeNull();
+  });
+
+  it('gives a busted player 60 seconds to choose, counting down in the state (SRS-12.10, SRS-NFR-015)', () => {
+    const table = bustSeatOne();
+    expect(BUSTED_DECISION_TIMEOUT_MS).toBe(60_000);
+
+    table.trackBusted(1_000);
+    expect(table.nextBustedDeadline()).toBe(61_000);
+    expect(table.getState(21_000).seats[0].bustedMsRemaining).toBe(40_000);
+    expect(table.getState(21_000).seats[1].bustedMsRemaining).toBeNull();
+
+    // Tracking again later doesn't restart the clock.
+    table.trackBusted(30_000);
+    expect(table.nextBustedDeadline()).toBe(61_000);
+  });
+
+  it('removes a busted player who has not chosen in time, and nobody else', () => {
+    const table = bustSeatOne();
+    table.trackBusted(0);
+
+    expect(table.removeTimedOutBusted(BUSTED_DECISION_TIMEOUT_MS - 1)).toEqual([]);
+    expect(table.removeTimedOutBusted(BUSTED_DECISION_TIMEOUT_MS)).toEqual([p(1)]);
+    expect(seat(table, 1).playerId).toBeNull();
+    expect(seat(table, 2).playerId).toBe(p(2));
+    expect(table.nextBustedDeadline()).toBeNull();
+  });
+
+  it('marks a busted player when the big blind passes their seat (SRS-11.1)', () => {
+    // Hand 1: button 1, SB 2, BB 3. Seat 1 busts; seat 4 sits down.
+    const table = bustSeatOne();
+    table.join(p(4), 'P4', 1000, null, 4);
+    expect(seat(table, 1).missedBigBlind).toBe(false);
+
+    // Hand 2: button 2, SB 3, BB 4 — the big blind moves from 3 to 4, so it
+    // hasn't passed seat 1 yet.
+    table.startHand(pick(0));
+    expect(table.getState().bigBlindSeat).toBe(4);
+    expect(seat(table, 1).missedBigBlind).toBe(false);
+    play(table, [
+      [2, 'fold'],
+      [3, 'fold'],
+    ]);
+
+    // Hand 3: button 3, SB 4, BB 2 — the big blind skips busted seat 1.
+    table.startHand(pick(0));
+    expect(table.getState().bigBlindSeat).toBe(2);
+    expect(seat(table, 1)).toMatchObject({ missedBigBlind: true, inHand: false });
+    expect(seat(table, 3).missedBigBlind).toBe(false);
+  });
+
+  it('keeps the missed blind through a buy-back, until the big blind reaches them (SRS-11.5)', () => {
+    const table = bustSeatOne();
+    table.join(p(4), 'P4', 1000, null, 4);
+    table.startHand(pick(0)); // button 2, SB 3, BB 4
+    foldHand(table);
+    table.startHand(pick(0)); // button 3, SB 4, BB 2 — passing seat 1
+    table.rebuy(p(1), 500);
+    expect(seat(table, 1).missedBigBlind).toBe(true);
+    foldHand(table);
+
+    // Bought back in, but still owes: not dealt in until the big blind gets there.
+    table.startHand(pick(0)); // button 4, SB 2 — passing seat 1 — BB 3
+    expect(seat(table, 1)).toMatchObject({ inHand: false, missedSmallBlind: true, missedBigBlind: true });
+    foldHand(table);
+    table.startHand(pick(0)); // button 2, SB 3, BB 4
+    expect(seat(table, 1).inHand).toBe(false);
+    foldHand(table);
+
+    table.startHand(pick(0)); // button 3, SB 4, BB 1
+    expect(table.getState().bigBlindSeat).toBe(1);
+    expect(seat(table, 1)).toMatchObject({ inHand: true, missedSmallBlind: false, missedBigBlind: false, bet: 10 });
+  });
+
+  it('stops the clock when the player buys back in', () => {
+    const table = bustSeatOne();
+    table.trackBusted(0);
+    table.rebuy(p(1), 500);
+    table.trackBusted(10_000);
+
+    expect(table.nextBustedDeadline()).toBeNull();
+    expect(table.removeTimedOutBusted(BUSTED_DECISION_TIMEOUT_MS * 2)).toEqual([]);
+    expect(seat(table, 1).chipStack).toBe(500);
+  });
+});
+
+describe('PokerTable missed blinds (SRS-11)', () => {
+  it('needs nothing from players seated before the first hand', () => {
+    const table = tableWith([1, 2, 3]);
+    expect(seat(table, 3)).toMatchObject({ missedSmallBlind: false, missedBigBlind: false });
+  });
+
+  it("deals a new player in free when the button won't land on them", () => {
+    const table = tableWith([1, 2, 3, 4]);
+    table.startHand(pick(0)); // button 1, SB 2, BB 3
+    foldHand(table);
+    table.join(p(6), 'P6', 1000, null, 6);
+    expect(seat(table, 6).waitingForButton).toBe(false);
+
+    table.startHand(pick(0)); // button 2, SB 3, BB 4
+    expect(seat(table, 6)).toMatchObject({ inHand: true, bet: 0, chipStack: 1000, missedBigBlind: false });
+  });
+
+  // Seats 1, 3 and 4 play a hand with the button on 1; then a new player sits
+  // in seat 2, right where the button would go next.
+  function newcomerOnTheButton(): PokerTable {
+    const table = tableWith([1, 3, 4]);
+    table.startHand(pick(0)); // button 1, SB 3, BB 4
+    foldHand(table);
+    table.join(p(2), 'P2', 1000, null, 2);
+    return table;
+  }
+
+  it('skips a new player the button would land on, who sits that hand out and then plays free', () => {
+    const table = newcomerOnTheButton();
+    expect(seat(table, 2).waitingForButton).toBe(true);
+
+    table.startHand(pick(0));
+    const state = table.getState();
+    expect([state.dealerSeat, state.smallBlindSeat, state.bigBlindSeat]).toEqual([3, 4, 1]);
+    expect(seat(table, 2)).toMatchObject({ inHand: false, waitingForButton: false, missedSmallBlind: false, missedBigBlind: false });
+    foldHand(table);
+
+    table.startHand(pick(0)); // button 4, SB 1, BB 2 — dealt in like anyone else
+    expect(table.getState().bigBlindSeat).toBe(2);
+    expect(seat(table, 2)).toMatchObject({ inHand: true, bet: 10 });
+  });
+
+  it('lets a new player the button would land on post both blinds to play that hand', () => {
+    const table = newcomerOnTheButton();
+    expect(table.setPostMissedBlinds(p(2), true)).toEqual({ ok: true });
+    table.startHand(pick(0)); // button 3, SB 4, BB 1
+
+    expect(table.getState().dealerSeat).toBe(3);
+    expect(seat(table, 2)).toMatchObject({ inHand: true, bet: 10, chipStack: 985 });
+    expect(table.getState().pot).toBe(5);
+  });
+
+  // Seats 1-5; seat 1 busts in the first hand, then the blinds pass it:
+  // the big blind in hand 4, the small blind in hand 5.
+  function owesBothBlinds(): PokerTable {
+    const table = tableWith([1, 2, 3, 4, 5], { 1: 100 });
+    table.startHand(
+      pick(0),
+      stackDeck([2, 3, 4, 5, 1], { 1: 'Kh Kd', 2: 'Ah Ad', 3: '7c 2d', 4: '8c 3d', 5: '9c 4d' }, '3c 8s 9d 4h Jc')
+    ); // button 1, SB 2, BB 3
+    play(table, [
+      [4, 'fold'],
+      [5, 'fold'],
+      [1, 'raise', 100], // all-in
+      [2, 'call'],
+      [3, 'fold'],
+    ]);
+    expect(seat(table, 1).chipStack).toBe(0);
+
+    table.startHand(pick(0)); // button 2, SB 3, BB 4
+    foldHand(table);
+    table.startHand(pick(0)); // button 3, SB 4, BB 5
+    foldHand(table);
+    table.startHand(pick(0)); // button 4, SB 5, BB 2 — past seat 1
+    expect(table.getState().bigBlindSeat).toBe(2);
+    expect(seat(table, 1)).toMatchObject({ missedBigBlind: true, missedSmallBlind: false });
+    foldHand(table);
+    table.startHand(pick(0)); // button 5, SB 2 — past seat 1 — BB 3
+    expect(table.getState().smallBlindSeat).toBe(2);
+    foldHand(table);
+    return table;
+  }
+
+  it('records a missed small blind too, and keeps both (SRS-11.1, SRS-11.2, SRS-11.4)', () => {
+    const table = owesBothBlinds();
+    expect(seat(table, 1)).toMatchObject({ missedBigBlind: true, missedSmallBlind: true });
+  });
+
+  it('refuses to let a player post without chips, or while the button or a blind is coming to them (SRS-11.9)', () => {
+    const table = owesBothBlinds();
+    expect(table.setPostMissedBlinds(p(1), true)).toMatchObject({ ok: false, error: expect.stringContaining('Buy back in') });
+
+    table.rebuy(p(1), 500);
+    // Counted as clear, seat 1 would get the button next hand.
+    expect(table.setPostMissedBlinds(p(1), true)).toMatchObject({ ok: false, error: expect.stringContaining("can't post") });
+    expect(table.setPostMissedBlinds(p(2), true)).toEqual({ ok: false, error: "You don't owe any blinds." });
+  });
+
+  it('deals in a player who posts: a live big blind and a dead small blind (SRS-11.6-11.8, SRS-11.10)', () => {
+    const table = owesBothBlinds();
+    table.rebuy(p(1), 500);
+    table.startHand(pick(0)); // button 2, SB 3, BB 4 — seat 1 still waiting
+    expect(seat(table, 1).inHand).toBe(false);
+    foldHand(table);
+
+    // Next hand: button 3, SB 4, BB 5 — seat 1 gets none of them, so it may post.
+    expect(table.setPostMissedBlinds(p(1), true)).toEqual({ ok: true });
+    expect(seat(table, 1).postingMissedBlinds).toBe(true);
+    table.startHand(pick(0));
+
+    const state = table.getState();
+    expect([state.dealerSeat, state.smallBlindSeat, state.bigBlindSeat]).toEqual([3, 4, 5]);
+    expect(seat(table, 1)).toMatchObject({
+      inHand: true,
+      bet: 10, // live big blind
+      chipStack: 485, // and 5 more as the dead small blind
+      missedBigBlind: false,
+      missedSmallBlind: false,
+      postingMissedBlinds: false,
+    });
+    expect(state.pot).toBe(5); // the dead small blind is already in the pot
+
+    // A live big blind gets the option: first to act after the big blind, owing nothing.
+    expect(state.activeSeat).toBe(1);
+    play(table, [[1, 'check']]);
+  });
+
+  it('can change their mind and wait for the big blind instead', () => {
+    const table = owesBothBlinds();
+    table.rebuy(p(1), 500);
+    table.startHand(pick(0));
+    foldHand(table);
+    table.setPostMissedBlinds(p(1), true);
+    expect(table.setPostMissedBlinds(p(1), false)).toEqual({ ok: true });
+    table.startHand(pick(0));
+
+    expect(seat(table, 1).inHand).toBe(false);
+  });
+
+  it('forgets missed blinds when the table has to wait for players (SRS-11.11)', () => {
+    const table = owesBothBlinds(); // seat 1 busted, owing both blinds
+    table.leave(p(2));
+    table.leave(p(3));
+
+    // Only seats 4 and 5 could be dealt in: the table waits, clearing seat 1's blinds.
+    expect(table.updateCountdown(0)).toBeNull();
+    expect(table.getState().phase).toBe('waiting');
+    expect(seat(table, 1)).toMatchObject({ missedSmallBlind: false, missedBigBlind: false });
   });
 });

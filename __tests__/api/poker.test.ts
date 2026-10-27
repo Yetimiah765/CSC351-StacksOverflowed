@@ -103,6 +103,21 @@ describe('POST /api/poker/action', () => {
     expect(verifyRelayedAction(payload, SECRET, 'mid-2', Date.now())).toMatchObject({ move: 'raise', amount: 60 });
   });
 
+  it("carries a busted player's buy-back amount (SRS-12.4)", async () => {
+    await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'r', action: 'rebuy', buyIn: 500 }));
+
+    const payload = httpSend.mock.calls[0]?.[2];
+    expect(verifyRelayedAction(payload, SECRET, 'low-1', Date.now())).toMatchObject({ action: 'rebuy', buyIn: 500 });
+  });
+
+  it('relays the choice to post missed blinds or wait for the big blind (SRS-11.6)', async () => {
+    await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'a', action: 'post-blinds' }));
+    await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'b', action: 'wait-for-big-blind' }));
+
+    const actions = httpSend.mock.calls.map((call) => verifyRelayedAction(call[2], SECRET, 'low-1', Date.now())?.action);
+    expect(actions).toEqual(['post-blinds', 'wait-for-big-blind']);
+  });
+
   it('returns 401 without a token or with an expired session, broadcasting nothing', async () => {
     expect((await postAction(req('/api/poker/action', join, null))).status).toBe(401);
 

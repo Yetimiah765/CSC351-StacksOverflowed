@@ -75,8 +75,20 @@
 // transport layer (server/pokerRealtimeServer.ts), which computes the
 // allowed buy-in range from this table's bigBlind (50x-200x) and passes an
 // already-validated chip count in here — this class just stores and returns
-// it. Reconnection grace periods (SRS-10.x, SRS-9.x), turn timers (SRS-4.x),
-// and busted-player options (SRS-12.x) are deferred to later sprints.
+// it. A player whose stack hits 0 at the end of a hand is busted (SRS-12.1,
+// isBustedSeat()): they sit out (SRS-12.9) until they buy back in with
+// rebuy() (SRS-12.4/12.5) or leave (SRS-12.3), or are removed after
+// BUSTED_DECISION_TIMEOUT_MS (SRS-12.10; like the countdown, the caller
+// passes `now` and owns the timer). Missed blinds (SRS-11): a seated player
+// the small or big blind passes while they aren't dealt in — busted or
+// sitting out — owes it, and is dealt back in only when the big blind
+// reaches them (SRS-11.5) or after electing to post what they owe
+// (SRS-11.6-11.9, setPostMissedBlinds()). A newly seated player is dealt in
+// free (SRS-11.3), unless the button
+// would land on them next hand: the button skips them, and they either post
+// both blinds to play that hand or sit it out (waitingForButton,
+// SRS-11.13-11.16). Reconnection grace periods (SRS-10.x,
+// SRS-9.x) and turn timers (SRS-4.x) are deferred to later sprints.
 
 import { createDeck, evaluateHand, shuffleDeck, type Card, type HandScore, compareScores } from './pokerCards';
 
@@ -93,6 +105,9 @@ export const MIN_PLAYERS_TO_START = 3;
 // How long a table counts down once it has enough players, before the hand
 // starts — long enough for one more player to grab a seat.
 export const HAND_START_COUNTDOWN_MS = 5_000;
+// SRS-NFR-015 / SRS-12.10: how long a busted player has to buy back in or
+// leave before they're removed from their seat.
+export const BUSTED_DECISION_TIMEOUT_MS = 60_000;
 
 /**
  * waiting: fewer than MIN_PLAYERS_TO_START seated with chips (SRS-20.2/20.5).
@@ -135,6 +150,26 @@ export interface Seat {
   leaveRequested: boolean;
   /** What this seat did most recently this round ('Check', 'Call', 'Raise', 'All-in', 'Fold'). */
   lastAction: string | null;
+  /**
+   * SRS-12.10: ms a busted player has left to buy back in or leave before
+   * they're removed; null when not busted. Relative, like countdownMsRemaining.
+   */
+  bustedMsRemaining: number | null;
+  /** SRS-11.2: the small blind passed this seat while the player wasn't dealt in. */
+  missedSmallBlind: boolean;
+  /**
+   * SRS-11.1/11.3: the big blind passed this seat while the player wasn't
+   * dealt in, or they sat down after the table's first hand.
+   */
+  missedBigBlind: boolean;
+  /** SRS-11.6: elected to post their missed blinds and be dealt into the next hand. */
+  postingMissedBlinds: boolean;
+  /**
+   * Newly seated where the button would land next hand. The button skips
+   * them: they post both blinds to play that hand (postingMissedBlinds), or
+   * sit it out and are dealt in free from the hand after.
+   */
+  waitingForButton: boolean;
 }
 
 /** A main or side pot built from chips already collected (SRS-19). */
@@ -282,8 +317,22 @@ export function getBettingOptions(
   };
 }
 
+/**
+ * SRS-12.1: busted — seated with no chips left after a hand. A player who
+ * went all-in is still in the hand (inHand) until it ends, so they only
+ * count as busted once it's over. Shared with the table page, which offers
+ * a busted player the choice to buy back in or leave (SRS-12.2).
+ */
+export function isBustedSeat(seat: Pick<Seat, 'playerId' | 'chipStack' | 'inHand'>): boolean {
+  return seat.playerId !== null && seat.chipStack === 0 && !seat.inHand;
+}
+
 // Internal bookkeeping that clients don't need to see.
-interface SeatRecord extends Seat {
+interface SeatRecord extends Omit<Seat, 'bustedMsRemaining' | 'waitingForButton'> {
+  /** Sat down after the first hand and hasn't been through a hand start yet. */
+  newcomer: boolean;
+  /** When this player was first seen busted (trackBusted()); null when not busted. */
+  bustedAt: number | null;
   /** Acted since the last full bet/raise — who loses raising rights under SRS-15.8. */
   actedSinceFullRaise: boolean;
   /** Private: never part of getState() (SRS-6.1). Empty when not dealt in. */
@@ -308,6 +357,11 @@ function emptySeat(seatNumber: number): SeatRecord {
     lastAction: null,
     actedSinceFullRaise: false,
     holeCards: [],
+    bustedAt: null,
+    missedSmallBlind: false,
+    missedBigBlind: false,
+    postingMissedBlinds: false,
+    newcomer: false,
   };
 }
 
@@ -344,6 +398,9 @@ export class PokerTable {
   private dealerSeat: number | null = null;
   private smallBlindSeat: number | null = null;
   private bigBlindSeat: number | null = null;
+  /** The previous hand's blind seats (the public ones are cleared between hands), for SRS-11.1/11.2. */
+  private previousSmallBlindSeat: number | null = null;
+  private previousBigBlindSeat: number | null = null;
   private currentBet = 0;
   private minRaise: number;
   private lastAction: LastAction | null = null;
@@ -386,6 +443,7 @@ export class PokerTable {
   /** `now` (ms since the epoch) is only used to compute countdownMsRemaining. */
   getState(now: number = Date.now()): TableState {
     const pots = this.buildPots();
+    const waitingForButton = this.newcomersInButtonPath();
     return {
       tableId: this.tableId,
       maxSeats: this.maxSeats,
@@ -393,7 +451,14 @@ export class PokerTable {
       smallBlind: this.smallBlind,
       seatedCount: this.seats.filter((seat) => seat.playerId !== null).length,
       // Hole cards stay out of the public state (SRS-6.1).
-      seats: this.seats.map(({ actedSinceFullRaise: _internal, holeCards: _private, ...seat }) => seat),
+      seats: this.seats.map((record) => {
+        const { actedSinceFullRaise: _internal, holeCards: _private, bustedAt, newcomer: _newcomer, ...seat } = record;
+        return {
+          ...seat,
+          bustedMsRemaining: bustedAt === null ? null : Math.max(0, bustedAt + BUSTED_DECISION_TIMEOUT_MS - now),
+          waitingForButton: waitingForButton.includes(record),
+        };
+      }),
       phase: this.phase,
       countdownMsRemaining: this.countdownEndsAt === null ? null : Math.max(0, this.countdownEndsAt - now),
       handNumber: this.handNumber,
@@ -430,6 +495,130 @@ export class PokerTable {
     return seat.playerId !== null && (seat.chipStack ?? 0) > 0;
   }
 
+  /** Eligible with no missed-blind marker, so dealt into every hand (SRS-13.4). */
+  private isClear(seat: SeatRecord): boolean {
+    return this.isEligible(seat) && !seat.missedSmallBlind && !seat.missedBigBlind;
+  }
+
+  /**
+   * SRS-14.1/14.2: the small blind is the next clear player after the
+   * button, the big blind the next eligible player after that. Null if the
+   * three seats wouldn't all be different.
+   */
+  private blindsAfter(
+    dealer: SeatRecord,
+    isClear: (seat: SeatRecord) => boolean
+  ): { smallBlind: SeatRecord; bigBlind: SeatRecord } | null {
+    const smallBlind = this.nextSeatClockwise(dealer.seatNumber, isClear);
+    const bigBlind = smallBlind && this.nextSeatClockwise(smallBlind.seatNumber, (seat) => this.isEligible(seat));
+    if (!smallBlind || !bigBlind || new Set([dealer, smallBlind, bigBlind]).size < 3) return null;
+    return { smallBlind, bigBlind };
+  }
+
+  /** Who can take the button: a clear player who has already been through a hand start. */
+  private canTakeButton(seat: SeatRecord): boolean {
+    return this.isClear(seat) && !seat.newcomer;
+  }
+
+  /**
+   * Newly seated players the button will skip next hand: between the
+   * current button and the next seat that can take it. Each posts both
+   * blinds to play that hand, or sits it out.
+   */
+  private newcomersInButtonPath(): SeatRecord[] {
+    if (this.dealerSeat === null) return [];
+    const next = this.nextSeatClockwise(this.dealerSeat, (seat) => this.canTakeButton(seat));
+    if (!next) return [];
+    const passed: SeatRecord[] = [];
+    for (let offset = 1; offset < this.maxSeats; offset++) {
+      const seat = this.seats[(this.dealerSeat - 1 + offset) % this.maxSeats] as SeatRecord;
+      if (seat === next) break;
+      if (seat.newcomer && this.isEligible(seat)) passed.push(seat);
+    }
+    return passed;
+  }
+
+  /**
+   * SRS-11.9: a player may not post their way in when, counted as clear,
+   * their seat would get the button or a blind next hand.
+   */
+  private postingBlockedFor(seat: SeatRecord): boolean {
+    if (this.dealerSeat === null) return true;
+    const isClear = (candidate: SeatRecord) =>
+      candidate === seat ? this.isEligible(candidate) : this.isClear(candidate);
+    const dealer = this.nextSeatClockwise(this.dealerSeat, (candidate) =>
+      candidate === seat ? this.isEligible(candidate) : this.canTakeButton(candidate)
+    );
+    const blinds = dealer && this.blindsAfter(dealer, isClear);
+    return !dealer || !blinds || [dealer, blinds.smallBlind, blinds.bigBlind].includes(seat);
+  }
+
+  /**
+   * SRS-13.3 hand setup: the button (SRS-13.1/13.2), the blinds
+   * (SRS-14.1/14.2), then who's dealt in (SRS-13.4): every clear player, the
+   * big blind, and every player whose election to post is still allowed
+   * (SRS-11.6/11.9). The button never lands on a newcomer; newcomers it
+   * skips are dealt in only if they post. Null when that's fewer than
+   * MIN_PLAYERS_TO_START (SRS-20.1). Calls randomIndex only for the first
+   * hand's button.
+   */
+  private planHand(randomIndex: (n: number) => number): {
+    dealer: SeatRecord;
+    smallBlind: SeatRecord;
+    bigBlind: SeatRecord;
+    dealtIn: SeatRecord[];
+    posters: SeatRecord[];
+  } | null {
+    const isClear = (seat: SeatRecord) => this.isClear(seat);
+    const clear = this.seats.filter(isClear);
+    if (clear.length === 0) return null;
+    const dealer =
+      this.dealerSeat === null
+        ? (clear[randomIndex(clear.length)] as SeatRecord)
+        : this.nextSeatClockwise(this.dealerSeat, (seat) => this.canTakeButton(seat));
+    if (!dealer) return null;
+    const blinds = this.blindsAfter(dealer, isClear);
+    if (!blinds) return null;
+
+    const skippedNewcomers = this.newcomersInButtonPath();
+    const posters = this.seats.filter(
+      (seat) =>
+        seat.postingMissedBlinds &&
+        (skippedNewcomers.includes(seat) ||
+          (!isClear(seat) && this.isEligible(seat) && seat !== blinds.bigBlind && !this.postingBlockedFor(seat)))
+    );
+    const dealtIn = this.seats.filter(
+      (seat) =>
+        (isClear(seat) && !skippedNewcomers.includes(seat)) || seat === blinds.bigBlind || posters.includes(seat)
+    );
+    if (dealtIn.length < MIN_PLAYERS_TO_START) return null;
+    return { dealer, ...blinds, dealtIn, posters };
+  }
+
+  /**
+   * SRS-11.11: a table in the waiting state forgets every missed blind — and
+   * who's new, so a newcomer the button would skip can't hold up the restart.
+   */
+  private clearMissedBlinds() {
+    for (const seat of this.seats) {
+      seat.newcomer = false;
+      seat.missedSmallBlind = false;
+      seat.missedBigBlind = false;
+      seat.postingMissedBlinds = false;
+    }
+  }
+
+  /**
+   * Whether a hand could start now (SRS-20.3). If hand setup would come up
+   * short, the table is waiting, which clears missed blinds (SRS-11.11) —
+   * and that may be enough to start after all.
+   */
+  private canStartHand(): boolean {
+    if (this.planHand(() => 0)) return true;
+    this.clearMissedBlinds();
+    return this.planHand(() => 0) !== null;
+  }
+
   /** In the hand and not all-in, so they still have decisions to make. */
   private isAbleToAct(seat: SeatRecord): boolean {
     return seat.inHand && !seat.allIn;
@@ -460,21 +649,23 @@ export class PokerTable {
   }
 
   /**
-   * Starts or cancels the pre-hand countdown to match how many players with
-   * chips are seated. Call after every join/leave and after a hand ends; the
+   * Starts or cancels the pre-hand countdown to match whether hand setup
+   * would deal in enough players (SRS-20.1/20.3). Call after every change
+   * (join, leave, buy-back, posting election) and after a hand ends; the
    * caller starts or clears its timer (and calls startHand() when it fires)
    * based on the return value.
    */
   updateCountdown(now: number): 'started' | 'cancelled' | null {
-    const eligibleCount = this.seats.filter((seat) => this.isEligible(seat)).length;
+    if (this.phase === 'in-hand') return null;
+    const canStart = this.canStartHand();
 
-    if (this.phase === 'waiting' && eligibleCount >= MIN_PLAYERS_TO_START) {
+    if (this.phase === 'waiting' && canStart) {
       this.phase = 'countdown';
       this.countdownEndsAt = now + HAND_START_COUNTDOWN_MS;
       return 'started';
     }
 
-    if (this.phase === 'countdown' && eligibleCount < MIN_PLAYERS_TO_START) {
+    if (this.phase === 'countdown' && !canStart) {
       this.phase = 'waiting';
       this.countdownEndsAt = null;
       return 'cancelled';
@@ -490,8 +681,9 @@ export class PokerTable {
    * the first hand's dealer (SRS-13.1) and shuffles the deck (SRS-16.1) — the
    * server passes crypto.randomInt. `presetDeck` replaces the shuffle with a
    * fixed deck order, for tests. Returns false, leaving the table waiting,
-   * when fewer than MIN_PLAYERS_TO_START have chips (SRS-20.7: the button
-   * doesn't move and no blinds are posted).
+   * when setup would deal in fewer than MIN_PLAYERS_TO_START (SRS-20.7: the
+   * button doesn't move, no missed blinds are recorded, and no blinds are
+   * posted).
    */
   startHand(
     randomIndex: (n: number) => number = (n) => Math.floor(Math.random() * n),
@@ -500,23 +692,57 @@ export class PokerTable {
     if (this.phase === 'in-hand') return false;
 
     this.countdownEndsAt = null;
-    const players = this.seats.filter((seat) => this.isEligible(seat));
-    if (players.length < MIN_PLAYERS_TO_START) {
+    let plan = this.planHand(randomIndex);
+    if (!plan) {
+      // Waiting: missed blinds are cleared (SRS-11.11), which may be enough.
+      this.clearMissedBlinds();
+      plan = this.planHand(randomIndex);
+    }
+    if (!plan) {
       this.phase = 'waiting';
       return false;
     }
+    const { dealer, smallBlind, bigBlind, dealtIn, posters } = plan;
 
-    const isEligible = (seat: SeatRecord) => this.isEligible(seat);
-    const dealer =
-      this.dealerSeat === null
-        ? (players[randomIndex(players.length)] as SeatRecord)
-        : (this.nextSeatClockwise(this.dealerSeat, isEligible) as SeatRecord);
-    const smallBlind = this.nextSeatClockwise(dealer.seatNumber, isEligible) as SeatRecord;
-    const bigBlind = this.nextSeatClockwise(smallBlind.seatNumber, isEligible) as SeatRecord;
+    // SRS-11.1/11.2: every seated player left out of this hand whose seat
+    // the big (or small) blind moved past — after the previous hand's blind
+    // seat, up to and including this hand's — owes that blind. Kept until
+    // they're dealt in (SRS-11.4).
+    const markPassed = (previous: number | null, current: number, mark: (seat: SeatRecord) => void) => {
+      if (previous === null || previous === current) return;
+      for (let offset = 1; offset <= this.maxSeats; offset++) {
+        const seat = this.seats[(previous - 1 + offset) % this.maxSeats] as SeatRecord;
+        if (seat.playerId !== null && !dealtIn.includes(seat)) mark(seat);
+        if (seat.seatNumber === current) break;
+      }
+    };
+    markPassed(this.previousBigBlindSeat, bigBlind.seatNumber, (seat) => {
+      seat.missedBigBlind = true;
+    });
+    markPassed(this.previousSmallBlindSeat, smallBlind.seatNumber, (seat) => {
+      seat.missedSmallBlind = true;
+    });
+    this.previousSmallBlindSeat = smallBlind.seatNumber;
+    this.previousBigBlindSeat = bigBlind.seatNumber;
 
+    // What each poster owes, read before re-entry clears it (SRS-11.10). A
+    // newcomer the button skipped posts both blinds.
+    const owed = posters.map((seat) =>
+      seat.newcomer
+        ? { seat, big: true, small: true }
+        : { seat, big: seat.missedBigBlind, small: seat.missedSmallBlind }
+    );
     this.seats.forEach((seat) => {
       resetHandFields(seat);
-      seat.inHand = players.includes(seat);
+      seat.inHand = dealtIn.includes(seat);
+      if (seat.inHand) {
+        seat.missedSmallBlind = false;
+        seat.missedBigBlind = false;
+      }
+      // An election is for one hand: used now, or refused (SRS-11.9).
+      seat.postingMissedBlinds = false;
+      // A newcomer the button skipped has now sat out (or posted for) a hand.
+      seat.newcomer = false;
     });
 
     this.phase = 'in-hand';
@@ -531,6 +757,19 @@ export class PokerTable {
     this.deadRoundBets = [];
     this.putIn(smallBlind, Math.min(this.smallBlind, smallBlind.chipStack ?? 0));
     this.putIn(bigBlind, Math.min(this.bigBlind, bigBlind.chipStack ?? 0));
+    // SRS-11.7/11.8: posters put in a live big blind (it counts toward their
+    // bet, so they get the option like the big blind) and a dead small blind
+    // (straight into the pot, not part of their bet). A short stack posts
+    // what it has (SRS-14.5/14.6).
+    for (const { seat, big, small } of owed) {
+      if (big) this.putIn(seat, Math.min(this.bigBlind, seat.chipStack ?? 0));
+      if (small) {
+        const dead = Math.min(this.smallBlind, seat.chipStack ?? 0);
+        seat.chipStack = (seat.chipStack ?? 0) - dead;
+        if (seat.chipStack === 0) seat.allIn = true;
+        if (dead > 0) this.deadContributions.push(dead);
+      }
+    }
     this.currentBet = this.bigBlind;
     this.minRaise = this.bigBlind;
     this.lastAggressorSeat = null;
@@ -1007,11 +1246,14 @@ export class PokerTable {
     const seat = seatNumber === undefined ? openSeat : (this.seats[seatNumber - 1] as SeatRecord);
 
     // A fresh seat: sitting down mid-hand waits for the next one (SRS-20.6).
+    // SRS-11.3: a new player owes no blinds, but the button won't land on
+    // them before their first hand (SRS-13.2, newcomersInButtonPath()).
     Object.assign(seat, emptySeat(seat.seatNumber), {
       playerId,
       username: trimmedUsername,
       avatarUrl,
       chipStack,
+      newcomer: this.dealerSeat !== null,
     });
 
     return { ok: true, seatNumber: seat.seatNumber };
@@ -1051,5 +1293,108 @@ export class PokerTable {
     Object.assign(seat, emptySeat(seatNumber));
 
     return { ok: true, seatNumber, chipStack };
+  }
+
+  /**
+   * Why this player can't buy back in right now, or null if they can. Lets
+   * the server refuse before taking the buy-in from their balance; rebuy()
+   * re-checks it regardless.
+   */
+  checkRebuy(playerId: string): string | null {
+    const seat = this.findSeatByPlayerId(playerId);
+    if (!seat) return 'You are not seated at this table.';
+    if (!isBustedSeat(seat)) return 'You can only buy back in once you are out of chips.';
+    return null;
+  }
+
+  /**
+   * SRS-12.4/12.5: a busted player buys back in, keeping their seat. The
+   * caller has already validated the amount (SRS-12.6/12.7) and taken it
+   * from their balance. With chips again they're no longer busted, so
+   * they're dealt into the next hand (SRS-12.9) — not the one in progress,
+   * if any.
+   */
+  rebuy(playerId: string, chipStack: number): ActionResult {
+    if (!Number.isInteger(chipStack) || chipStack <= 0) {
+      return { ok: false, error: 'A valid buy-in amount is required.' };
+    }
+    const error = this.checkRebuy(playerId);
+    if (error) return { ok: false, error };
+
+    const seat = this.findSeatByPlayerId(playerId) as SeatRecord;
+    seat.chipStack = chipStack;
+    seat.bustedAt = null;
+    return { ok: true };
+  }
+
+  /**
+   * SRS-11.6: a player who owes blinds elects to post them and be dealt into
+   * the next hand (`post` true), or goes back to waiting for the big blind
+   * (`post` false). Refused when they have no chips or owe nothing, or under
+   * SRS-11.9 when the button or a blind would reach their seat next hand —
+   * then they wait (and if it's the big blind, they're dealt in anyway). A
+   * newcomer the button is about to skip may always post both blinds, or
+   * (`post` false) sit that hand out. Re-checked at hand start, and used for
+   * that one hand only.
+   */
+  setPostMissedBlinds(playerId: string, post: boolean): ActionResult {
+    const seat = this.findSeatByPlayerId(playerId);
+    if (!seat) return { ok: false, error: 'You are not seated at this table.' };
+    if (!post) {
+      seat.postingMissedBlinds = false;
+      return { ok: true };
+    }
+    if (this.newcomersInButtonPath().includes(seat)) {
+      seat.postingMissedBlinds = true;
+      return { ok: true };
+    }
+    if (!seat.missedSmallBlind && !seat.missedBigBlind) return { ok: false, error: "You don't owe any blinds." };
+    if (!this.isEligible(seat)) return { ok: false, error: 'You need chips to post the blinds. Buy back in first.' };
+    if (this.postingBlockedFor(seat)) {
+      return {
+        ok: false,
+        error:
+          "You can't post while the button or a blind is about to reach your seat. You'll be dealt in when the big blind gets to you.",
+      };
+    }
+    seat.postingMissedBlinds = true;
+    return { ok: true };
+  }
+
+  /**
+   * SRS-12.10: starts each newly busted player's decision clock at `now`,
+   * and stops it for anyone no longer busted. The caller calls this after
+   * every change (a hand ending is what busts players), then schedules a
+   * timer for nextBustedDeadline().
+   */
+  trackBusted(now: number): void {
+    for (const seat of this.seats) {
+      if (!isBustedSeat(seat)) seat.bustedAt = null;
+      else if (seat.bustedAt === null) seat.bustedAt = now;
+    }
+  }
+
+  /** When the next busted player runs out of time, or null if nobody is busted. */
+  nextBustedDeadline(): number | null {
+    const deadlines = this.seats
+      .filter((seat) => seat.bustedAt !== null)
+      .map((seat) => (seat.bustedAt as number) + BUSTED_DECISION_TIMEOUT_MS);
+    return deadlines.length > 0 ? Math.min(...deadlines) : null;
+  }
+
+  /**
+   * SRS-12.10: removes busted players whose time ran out by `now` and
+   * returns their player ids. They have no chips and aren't in a hand, so
+   * there is nothing to refund and no hand to disturb.
+   */
+  removeTimedOutBusted(now: number): string[] {
+    const removed: string[] = [];
+    for (const seat of this.seats) {
+      if (seat.bustedAt === null || !isBustedSeat(seat)) continue;
+      if (seat.bustedAt + BUSTED_DECISION_TIMEOUT_MS > now) continue;
+      removed.push(seat.playerId as string);
+      Object.assign(seat, emptySeat(seat.seatNumber));
+    }
+    return removed;
   }
 }

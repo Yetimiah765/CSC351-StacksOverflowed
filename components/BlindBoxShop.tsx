@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { notifyBalanceChanged } from '../lib/balanceEvents';
+import { BALANCE_CHANGED_EVENT, notifyBalanceChanged } from '../lib/balanceEvents';
 import { COSMETIC_CATEGORIES, type Cosmetic } from '../lib/cosmetics';
 import BlindBoxReveal, { type BoxResult } from './cosmetics/BlindBoxReveal';
 import CosmeticArt from './cosmetics/CosmeticArt';
@@ -89,6 +89,23 @@ export default function BlindBoxShop() {
     setToken(stored);
     load(stored).catch(() => setError(LOAD_FAILED));
   }, [load]);
+
+  // The Daily Login Box on the same page credits coins without a reload, so
+  // re-read the balance whenever it changes; otherwise a box the player can
+  // now afford would stay disabled (SRS-124.5) until the page is refreshed.
+  useEffect(() => {
+    if (!token) return;
+    const refresh = () => {
+      fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${token}` } })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data) setBalance(data.balance);
+        })
+        .catch(() => {});
+    };
+    window.addEventListener(BALANCE_CHANGED_EVENT, refresh);
+    return () => window.removeEventListener(BALANCE_CHANGED_EVENT, refresh);
+  }, [token]);
 
   // Escape closes the confirmation without buying (SRS-124.2, SRS-124.3).
   useEffect(() => {

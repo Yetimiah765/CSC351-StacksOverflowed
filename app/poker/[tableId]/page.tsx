@@ -25,6 +25,16 @@ import {
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
+import ActionCallout from '../ActionCallout';
+import {
+  DEAL_STAGGER_MS,
+  DeckStack,
+  MuckPile,
+  SHUFFLE_MS,
+  offsetVars,
+  tableGeometry,
+  useElementSize,
+} from '../tableAnimations';
 import {
   ConnectionPill,
   EmptyCardSlot,
@@ -138,6 +148,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const [now, setNow] = useState(() => Date.now());
 
   const fetchedAvatarsRef = useRef(new Set<string>());
+  // The table's size, for the deck/muck flight paths (app/poker/tableAnimations.tsx).
+  const tableRef = useRef<HTMLDivElement>(null);
+  const tableSize = useElementSize(tableRef);
 
   const {
     connected,
@@ -151,6 +164,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
       setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);
     }
   );
+
+  // Folded cards on the muck pile: two per folded seat during a hand, then
+  // kept on the table until the next hand gathers them into the deck.
+  const foldedCards =
+    tableState?.phase === 'in-hand' ? tableState.seats.filter((seat) => seat.folded).length * 2 : null;
+  const [heldMuck, setHeldMuck] = useState(0);
+  useEffect(() => {
+    if (foldedCards !== null) setHeldMuck(foldedCards);
+  }, [foldedCards]);
 
   // Tick while a countdown is running so the seconds left re-render.
   useEffect(() => {
@@ -544,6 +566,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           )
       : [];
   const myCosmetics = cosmetics[String(profile.playerId)];
+  const geometry = tableGeometry(tableSize);
   const myOwedLabel = mySeat ? owedBlindsLabel(mySeat) : null;
   // SRS-11.7/11.8: a live big blind and/or a dead small blind — both for a
   // newcomer the button is skipping.
@@ -607,7 +630,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           </div>
         </header>
 
-        <div className="relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px]">
+        <div ref={tableRef} className="relative mx-auto mt-10 h-[340px] w-full max-w-3xl sm:h-[440px]">
           {/* Light over the table */}
           <div className="pointer-events-none absolute inset-x-[10%] -top-8 bottom-0 rounded-[50%] bg-[radial-gradient(ellipse_at_center,_rgba(52,211,153,0.12)_0%,_transparent_65%)]" />
 
@@ -631,11 +654,14 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   <div className="flex gap-1.5">
                     {Array.from({ length: 5 }, (_, index) =>
                       tableState.board[index] ? (
-                        // A new street's cards flip over (the flop one after another).
+                        // A new street's cards slide out of the deck and turn over (the flop one after another).
                         <span
                           key={`${tableState.handNumber}-${index}`}
-                          className="poker-flip inline-block"
-                          style={cssVars({ '--delay': `${index < 3 ? index * 150 : 0}ms` })}
+                          className="poker-board-deal inline-block"
+                          style={cssVars({
+                            ...offsetVars('from', geometry.boardFromDeck(index)),
+                            '--delay': `${index < 3 ? index * 150 : 0}ms`,
+                          })}
                         >
                           <PlayingCard card={tableState.board[index]} />
                         </span>
@@ -704,6 +730,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             </div>
           </div>
 
+          {/* The deck (gathers and shuffles at each new hand) and the folded cards' muck pile. */}
+          {tableState ? <DeckStack geometry={geometry} handNumber={tableState.handNumber} /> : null}
+          <MuckPile geometry={geometry} count={foldedCards ?? heldMuck} />
+
           {tableState?.seats.map((seat, index) => {
             // Seats are placed by angle around an oval, starting at the top
             // and going clockwise, like sitting around a real table.
@@ -731,11 +761,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 : inHandPhase && (seat.inHand || seat.folded)
                   ? [null, null]
                   : null;
-            const mucked = inHandPhase && seat.folded && !isOwnSeat;
+            // Folded cards — this player's own too — go to the muck pile.
+            const mucked = inHandPhase && seat.folded;
             const dealIndex = Math.max(dealOrder.indexOf(seat.seatNumber), 0);
             const shownIndex = lastResult?.shown.findIndex((hand) => hand.seatNumber === seat.seatNumber) ?? -1;
-            // From this seat toward the middle of the table, for dealing and mucking.
-            const towardMiddle = { '--deal-x': `${-Math.cos(angle) * 150}px`, '--deal-y': `${-Math.sin(angle) * 110}px` };
+            // From this seat's cards to the deck (dealing) and to the muck pile (folding).
+            const cardsAt = geometry.seatCards(left, top);
+            const flightVars = {
+              ...offsetVars('deal', { x: geometry.deck.x - cardsAt.x, y: geometry.deck.y - cardsAt.y }),
+              ...offsetVars('muck', { x: geometry.muck.x - cardsAt.x, y: geometry.muck.y - cardsAt.y }),
+            };
             const award = lastResult?.awards.find((candidate) => candidate.seatNumber === seat.seatNumber);
             const awardIndex = award && lastResult ? lastResult.awards.indexOf(award) : 0;
             // The button stays on its seat between hands, like a real table.
@@ -821,26 +856,25 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   {seatCards ? (
                     <div className="absolute -right-5 top-0 z-20 flex -space-x-2.5 sm:-right-6">
                       {seatCards.map((card, cardIndex) => {
-                        // Face down: dealt out from the middle in deal order, or
-                        // mucked back toward it on a fold. Face up: flipped over —
-                        // at showdown, hand by hand in the order they're shown.
-                        const motion = mucked ? 'muck' : !card ? 'deal' : shown ? 'reveal' : 'flip';
+                        // Dealt from the deck once it's shuffled, one card at a time
+                        // in deal order (this player's own arrive face up); thrown
+                        // onto the muck on a fold; at showdown flipped over, hand by
+                        // hand in the order they're shown.
+                        const motion = mucked ? 'muck' : shown ? 'reveal' : 'deal';
                         const delay =
                           motion === 'deal'
-                            ? (cardIndex * dealOrder.length + dealIndex) * 90
+                            ? SHUFFLE_MS + (cardIndex * dealOrder.length + dealIndex) * DEAL_STAGGER_MS
                             : motion === 'reveal'
                               ? Math.max(shownIndex, 0) * 450 + cardIndex * 120
-                              : motion === 'flip'
-                                ? cardIndex * 120
-                                : 0;
+                              : 0;
                         return (
                           <span
-                            key={`${tableState.handNumber}-${motion}-${cardIndex}`}
+                            key={`${tableState.handNumber}-${motion}-${card ?? 'back'}-${cardIndex}`}
                             className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}
                           >
                             <span
                               className={`inline-block ${motion === 'deal' ? 'poker-deal' : motion === 'muck' ? 'poker-muck' : 'poker-flip'}`}
-                              style={cssVars({ ...towardMiddle, '--delay': `${delay}ms` })}
+                              style={cssVars({ ...flightVars, '--delay': `${delay}ms` })}
                             >
                               <PlayingCard
                                 card={card}
@@ -994,6 +1028,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
               </Fragment>
             );
           })}
+
+          {/* Every action gets a comic callout across the table. Mounted with the
+              first state, so the action already on the table isn't replayed. */}
+          {tableState ? (
+            <ActionCallout
+              action={tableState.lastAction}
+              actionKey={tableState.lastAction ? String(tableState.lastAction.id) : null}
+              ownSeatNumber={mySeat?.seatNumber ?? null}
+            />
+          ) : null}
         </div>
 
         {/* Controls */}

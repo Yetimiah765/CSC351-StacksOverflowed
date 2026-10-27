@@ -187,6 +187,8 @@ export interface Pot {
 }
 
 export interface LastAction {
+  /** Counts up with every action at this table, so a client can tell a new action from a repeat of the same state. */
+  id: number;
   seatNumber: number;
   username: string | null;
   move: BettingMove;
@@ -419,6 +421,8 @@ export class PokerTable {
   private pendingRemovals: Removal[] = [];
   /** How long the next countdown runs if it starts right after a hand (NEXT_HAND_DELAY_MS). */
   private nextCountdownMs: number | null = null;
+  /** Actions taken at this table so far, for LastAction.id. */
+  private actionCount = 0;
 
   /** smallBlind defaults to half the big blind, rounded down (minimum 1). */
   constructor(
@@ -936,7 +940,9 @@ export class PokerTable {
               : move === 'bet'
                 ? 'Bet'
                 : 'Raise';
+    this.actionCount += 1;
     this.lastAction = {
+      id: this.actionCount,
       seatNumber: seat.seatNumber,
       username: seat.username,
       move,

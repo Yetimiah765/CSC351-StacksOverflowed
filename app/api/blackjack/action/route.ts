@@ -1,15 +1,24 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
-import { canDouble, handView, isBlackjackMove, playMove } from '../../../../lib/blackjack';
+import {
+  canDouble,
+  canSplit,
+  handView,
+  isBlackjackMove,
+  moveCost,
+  playMove,
+  totalStake,
+} from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
 import { changeBalance, finishBusy, getHand, removeHand, saveHand, startBusy } from '../hands';
 
-// Hit, Stand, or Double (SRS-903.1, SRS-904.1, SRS-910). Body:
-// { handId, move, cards }, where `cards` is how many cards the player's hand
-// had when they clicked: if the hand has moved on since (a double click), the
-// move is refused instead of being played twice. Plays the move on the hand
-// in memory, including the dealer's turn and the result once the hand ends
-// (SRS-906.1, SRS-907.1), and pays out a win or push (SRS-908.1). Double
-// first takes a second bet equal to the first (SRS-910.2). Returns
+// Hit, Stand, Double, or Split (SRS-903.1, SRS-904.1, SRS-910, SRS-911) on
+// the hand being played. Body: { handId, move, step }, where `step` is the
+// round's step from the view the player clicked on: if the round has moved on
+// since (a double click), the move is refused instead of being played twice.
+// Double and Split first take another bet equal to the original (SRS-910.2,
+// SRS-911.2). When the last hand is done the dealer plays and every hand is
+// settled (SRS-906.1, SRS-907.1, SRS-911.6); the round's winnings and pushed
+// bets are then paid back in one balance change (SRS-908.1). Returns
 // { hand, balance? } — balance only when it changed.
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
@@ -18,22 +27,17 @@ export async function POST(request: Request) {
   const { playerId, errorResponse } = await requirePlayerId(request, supabase);
   if (errorResponse) return errorResponse;
 
-  let body: { handId?: unknown; move?: unknown; cards?: unknown };
+  let body: { handId?: unknown; move?: unknown; step?: unknown };
   try {
     body = await request.json();
   } catch {
     return Response.json({ error: 'Invalid request body.' }, { status: 400 });
   }
 
-  const { handId, move, cards } = body ?? {};
-  if (
-    typeof handId !== 'number' ||
-    typeof cards !== 'number' ||
-    !Number.isSafeInteger(handId) ||
-    !isBlackjackMove(move)
-  ) {
+  const { handId, move, step } = body ?? {};
+  if (typeof handId !== 'number' || typeof step !== 'number' || !Number.isSafeInteger(handId) || !isBlackjackMove(move)) {
     return Response.json(
-      { error: 'Send a handId, the number of cards, and a move of "hit", "stand", or "double".' },
+      { error: 'Send a handId, the step, and a move of "hit", "stand", "double", or "split".' },
       { status: 400 }
     );
   }
@@ -45,35 +49,37 @@ export async function POST(request: Request) {
   try {
     const stored = getHand(playerId!);
     if (!stored) return Response.json({ error: 'You have no hand in play.' }, { status: 404 });
-    if (stored.handId !== handId || stored.state.playerCards.length !== cards) {
+    if (stored.handId !== handId || stored.state.step !== step) {
       return Response.json({ error: 'That hand already moved on. Refresh to see it.' }, { status: 409 });
     }
+    if (move === 'double' && !canDouble(stored.state)) {
+      return Response.json({ error: 'You can only double on a hand’s first two cards.' }, { status: 409 });
+    }
+    if (move === 'split' && !canSplit(stored.state)) {
+      return Response.json({ error: 'You can only split a pair, once.' }, { status: 409 });
+    }
 
+    // SRS-910.1 / 911.1: refused, with nothing taken, without enough coins.
     let balance: number | undefined;
-    let bet = stored.bet;
-    if (move === 'double') {
-      if (!canDouble(stored.state)) {
-        return Response.json({ error: 'You can only double on your first two cards.' }, { status: 409 });
-      }
-      // SRS-910.1 / 910.2: refused, with nothing taken, without enough coins.
-      const taken = await changeBalance(supabase, playerId!, -stored.bet);
+    const cost = moveCost(stored.bet, move);
+    if (cost > 0) {
+      const taken = await changeBalance(supabase, playerId!, -cost);
       if (!taken.ok) {
-        const error = taken.status === 409 ? 'You need another bet of coins to double.' : taken.error;
+        const error = taken.status === 409 ? `You need another ${cost.toLocaleString()} coins to ${move}.` : taken.error;
         return Response.json({ error }, { status: taken.status });
       }
       balance = taken.balance;
-      bet = stored.bet * 2;
     }
 
     const { state, outcome } = playMove(stored.bet, stored.state, move);
     if (!outcome) {
       saveHand(playerId!, { ...stored, state });
-      return Response.json({ hand: handView(handId, bet, state, null) }, { status: 200 });
+      return Response.json({ hand: handView(handId, stored.bet, state, null), balance }, { status: 200 });
     }
 
     removeHand(playerId!);
-    const view = handView(handId, bet, state, outcome);
-    const payout = bet + outcome.net;
+    const view = handView(handId, stored.bet, state, outcome);
+    const payout = totalStake(stored.bet, state) + outcome.net;
     if (payout <= 0) return Response.json({ hand: view, balance }, { status: 200 });
 
     const paid = await changeBalance(supabase, playerId!, payout);

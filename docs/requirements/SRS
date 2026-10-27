@@ -2300,6 +2300,38 @@ Traces to: UR-215
 
 *Traces to: UR-910*
 
+**UR-911, HC \- Split**
+
+***User story:** As a blackjack player, I want to split a pair into two separate hands, so that I can turn a weak starting pair into two better hands.*
+
+**SRS-911.1, Offer Split on a pair.** The system shall allow the player to select "Split" only during their turn, while their hand holds only its first two cards, when those two cards are of the same rank, when the hand has not already been split, and only when their available balance is at least the hand's original bet.
+
+*Traces to: UR-911*
+
+**SRS-911.2, Bet the second hand.** When the player selects "Split," the system shall deduct a second amount equal to the original bet from the player's balance, so that each of the two hands carries a bet equal to the original bet.
+
+*Traces to: UR-911*
+
+**SRS-911.3, Play two hands.** After a split, the system shall separate the two cards into two hands, deal one additional card to each hand, and let the player play the first hand to completion and then the second, with "Hit," "Stand," and "Double" available on each hand as for any other hand.
+
+*Traces to: UR-911*
+
+**SRS-911.4, Split Aces.** When the player splits a pair of Aces, the system shall deal exactly one additional card to each hand and shall then end the player's turn for both hands.
+
+*Traces to: UR-911*
+
+**SRS-911.5, No blackjack after a split.** A hand made by a split that totals 21 with two cards shall count as a total of 21, not as a blackjack, and shall be paid 1 to 1 if it wins.
+
+*Traces to: UR-911*
+
+**SRS-911.6, Settle each hand.** After both split hands are complete, the system shall play the dealer's turn once per SRS-906.1, unless both hands have gone over 21, shall declare each hand's result separately per SRS-907.1, and shall update the player's balance per SRS-908.1 using each hand's own bet.
+
+*Traces to: UR-911*
+
+**SRS-911.7, Explain Split before use.** The system shall display an information icon next to the "Split" control that, when the player hovers over, focuses, or taps it, shows a short explanation of what Split does and how many coins it costs, without performing the action.
+
+*Traces to: UR-911*
+
 # **11\. AI Suggestions**
 
 **UR-1001, HC \- AI Cost** 

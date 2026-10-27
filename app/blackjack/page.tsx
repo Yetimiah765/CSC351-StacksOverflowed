@@ -6,7 +6,6 @@ import { BALANCE_CHANGED_EVENT, notifyBalanceChanged } from "../../lib/balanceEv
 import {
   BLACKJACK_CHIPS,
   MIN_BLACKJACK_BET,
-  canDouble,
   type BlackjackHandView,
   type BlackjackMove,
 } from "../../lib/blackjack";
@@ -151,22 +150,29 @@ function Chip({ value, small }: { value: number; small?: boolean }) {
   );
 }
 
-/** The result line shown on the felt once a hand is over (SRS-907.1). */
-function describeResult(hand: BlackjackHandView): { text: string; tone: string } {
-  const net = hand.net ?? 0;
-  switch (hand.result) {
-    case "Win":
-      return {
-        text: hand.playerBlackjack ? `Blackjack! +${net.toLocaleString()}` : `You win +${net.toLocaleString()}`,
-        tone: "border-emerald-300/50 bg-emerald-400/15 text-emerald-200",
-      };
-    case "Push":
-      return { text: "Push — your bet is returned", tone: "border-white/20 bg-white/10 text-slate-200" };
-    case "Bust":
-      return { text: `Bust −${Math.abs(net).toLocaleString()}`, tone: "border-red-300/40 bg-red-500/15 text-red-200" };
-    default:
-      return { text: `Dealer wins −${Math.abs(net).toLocaleString()}`, tone: "border-red-300/40 bg-red-500/15 text-red-200" };
-  }
+const WIN_TONE = "border-emerald-300/50 bg-emerald-400/15 text-emerald-200";
+const EVEN_TONE = "border-white/20 bg-white/10 text-slate-200";
+const LOSS_TONE = "border-red-300/40 bg-red-500/15 text-red-200";
+
+/**
+ * The result line shown on the felt once the round is over (SRS-907.1): the
+ * hand's result, or after a split the two hands' combined coins.
+ */
+function describeResult(round: BlackjackHandView): { text: string; tone: string } {
+  const net = round.net ?? 0;
+  const amount = Math.abs(net).toLocaleString();
+  const only = round.hands.length === 1 ? round.hands[0] : null;
+  if (net > 0) return { text: only?.blackjack ? `Blackjack! +${amount}` : `You win +${amount}`, tone: WIN_TONE };
+  if (net === 0) return { text: only ? "Push — your bet is returned" : "Even — no coins won or lost", tone: EVEN_TONE };
+  if (only?.result === "Bust") return { text: `Bust −${amount}`, tone: LOSS_TONE };
+  return { text: only ? `Dealer wins −${amount}` : `You lose −${amount}`, tone: LOSS_TONE };
+}
+
+/** A small tag under each split hand with its own result. */
+function resultTone(result: string | null) {
+  if (result === "Win") return "text-emerald-300";
+  if (result === "Push") return "text-slate-300";
+  return "text-red-300";
 }
 
 function getToken() {
@@ -225,10 +231,11 @@ export default function BlackjackPage() {
   const [error, setError] = useState<string | null>(null);
 
   const chipTotal = betChips.reduce((sum, chip) => sum + chip, 0);
-  const inPlay = hand !== null && hand.result === null;
-  const finished = hand !== null && hand.result !== null;
-  // During a hand the bet is the one already taken from the balance.
-  const bet = hand ? hand.bet : chipTotal;
+  const inPlay = hand !== null && !hand.finished;
+  const finished = hand !== null && hand.finished;
+  // During a round the bet is everything already taken from the balance,
+  // including any Double or Split.
+  const bet = hand ? hand.totalBet : chipTotal;
   const available = balance ?? 0;
   const canBet = !hand && !busy;
 
@@ -284,23 +291,23 @@ export default function BlackjackPage() {
   }
 
   async function play(move: BlackjackMove) {
-    if (!hand || hand.result !== null || busy) return;
+    if (!hand || hand.finished || busy) return;
     setBusy(true);
     setError(null);
     try {
       const { res, data } = await post("/api/blackjack/action", {
         handId: hand.handId,
         move,
-        cards: hand.playerCards.length,
+        step: hand.step,
       });
       if (!res.ok) {
         setError(data.error ?? "Could not play that move. Please try again.");
         return;
       }
       setHand(data.hand);
-      // The balance changes when the player doubles (SRS-910.2) and when the
-      // hand ends (SRS-908.1).
-      if (data.balance !== undefined || data.hand.result !== null) notifyBalanceChanged();
+      // The balance changes when the player doubles or splits (SRS-910.2,
+      // SRS-911.2) and when the round ends (SRS-908.1).
+      if (data.balance !== undefined || data.hand.finished) notifyBalanceChanged();
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -308,17 +315,29 @@ export default function BlackjackPage() {
     }
   }
 
-  // SRS-910.1: first two cards only, with another bet's worth of coins.
-  const doubleAllowed = inPlay && !busy && canDouble(hand) && available >= hand.bet;
+  // What Double or Split would cost right now: the round's original bet, or
+  // the chips set for the next one.
+  const extraCost = hand ? hand.bet : chipTotal;
+  const canAfford = available >= extraCost;
+  // SRS-910.1: a hand's first two cards, with another bet's worth of coins.
+  const doubleAllowed = inPlay && !busy && hand.canDouble && canAfford;
   const doubleReason = !inPlay
     ? "Your moves unlock once the cards are dealt."
-    : !canDouble(hand)
-      ? "You can only double on your first two cards."
-      : available < hand.bet
-        ? `You need another ${hand.bet.toLocaleString()} coins to double.`
+    : !hand.canDouble
+      ? "You can only double on a hand's first two cards."
+      : !canAfford
+        ? `You need another ${extraCost.toLocaleString()} coins to double.`
         : undefined;
-  // What Double would cost right now: the hand's bet, or the chips set.
-  const doubleCost = hand ? hand.bet : chipTotal;
+  // SRS-911.1: a pair, once, with another bet's worth of coins.
+  const splitAllowed = inPlay && !busy && hand.canSplit && canAfford;
+  const splitReason = !inPlay
+    ? "Your moves unlock once the cards are dealt."
+    : !hand.canSplit
+      ? "You can split only when your first two cards are a pair, once per hand."
+      : !canAfford
+        ? `You need another ${extraCost.toLocaleString()} coins to split.`
+        : undefined;
+  const activeHand = inPlay && hand.active !== null ? hand.hands[hand.active] : undefined;
 
   function newHand() {
     setHand(null);
@@ -333,6 +352,7 @@ export default function BlackjackPage() {
       if (key === "h") play("hit");
       else if (key === "s") play("stand");
       else if (key === "d" && doubleAllowed) play("double");
+      else if (key === "p" && splitAllowed) play("split");
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -341,13 +361,9 @@ export default function BlackjackPage() {
   const result = finished ? describeResult(hand) : null;
   // The chips in the betting circle: the real stack when it matches the bet
   // (it won't after a refresh mid-hand), otherwise just the amount.
-  // After a double the bet is the same stack twice.
-  const circleChips =
-    chipTotal === bet
-      ? betChips.slice(-5)
-      : chipTotal * 2 === bet
-        ? [...betChips, ...betChips].slice(-5)
-        : [];
+  // After a Double or Split the bet is the same stack two or three times.
+  const repeats = chipTotal > 0 && bet % chipTotal === 0 ? bet / chipTotal : 0;
+  const circleChips = Array.from({ length: repeats }, () => betChips).flat().slice(-5);
 
   return (
     <main className="min-h-page bg-[radial-gradient(ellipse_at_top,_#14532d_0%,_#052e16_30%,_#020617_70%)] px-4 pb-10 pt-6 text-slate-100 sm:px-6">
@@ -457,10 +473,39 @@ export default function BlackjackPage() {
             {/* Player */}
             <div className="flex flex-col items-center gap-3">
               {hand ? (
-                <>
-                  <Hand cards={hand.playerCards} />
-                  <HandLabel name="You" value={hand.playerTotal} bust={hand.playerTotal > 21} />
-                </>
+                <div className="flex flex-wrap items-start justify-center gap-6">
+                  {hand.hands.map((playerHand, index) => {
+                    const split = hand.hands.length > 1;
+                    const playing = split && hand.active === index;
+                    const waiting = split && hand.active !== null && hand.active !== index;
+                    return (
+                      <div
+                        key={index}
+                        className={`flex flex-col items-center gap-3 rounded-2xl px-3 py-2 transition ${
+                          playing ? "bg-emerald-300/10 ring-1 ring-emerald-300/50" : ""
+                        } ${waiting ? "opacity-60" : ""}`}
+                      >
+                        <Hand cards={playerHand.cards} />
+                        <HandLabel
+                          name={split ? `Hand ${index + 1}` : "You"}
+                          value={playerHand.total}
+                          bust={playerHand.total > 21}
+                        />
+                        {split ? (
+                          <p className="text-xs tabular-nums text-amber-100/80">
+                            {playerHand.bet.toLocaleString()} coins{playerHand.doubled ? " · doubled" : ""}
+                            {playerHand.result ? (
+                              <span className={`font-semibold ${resultTone(playerHand.result)}`}>
+                                {" "}
+                                · {playerHand.result}
+                              </span>
+                            ) : null}
+                          </p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
                 <>
                   <Hand cards={[null, null]} />
@@ -542,7 +587,7 @@ export default function BlackjackPage() {
             {inPlay ? (
               <p className="mt-auto pt-4 text-sm text-slate-400">
                 Bet in play — <span className="font-semibold tabular-nums text-amber-200">{bet.toLocaleString()}</span>{" "}
-                coins. Hit, Stand, or Double to play the hand.
+                coins. Hit, Stand, Double, or Split to play the hand.
               </p>
             ) : finished ? (
               <div className="mt-auto pt-4">
@@ -611,9 +656,9 @@ export default function BlackjackPage() {
                 >
                   <span>
                     Double
-                    {doubleCost > 0 ? (
+                    {extraCost > 0 ? (
                       <span className="ml-2 text-sm font-medium tabular-nums text-amber-300/80">
-                        +{doubleCost.toLocaleString()}
+                        +{extraCost.toLocaleString()}
                       </span>
                     ) : null}
                   </span>
@@ -624,16 +669,48 @@ export default function BlackjackPage() {
                 <InfoTip label="What does Double do?">
                   <span className="mb-1 block font-semibold text-amber-200">Double</span>
                   Doubles your bet and gives you exactly one more card, then your turn ends.{" "}
-                  {doubleCost > 0
-                    ? `It costs another ${doubleCost.toLocaleString()} coins, so your bet becomes ${(doubleCost * 2).toLocaleString()}.`
+                  {extraCost > 0
+                    ? `It costs another ${extraCost.toLocaleString()} coins, so your bet becomes ${(extraCost * 2).toLocaleString()}.`
                     : "It costs the same amount as your bet again."}{" "}
-                  Wins and losses are paid on the doubled bet. Only allowed on your first two cards.
+                  Wins and losses are paid on the doubled bet. Only allowed on a hand&apos;s first two cards.
+                </InfoTip>
+              </div>
+              <div className="col-span-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => play("split")}
+                  disabled={!splitAllowed}
+                  title={splitReason}
+                  className="flex flex-1 items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-4 text-lg font-semibold text-slate-100 transition hover:border-sky-300/60 hover:bg-sky-400/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-white/10 disabled:hover:bg-white/5"
+                >
+                  <span>
+                    Split
+                    {extraCost > 0 ? (
+                      <span className="ml-2 text-sm font-medium tabular-nums text-sky-300/80">
+                        +{extraCost.toLocaleString()}
+                      </span>
+                    ) : null}
+                  </span>
+                  <kbd className="rounded-md border border-white/10 px-1.5 text-[11px] font-medium text-slate-400">
+                    P
+                  </kbd>
+                </button>
+                <InfoTip label="What does Split do?">
+                  <span className="mb-1 block font-semibold text-sky-200">Split</span>
+                  When your first two cards are a pair, like 8 and 8, splits them into two separate hands and deals
+                  each one a second card. You then play each hand on its own.{" "}
+                  {extraCost > 0
+                    ? `It costs another ${extraCost.toLocaleString()} coins, one bet for each hand.`
+                    : "It costs the same amount as your bet again, one bet for each hand."}{" "}
+                  Split aces get only one more card each, and 21 after a split pays 1 to 1, not 3 to 2. Once per hand.
                 </InfoTip>
               </div>
             </div>
             <p className="mt-auto pt-4 text-xs text-slate-500">
-              {inPlay
-                ? `You have ${hand.playerTotal}. The dealer shows ${hand.dealerTotal}.`
+              {activeHand
+                ? `${hand!.hands.length > 1 ? `Playing hand ${hand!.active! + 1} of ${hand!.hands.length}: you` : "You"} have ${
+                    activeHand.total
+                  }. The dealer shows ${hand!.dealerTotal}.`
                 : "Your moves unlock once the cards are dealt."}
             </p>
           </div>

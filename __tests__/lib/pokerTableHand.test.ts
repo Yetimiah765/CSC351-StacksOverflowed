@@ -739,6 +739,39 @@ describe('PokerTable betting rounds', () => {
 });
 
 describe('PokerTable leaving during a hand', () => {
+  it('starts over once the last player has left, forgetting the last hand', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0));
+    foldHand(table);
+    expect(table.getState().lastHandResult).not.toBeNull();
+
+    table.leave(p(1));
+    table.leave(p(2));
+    expect(table.getState().lastHandResult).not.toBeNull(); // someone's still there
+    table.leave(p(3));
+
+    const state = table.getState();
+    expect(state).toMatchObject({ phase: 'waiting', lastHandResult: null, lastAction: null, dealerSeat: null, seatedCount: 0 });
+
+    // A fresh table: the next players aren't new arrivals to a hand in progress.
+    table.join(p(4), 'P4', 1000, null, 4);
+    expect(seat(table, 4)).toMatchObject({ waitingForButton: false, missedBigBlind: false });
+  });
+
+  it('starts over when everyone leaves during a hand, once it ends', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0)); // seat 1 to act
+    // Seats 3 and 2 ask first, so all three are still in the hand: seat 1
+    // folds at once, seat 2 when the turn reaches it, and seat 3 wins.
+    table.leave(p(3));
+    table.leave(p(2));
+    table.leave(p(1));
+    foldHand(table);
+
+    expect(table.drainRemovals()).toHaveLength(3);
+    expect(table.getState()).toMatchObject({ phase: 'waiting', lastHandResult: null, dealerSeat: null, seatedCount: 0 });
+  });
+
   it('folds a player who asked to leave when action reaches them, and removes them after the hand (SRS-21.2/21.3)', () => {
     const table = tableWith([1, 2, 3, 4]);
     table.startHand(pick(0)); // seat 4 to act, then 1, 2 (SB), 3 (BB)

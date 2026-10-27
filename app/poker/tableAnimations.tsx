@@ -75,9 +75,18 @@ const STACK = [0, 1, 2, 3, 4, 5];
 
 /**
  * The deck. Re-keyed per hand: the previous hand's cards fly in from the
- * muck and the board, then it riffle-shuffles twice.
+ * muck and the board, then it riffle-shuffles twice — unless `shuffle` is
+ * false (a hand already under way, or over, when the page opened).
  */
-export function DeckStack({ geometry, handNumber }: { geometry: TableGeometry; handNumber: number }) {
+export function DeckStack({
+  geometry,
+  handNumber,
+  shuffle = true,
+}: {
+  geometry: TableGeometry;
+  handNumber: number;
+  shuffle?: boolean;
+}) {
   if (!geometry.wide) return null;
   const fromMuck = { x: geometry.muck.x - geometry.deck.x, y: geometry.muck.y - geometry.deck.y };
   const fromBoard = { x: (geometry.muck.x + geometry.deck.x) / 2 - geometry.deck.x, y: -8 };
@@ -90,7 +99,7 @@ export function DeckStack({ geometry, handNumber }: { geometry: TableGeometry; h
     >
       <div className="relative h-14 w-10">
         {/* The last hand's cards being gathered in. */}
-        {handNumber > 0
+        {handNumber > 0 && shuffle
           ? [fromMuck, fromBoard, fromMuck, fromBoard].map((from, index) => (
               <span
                 key={`gather-${index}`}
@@ -104,7 +113,7 @@ export function DeckStack({ geometry, handNumber }: { geometry: TableGeometry; h
         {STACK.map((index) => (
           <span
             key={index}
-            className={`poker-deck-card absolute inset-0 ${handNumber > 0 ? (index % 2 === 0 ? 'poker-riffle-left' : 'poker-riffle-right') : ''}`}
+            className={`poker-deck-card absolute inset-0 ${handNumber > 0 && shuffle ? (index % 2 === 0 ? 'poker-riffle-left' : 'poker-riffle-right') : ''}`}
             style={cssVars({ '--stack': `${-index}px`, '--delay': `${450 + index * 20}ms` })}
           >
             <PlayingCard />

@@ -211,6 +211,23 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   }, []);
   useEffect(() => () => hitTimersRef.current.forEach(clearTimeout), []);
 
+  // What was already on the table when this page opened — a hand in
+  // progress, or the last hand's result — happened before the player was
+  // watching, so it's drawn as it stands instead of being played out again.
+  const loadedRef = useRef<{ hand: number; inHand: boolean; board: number; result: number | null } | null>(null);
+  if (tableState && !loadedRef.current) {
+    loadedRef.current = {
+      hand: tableState.handNumber,
+      inHand: tableState.phase === 'in-hand',
+      board: tableState.board.length,
+      result: tableState.phase === 'in-hand' ? null : tableState.lastHandResult?.handNumber ?? null,
+    };
+  }
+  // The hand in progress when the page opened.
+  const handIsHistory = Boolean(
+    tableState && loadedRef.current?.inHand && loadedRef.current.hand === tableState.handNumber
+  );
+
   // A brand-new action's callout (app/poker/ActionCallout.tsx) sweeps across
   // the table first; cards that action brings out wait for it to pass, so
   // they aren't hidden behind it. 0 when there's no new callout — like the
@@ -241,7 +258,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // timeline for the animations and the shakes.
   const finishedHand = tableState && tableState.phase !== 'in-hand' ? tableState.lastHandResult : null;
   const showdown: ShowdownTimeline | null = useMemo(() => {
-    if (!finishedHand) return null;
+    // No timeline (so no reveals, run-out or payout animation) for a result
+    // that was already on the table when the page opened.
+    if (!finishedHand || loadedRef.current?.result === finishedHand.handNumber) return null;
     const seen = boardSeenRef.current;
     const boardBefore = seen && seen.hand === finishedHand.handNumber ? seen.length : finishedHand.board.length;
     return showdownTimeline(finishedHand, boardBefore, calloutWait);
@@ -758,7 +777,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   {/* Community cards (SRS-17) */}
                   <div className="flex gap-1.5">
                     {Array.from({ length: 5 }, (_, index) =>
-                      tableState.board[index] ? (
+                      tableState.board[index] && handIsHistory && index < (loadedRef.current?.board ?? 0) ? (
+                        // Already out when the page opened.
+                        <PlayingCard key={`${tableState.handNumber}-${index}`} card={tableState.board[index]} />
+                      ) : tableState.board[index] ? (
                         // A new street's cards leave the deck face down, rise, flip and
                         // slam onto the felt (the flop one after another, the river hardest).
                         <SlamCard
@@ -857,7 +879,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           </div>
 
           {/* The deck (gathers and shuffles at each new hand) and the folded cards' muck pile. */}
-          {tableState ? <DeckStack geometry={geometry} handNumber={tableState.handNumber} /> : null}
+          {tableState ? (
+            <DeckStack
+              geometry={geometry}
+              handNumber={tableState.handNumber}
+              shuffle={tableState.handNumber !== loadedRef.current?.hand}
+            />
+          ) : null}
           <MuckPile geometry={geometry} count={foldedCards ?? heldMuck} />
 
           {tableState?.seats.map((seat, index) => {
@@ -936,7 +964,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                 ) : null}
 
                 {/* The pot sliding over to a winner, one winner after another. */}
-                {award && lastResult ? (
+                {award && lastResult && showdown ? (
                   <span
                     key={`won-${lastResult.handNumber}`}
                     style={cssVars({
@@ -1004,6 +1032,23 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                             </span>
                           );
                         }
+                        // Already dealt (or folded, or shown) before the page opened: no replay.
+                        if ((handIsHistory && motion !== 'reveal') || (motion === 'reveal' && !showdown)) {
+                          if (motion === 'muck') return null;
+                          return (
+                            <span
+                              key={`${tableState.handNumber}-still-${card ?? 'back'}-${cardIndex}`}
+                              className={cardIndex === 0 ? '-rotate-6' : 'rotate-6'}
+                            >
+                              <PlayingCard
+                                card={card}
+                                size="sm"
+                                highlight={Boolean(shown && wonLastHand)}
+                                backArtKey={seatCosmetics?.card}
+                              />
+                            </span>
+                          );
+                        }
                         const delay =
                           motion === 'deal' ? SHUFFLE_MS + (cardIndex * dealOrder.length + dealIndex) * DEAL_STAGGER_MS : 0;
                         return (
@@ -1028,7 +1073,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     </div>
                   ) : null}
                   {/* "+120" over a winner, once the pot reaches them. */}
-                  {award && lastResult ? (
+                  {award && lastResult && showdown ? (
                     <span
                       key={`won-${lastResult.handNumber}`}
                       style={cssVars({ '--delay': `${winnerStart + 1300 + awardIndex * 350}ms` })}
@@ -1040,8 +1085,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                   {/* The equipped profile outline hangs outside the photo, so it
                       sits beside the button rather than in its clipped circle. */}
                   <div
-                    className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award ? 'poker-win-glow' : ''}`}
-                    style={award ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
+                    className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award && showdown ? 'poker-win-glow' : ''}`}
+                    style={award && showdown ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
                   >
                     <button
                       type="button"

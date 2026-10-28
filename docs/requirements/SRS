@@ -1066,7 +1066,7 @@ flowchart LR
 
 *Traces to: UR-111*
 
-**SRS-111.2, JO, Profile content display.** The player's profile page shall display the player's profile information, time-played statistics, money-won and money-lost statistics, owned cosmetics, and currently equipped cosmetics.
+**SRS-111.2, JO, Profile content display.** The player's profile page shall display the player's profile information, money-won and money-lost statistics, owned cosmetics, and currently equipped cosmetics.
 
 *Traces to: UR-111*
 
@@ -1188,59 +1188,7 @@ flowchart LR
 
 ### UR-116, JO – View Time Played
 
-*User story: As a player, I want to view my total time played and the amount of time I have spent playing each supported casino game, so that I can track my gaming activity.*
-
-**SRS-116.1, JO, Store total time played.** The system shall store the player's total active casino-game playtime.
-
-*Traces to: UR-116*
-
-**SRS-116.2, JO, Display total time played.** The system shall display the player's total active casino-game playtime on their own profile.
-
-*Traces to: UR-116*
-
-**SRS-116.3, JO, Store per-game time played.** The system shall store active playtime separately for each supported casino game.
-
-*Traces to: UR-116*
-
-**SRS-116.4, JO, Display per-game time played.** The system shall display active playtime separately for each supported casino game to the authenticated account owner.
-
-*Traces to: UR-116*
-
-**SRS-116.5, JO, Gameplay-start timing.** The system shall begin measuring playtime only when the player begins actively participating in a casino game.
-
-*Traces to: UR-116*
-
-**SRS-116.6, JO, Game-page viewing exclusion.** The system shall not begin measuring playtime solely because the player opens or views a game page.
-
-*Traces to: UR-116*
-
-**SRS-116.7, JO, Active-game timing.** The system shall continue measuring time while an active game, hand, round, or equivalent gameplay sequence remains in progress and the player remains an active participant.
-
-*Traces to: UR-116*
-
-**SRS-116.8, JO, Between-round inactivity.** Time spent after a completed hand or round and before the player begins another gameplay sequence shall not be added to playtime.
-
-*Traces to: UR-116*
-
-**SRS-116.9, JO, Early exit.** If the player leaves before the active gameplay sequence is completed, the active time accumulated before leaving shall remain included in the player's statistics.
-
-*Traces to: UR-116*
-
-**SRS-116.10, JO, Timeout handling.** When a player reaches the timeout condition defined by the current game, the system shall stop adding time to the player's playtime.
-
-*Traces to: UR-116*
-
-**SRS-116.11, JO, Gameplay resumption.** After a timeout or interruption, the system shall begin adding time again only after the player resumes active gameplay.
-
-*Traces to: UR-116*
-
-**SRS-116.12, JO, Sports-betting exclusion.** The system shall not include time spent browsing, placing, monitoring, or resolving sports bets in the player's time-played statistics.
-
-*Traces to: UR-116*
-
-**SRS-116.13, JO, Multiplayer waiting time.** During an active multiplayer hand or round, time spent waiting for other active players to complete their turns shall count toward the player's time played.
-
-*Traces to: UR-116*
+*Removed on 2026-10-27: the platform no longer tracks time played. Its requirements, SRS-116.1 to SRS-116.13, were removed with it, and their numbers are not reused.*
 
 ### UR-117, JO – View Overall Money Won and Lost
 
@@ -1394,9 +1342,7 @@ flowchart LR
 
 *Traces to: UR-121*
 
-**SRS-121.6, JO, Public overall time played.** The public profile shall display the player's overall time played.
-
-*Traces to: UR-121*
+**SRS-121.6, JO, Public overall time played.** *Removed on 2026-10-27 with UR-116: time played is no longer tracked.*
 
 **SRS-121.7, JO, Public overall money won.** The public profile shall display the player's overall amount of virtual currency won.
 
@@ -1410,9 +1356,7 @@ flowchart LR
 
 *Traces to: UR-121*
 
-**SRS-121.10, JO, Private per-game time played.** The system shall not display another player's per-game time-played statistics on their public profile.
-
-*Traces to: UR-121*
+**SRS-121.10, JO, Private per-game time played.** *Removed on 2026-10-27 with UR-116: time played is no longer tracked.*
 
 **SRS-121.11, JO, Private per-game money statistics.** The system shall not display another player's per-game money-won or money-lost statistics on their public profile.
 
@@ -1710,9 +1654,9 @@ flowchart LR
 
 *Traces to: UR-101, UR-103, UR-104, UR-106, UR-113*
 
-**SRS-NFR-102, JO, Persistent account-data durability.** After the system confirms that account data has been successfully saved, 100% of the committed account state required by this SRS shall remain stored and available after logout, browser-tab closure, disconnection, and later login unless that state is subsequently changed or deleted by another valid system operation. Persistent account state includes the player's first name, last name, birthday, username, password hash and authentication data, virtual-currency balance, bio, profile photo, total and per-game time-played statistics, total and per-game money-won and money-lost statistics, owned cosmetics, currently equipped cosmetics, Daily Login Box claim history and cooldown state, username-change and username-reservation state, and account-deletion state.
+**SRS-NFR-102, JO, Persistent account-data durability.** After the system confirms that account data has been successfully saved, 100% of the committed account state required by this SRS shall remain stored and available after logout, browser-tab closure, disconnection, and later login unless that state is subsequently changed or deleted by another valid system operation. Persistent account state includes the player's first name, last name, birthday, username, password hash and authentication data, virtual-currency balance, bio, profile photo, total and per-game money-won and money-lost statistics, owned cosmetics, currently equipped cosmetics, Daily Login Box claim history and cooldown state, username-change and username-reservation state, and account-deletion state.
 
-*Traces to: UR-101, UR-102, UR-103, UR-104, UR-106, UR-109, UR-110, UR-112, UR-113, UR-114, UR-115, UR-116, UR-117, UR-118, UR-119, UR-120, UR-128*
+*Traces to: UR-101, UR-102, UR-103, UR-104, UR-106, UR-109, UR-110, UR-112, UR-113, UR-114, UR-115, UR-117, UR-118, UR-119, UR-120, UR-128*
 
 **SRS-NFR-103, JO, Blind-box transaction reliability.** For each successfully confirmed blind-box purchase, the system shall persist exactly one purchase-price deduction and exactly one reward outcome, even if the player disconnects or closes the browser tab before viewing the result.
 
@@ -1726,13 +1670,13 @@ flowchart LR
 
 *Applies to: all browser-based system features*
 
-**SRS-NFR-106, JO, Private-profile data protection.** When an unauthenticated user or another authenticated player requests a player's public profile, the system shall return and display only information authorized for public viewing. The system shall expose zero private account fields, including first name, last name, birthday, password hashes, authentication data, current virtual-currency balance, per-game time-played statistics, and per-game money-won or money-lost statistics. The authenticated account owner shall retain access to their own overall and per-game statistics.
+**SRS-NFR-106, JO, Private-profile data protection.** When an unauthenticated user or another authenticated player requests a player's public profile, the system shall return and display only information authorized for public viewing. The system shall expose zero private account fields, including first name, last name, birthday, password hashes, authentication data, current virtual-currency balance, and per-game money-won or money-lost statistics. The authenticated account owner shall retain access to their own overall and per-game statistics.
 
-*Traces to: UR-111, UR-116, UR-117, UR-118, UR-121*
+*Traces to: UR-111, UR-117, UR-118, UR-121*
 
-**SRS-NFR-107, JO, Displayed account-state consistency.** After an account-state change has been successfully committed, 100% of subsequently loaded authorized pages displaying that account's balance, time-played statistics, money-won or money-lost statistics, cosmetic ownership, or equipped cosmetics shall display values matching the stored account state.
+**SRS-NFR-107, JO, Displayed account-state consistency.** After an account-state change has been successfully committed, 100% of subsequently loaded authorized pages displaying that account's balance, money-won or money-lost statistics, cosmetic ownership, or equipped cosmetics shall display values matching the stored account state.
 
-*Traces to: UR-109, UR-110, UR-116, UR-117, UR-118, UR-119, UR-120, UR-128*
+*Traces to: UR-109, UR-110, UR-117, UR-118, UR-119, UR-120, UR-128*
 
 **SRS-NFR-108, JO, Daily Login Box transaction reliability.** For each successfully committed Daily Login Box opening, the system shall persist exactly one reward credit, one claim record, and one corresponding next-available timestamp. The system shall preserve these values across browser refreshes, browser-tab closures, connection interruptions, and subsequent login sessions. An interrupted animation or duplicate opening request shall result in zero additional reward credits.
 

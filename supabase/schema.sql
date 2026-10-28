@@ -11,7 +11,7 @@
 --   * All timestamps are TIMESTAMPTZ.
 --   * Values the SRS defines as derivable are NOT stored, to avoid
 --     repeating the same fact in two places:
---       - total time played / money won / money lost (SUM of per-game rows)
+--       - total money won / money lost (SUM of per-game rows)
 --       - blind-box reward probability (1 / number of rewards in the box)
 --       - min/max poker buy-in (40x / 100x the table's big blind)
 --       - potential sports payout (wager amount x recorded odds)
@@ -286,25 +286,19 @@ CREATE TABLE player_sessions (
 
 -- Table: player_game_stats
 -- Reviewed by: JO (James Ortiz)
--- Supports: SRS-103.2, SRS-111.2, SRS-116.1, SRS-116.2, SRS-116.3, SRS-116.4, SRS-116.12, SRS-117.1, SRS-117.2, SRS-117.4, SRS-117.5, SRS-118.1, SRS-118.2, SRS-118.3, SRS-118.4, SRS-118.5, SRS-121.6, SRS-121.7, SRS-121.8, SRS-NFR-102, SRS-NFR-107
--- Purpose: Stores each player's active playtime, money won, and money lost per game; overall totals are the sum of these rows.
+-- Supports: SRS-103.2, SRS-111.2, SRS-117.1, SRS-117.2, SRS-117.4, SRS-117.5, SRS-118.1, SRS-118.2, SRS-118.3, SRS-118.4, SRS-118.5, SRS-121.7, SRS-121.8, SRS-NFR-102, SRS-NFR-107
+-- Purpose: Stores each player's money won and money lost per game; overall totals are the sum of these rows. (Time played was removed with UR-116 on 2026-10-27.)
 CREATE TABLE player_game_stats (
     player_id       INTEGER      NOT NULL
                     REFERENCES players(player_id) ON DELETE CASCADE,
     game_code       VARCHAR(20)  NOT NULL
                     REFERENCES games(game_code),
-    seconds_played  BIGINT       NOT NULL DEFAULT 0
-                    CHECK (seconds_played >= 0),
     money_won       BIGINT       NOT NULL DEFAULT 0
                     CHECK (money_won >= 0),
     money_lost      BIGINT       NOT NULL DEFAULT 0
                     CHECK (money_lost >= 0),
 
-    PRIMARY KEY (player_id, game_code),
-
-    -- SRS-116.12: sports betting never adds to time played.
-    CONSTRAINT chk_player_game_stats_no_sports_time
-        CHECK (game_code <> 'sports_betting' OR seconds_played = 0)
+    PRIMARY KEY (player_id, game_code)
 );
 
 
@@ -2287,7 +2281,7 @@ CREATE TABLE ai_suggestions (
 -- =============================================================================
 
 -- SRS-107.1: the games and areas the platform offers.
--- These keys are referenced by player_game_stats (SRS-116.3, SRS-118.1).
+-- These keys are referenced by player_game_stats (SRS-118.1).
 INSERT INTO games (game_code, display_name) VALUES
     ('poker',          'Poker'),
     ('roulette',       'Roulette'),

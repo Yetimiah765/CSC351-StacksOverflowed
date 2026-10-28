@@ -113,7 +113,22 @@ describe('Statistics API route', () => {
     expect(games.slots.moneyWon).toBe(0);
   });
 
-  it('covers every casino game and sports betting in the database (SRS-118.2)', async () => {
+  it("returns each game's money lost separately, 0 for a game with no results (SRS-118.4)", async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [stat('sports_betting', 300, 120), stat('roulette', 45, 0), stat('blackjack', 0, 80)],
+      error: null,
+    };
+
+    const { games } = await (await GET(req())).json();
+
+    expect(games.sports_betting).toEqual({ moneyWon: 300, moneyLost: 120 });
+    expect(games.roulette.moneyLost).toBe(0);
+    expect(games.blackjack.moneyLost).toBe(80);
+    expect(games.poker.moneyLost).toBe(0);
+    expect(games.slots.moneyLost).toBe(0);
+  });
+
+  it('covers every casino game and sports betting in the database (SRS-118.2, SRS-118.4)', async () => {
     // The game codes seeded into the games table, which player_game_stats uses.
     const schema = readFileSync(join(__dirname, '../../supabase/schema.sql'), 'utf8');
     const seeded = schema.match(/INSERT INTO games \(game_code, display_name\) VALUES([^;]+);/)![1];

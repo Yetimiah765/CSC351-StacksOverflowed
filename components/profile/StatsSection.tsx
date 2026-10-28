@@ -7,12 +7,12 @@ export interface PlayerStats {
   moneyWon: number;
   moneyLost: number;
   // Keyed by each game's statsCode (lib/games.ts).
-  games: Record<string, { moneyWon: number }>;
+  games: Record<string, { moneyWon: number; moneyLost: number }>;
 }
 
 // The profile page's statistics section: money won and money lost, with the
-// overall totals on top (SRS-117.2, SRS-117.5) and each game's money won
-// below (SRS-118.2). Time played is no longer tracked (UR-116 was removed on
+// overall totals on top (SRS-117.2, SRS-117.5) and each game's money won and
+// lost below (SRS-118.2, SRS-118.4). Time played is no longer tracked (UR-116 was removed on
 // 2026-10-27). A game that doesn't save its results yet says so instead of
 // showing a misleading 0.
 export default function StatsSection({ stats, loadError }: { stats: PlayerStats | null; loadError: string }) {
@@ -54,7 +54,10 @@ export default function StatsSection({ stats, loadError }: { stats: PlayerStats 
                 {!game.recordsResults ? (
                   <span className="text-slate-500">Not recorded yet</span>
                 ) : result ? (
-                  <span className="text-emerald-300">Won {result.moneyWon.toLocaleString('en-US')}</span>
+                  <span className="flex gap-4">
+                    <span className="text-emerald-300">Won {result.moneyWon.toLocaleString('en-US')}</span>
+                    <span className="text-rose-300">Lost {result.moneyLost.toLocaleString('en-US')}</span>
+                  </span>
                 ) : (
                   <span className="text-slate-500">—</span>
                 )}

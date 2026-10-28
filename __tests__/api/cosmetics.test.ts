@@ -280,6 +280,18 @@ describe('POST /api/shop/buy', () => {
     expect([body.wasDuplicate, body.refund, body.balance]).toEqual([true, 175, 825]);
   });
 
+  it("doesn't count a duplicate refund as money won (SRS-117.11)", async () => {
+    const from = vi.fn((table: keyof typeof tables) => tables[table]);
+    vi.mocked(getSupabaseClient).mockReturnValueOnce({ from, rpc } as never);
+    rpc.mockResolvedValue({ data: { ...opened, was_duplicate: true, refund: 175, balance: 825 }, error: null });
+
+    const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
+
+    expect(response.status).toBe(200);
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['fn_buy_blind_box']);
+    expect(from.mock.calls.map(([table]) => table)).not.toContain('player_game_stats');
+  });
+
   it('draws again once, from the new counts, if the box changed', async () => {
     rpc
       .mockResolvedValueOnce({ data: { status: 'stale_pick', regular_count: 4, holographic_count: 2, reward_count: 4 }, error: null })

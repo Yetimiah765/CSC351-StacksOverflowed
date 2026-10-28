@@ -7,7 +7,7 @@ import CosmeticsSection from '../../components/profile/CosmeticsSection';
 import PasswordEditor, { type PasswordChange } from '../../components/profile/PasswordEditor';
 import ProfileField from '../../components/profile/ProfileField';
 import ProfilePhoto from '../../components/profile/ProfilePhoto';
-import StatsSection from '../../components/profile/StatsSection';
+import StatsSection, { type PlayerStats } from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
 import { notifyAppearanceChanged } from '../../lib/balanceEvents';
 import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
@@ -45,6 +45,9 @@ export default function ProfilePage() {
   // The player's cosmetics (UR-119, UR-120), loaded after the profile.
   const [cosmetics, setCosmetics] = useState<{ owned: Cosmetic[]; equipped: Partial<Record<CosmeticCategory, number>> } | null>(null);
   const [cosmeticsError, setCosmeticsError] = useState('');
+  // Money won and lost (UR-117, UR-118), loaded after the profile.
+  const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [statsError, setStatsError] = useState('');
 
   // A one-line confirmation, e.g. after a password change, which otherwise
   // shows nothing new on the page.
@@ -83,6 +86,7 @@ export default function ProfilePage() {
     }
     setProfile(data.profile);
     fetchCosmetics(playerToken);
+    fetchStats(playerToken);
   }
 
   async function fetchCosmetics(playerToken: string) {
@@ -96,6 +100,20 @@ export default function ProfilePage() {
       setCosmetics(data);
     } catch {
       setCosmeticsError('Could not load your cosmetics.');
+    }
+  }
+
+  async function fetchStats(playerToken: string) {
+    try {
+      const res = await fetch('/api/profile/stats', { headers: { Authorization: `Bearer ${playerToken}` } });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatsError(data.error || 'Could not load your statistics.');
+        return;
+      }
+      setStats(data);
+    } catch {
+      setStatsError('Could not load your statistics.');
     }
   }
 
@@ -253,7 +271,7 @@ export default function ProfilePage() {
               loadError={cosmeticsError}
               onEquip={equipCosmetic}
             />
-            <StatsSection />
+            <StatsSection stats={stats} loadError={statsError} />
           </>
         ) : (
           <p className="text-slate-300">Unable to load your profile.</p>

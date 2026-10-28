@@ -28,4 +28,16 @@ describe('Money won and lost exclusions in the database', () => {
       for (const { file, body } of definitions) expect(writesGameStats(body), `${trigger} in ${file}`).toBe(false);
     }
   });
+
+  it("doesn't count Daily Login Box coins as money won or lost (SRS-117.9)", () => {
+    const definitions = functionDefinitions('fn_open_daily_login_box');
+    expect(definitions.length).toBeGreaterThan(0);
+    for (const { file, body } of definitions) {
+      // It credits the reward to the balance and records the claim...
+      expect(body, file).toMatch(/SET balance = balance \+ p_reward/);
+      expect(body, file).toMatch(/INSERT INTO daily_login_box_claims/);
+      // ...and nothing else.
+      expect(writesGameStats(body), file).toBe(false);
+    }
+  });
 });

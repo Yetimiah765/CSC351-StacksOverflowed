@@ -150,6 +150,22 @@ describe('Daily Login Box API route', () => {
       expect(body.msRemaining).toBeGreaterThan(24 * HOUR - 5000);
     });
 
+    it("doesn't count the reward as money won or lost (SRS-117.9)", async () => {
+      const from = vi.fn((table: keyof typeof tables) => tables[table]);
+      vi.mocked(getSupabaseClient).mockReturnValue({ from, rpc } as never);
+      rpc.mockResolvedValue({
+        data: { status: 'opened', reward: 500, balance: 1500, next_available_at: new Date(Date.now() + 24 * HOUR).toISOString() },
+        error: null,
+      });
+
+      const response = await POST(req('POST'));
+
+      expect(response.status).toBe(200);
+      // Only the opening function runs, and the route never writes statistics.
+      expect(rpc.mock.calls.map(([name]) => name)).toEqual(['fn_open_daily_login_box']);
+      expect(from.mock.calls.map(([table]) => table)).not.toContain('player_game_stats');
+    });
+
     it('rejects a second opening during the cooldown (SRS-128.12/128.19)', async () => {
       const nextAvailableAt = new Date(Date.now() + 3 * HOUR).toISOString();
       rpc.mockResolvedValue({ data: { status: 'cooldown', next_available_at: nextAvailableAt }, error: null });

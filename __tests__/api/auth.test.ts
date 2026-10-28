@@ -233,6 +233,17 @@ describe('Auth API routes', () => {
       expect(schema).toMatch(/\bbalance\s+BIGINT\s+NOT NULL DEFAULT 1000\b/);
     });
 
+    it("doesn't count the starting coins as money won (SRS-117.8)", async () => {
+      acceptRegistration();
+      const from = vi.fn((table: keyof typeof tables) => tables[table]);
+      vi.mocked(getSupabaseClient).mockReturnValue({ from } as never);
+
+      const response = await registerPost(registerRequest(validRegistration));
+
+      expect(response.status).toBe(201);
+      expect(from.mock.calls.map(([table]) => table)).not.toContain('player_game_stats');
+    });
+
     it('releases an expired reservation of the name before checking it (SRS-112.8)', async () => {
       tables.players.singleResult = {
         data: { player_id: 7, first_name: 'Ada', last_name: 'Lovelace', birthday: '1990-01-01', balance: 1000 },

@@ -98,6 +98,14 @@ describe('Statistics API route', () => {
     expect((await response.json()).moneyLost).toBe(0);
   });
 
+  it('shows a new account 0 money won, whatever its balance (SRS-117.8)', async () => {
+    const response = await GET(req());
+
+    expect((await response.json()).moneyWon).toBe(0);
+    // The statistics never look at the balance, which starts at 1,000.
+    expect(from).not.toHaveBeenCalledWith('players');
+  });
+
   it("returns each game's money won separately, 0 for a game with no results (SRS-118.2)", async () => {
     tables.player_game_stats.defaultResult = {
       data: [stat('sports_betting', 300, 120), stat('roulette', 45, 0), stat('blackjack', 0, 80)],

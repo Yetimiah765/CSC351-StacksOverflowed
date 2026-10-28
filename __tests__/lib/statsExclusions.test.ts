@@ -53,4 +53,18 @@ describe('Money won and lost exclusions in the database', () => {
       expect(body, file).toMatch(/INSERT INTO blind_box_purchases/);
     }
   });
+
+  it("doesn't count duplicate refunds as money won (SRS-117.11)", () => {
+    const purchases = functionDefinitions('fn_buy_blind_box').filter(({ body }) => !/^\s*SELECT fn_buy_blind_box\(/.test(body));
+    expect(purchases.length).toBeGreaterThan(0);
+    for (const { file, body } of purchases) {
+      // A duplicate's refund goes back into the balance in the same update
+      // that takes the price, and onto the purchase record...
+      expect(body, file).toMatch(/v_refund := CEIL\(v_box\.price \/ 2\.0\)/);
+      expect(body, file).toMatch(/SET balance = balance - v_box\.price \+ v_refund/);
+      expect(body, file).toMatch(/refund_amount\)\s*VALUES \([^)]*\bv_refund\)/);
+      // ...and nowhere else.
+      expect(writesGameStats(body), file).toBe(false);
+    }
+  });
 });

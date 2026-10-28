@@ -136,6 +136,20 @@ describe('Statistics API route', () => {
     expect(games.slots.moneyLost).toBe(0);
   });
 
+  it('makes the totals the sums of the per-game figures (SRS-118.5)', async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [stat('sports_betting', 760515, 3000050), stat('roulette', 45, 0), stat('blackjack', 0, 80), stat('poker', 1200, 900)],
+      error: null,
+    };
+
+    const { moneyWon, moneyLost, games } = await (await GET(req())).json();
+    const perGame = Object.values(games) as { moneyWon: number; moneyLost: number }[];
+
+    expect(moneyWon).toBe(perGame.reduce((total, game) => total + game.moneyWon, 0));
+    expect(moneyLost).toBe(perGame.reduce((total, game) => total + game.moneyLost, 0));
+    expect([moneyWon, moneyLost]).toEqual([761760, 3001030]);
+  });
+
   it('covers every casino game and sports betting in the database (SRS-118.2, SRS-118.4)', async () => {
     // The game codes seeded into the games table, which player_game_stats uses.
     const schema = readFileSync(join(__dirname, '../../supabase/schema.sql'), 'utf8');

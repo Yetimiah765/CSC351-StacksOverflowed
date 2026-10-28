@@ -49,6 +49,7 @@ vi.mock('crypto', async (importOriginal) => ({
   randomInt: (n: number) => randomInt(n),
 }));
 
+import { getSupabaseClient } from '../../lib/supabase';
 import { GET as getCollection } from '../../app/api/cosmetics/route';
 import { POST as equip } from '../../app/api/cosmetics/equip/route';
 import { GET as getBoxes } from '../../app/api/shop/boxes/route';
@@ -256,6 +257,19 @@ describe('POST /api/shop/buy', () => {
     expect(randomInt.mock.calls).toEqual([[10000], [2]]);
     expect(rpc).toHaveBeenCalledWith('fn_buy_blind_box', { p_player_id: 7, p_box_id: 1, p_roll: 0, p_pick: 1 });
     expect(body.cosmetic).toEqual({ cosmeticId: 46, name: 'Neon Prism', category: 'Card', artKey: 'holo-neon', isHolographic: true });
+  });
+
+  it("doesn't count the price as money lost (SRS-117.10)", async () => {
+    const from = vi.fn((table: keyof typeof tables) => tables[table]);
+    vi.mocked(getSupabaseClient).mockReturnValueOnce({ from, rpc } as never);
+    rpc.mockResolvedValue({ data: opened, error: null });
+
+    const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
+
+    expect(response.status).toBe(200);
+    // Only the purchase function runs, and the route never writes statistics.
+    expect(rpc.mock.calls.map(([name]) => name)).toEqual(['fn_buy_blind_box']);
+    expect(from.mock.calls.map(([table]) => table)).not.toContain('player_game_stats');
   });
 
   it('passes a duplicate refund through (SRS-126.3)', async () => {

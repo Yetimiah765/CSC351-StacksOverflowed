@@ -40,4 +40,17 @@ describe('Money won and lost exclusions in the database', () => {
       expect(writesGameStats(body), file).toBe(false);
     }
   });
+
+  it("doesn't count blind box purchases as money lost (SRS-117.10)", () => {
+    const definitions = functionDefinitions('fn_buy_blind_box');
+    // The older 3-argument version only hands over to the current one.
+    const purchases = definitions.filter(({ body }) => !/^\s*SELECT fn_buy_blind_box\(/.test(body));
+    expect(purchases.length).toBeGreaterThan(0);
+    for (const { file, body } of definitions) expect(writesGameStats(body), file).toBe(false);
+    // Each one charges the price to the balance and records the purchase.
+    for (const { file, body } of purchases) {
+      expect(body, file).toMatch(/SET balance = balance - v_box\.price/);
+      expect(body, file).toMatch(/INSERT INTO blind_box_purchases/);
+    }
+  });
 });

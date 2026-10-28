@@ -1,4 +1,5 @@
-// Every game shown on the home page (SRS-107.1), in display order.
+// Every game shown on the home page (SRS-107.1), in display order. The
+// profile's statistics list the same games (SRS-118).
 //
 // To connect a game, set its `href` to the game's page route (for example
 // '/blackjack'). Its home page button then changes from a disabled
@@ -12,6 +13,13 @@ export interface Game {
   href: string | null;
   /** A short label shown on the card's picture, e.g. 'Live multiplayer'. */
   tag: string;
+  /** The game's code in the database's `games` table, which keys its money won
+   * and lost in `player_game_stats` (SRS-118). */
+  statsCode: string;
+  /** Whether the game saves its results to `player_game_stats` yet. The
+   * profile shows "Not recorded yet" for a game that doesn't; set it to true
+   * once the game records its results. */
+  recordsResults: boolean;
 }
 
 export const GAMES: Game[] = [
@@ -21,6 +29,8 @@ export const GAMES: Game[] = [
     description: "Texas Hold'em against other players at a live table. Pick your stakes, take a seat, and play it out to the river.",
     href: '/poker',
     tag: 'Live multiplayer',
+    statsCode: 'poker',
+    recordsResults: false,
   },
   {
     id: 'blackjack',
@@ -28,6 +38,8 @@ export const GAMES: Game[] = [
     description: 'Get closer to 21 than the dealer without going over.',
     href: '/blackjack',
     tag: 'Classic',
+    statsCode: 'blackjack',
+    recordsResults: false,
   },
   {
     id: 'roulette',
@@ -35,6 +47,8 @@ export const GAMES: Game[] = [
     description: 'Bet on where the ball lands on the wheel.',
     href: '/roulette',
     tag: 'Table game',
+    statsCode: 'roulette',
+    recordsResults: false,
   },
   {
     id: 'slots',
@@ -42,6 +56,8 @@ export const GAMES: Game[] = [
     description: 'Spin the reels and line up matching symbols.',
     href: null,
     tag: 'Reels',
+    statsCode: 'slots',
+    recordsResults: false,
   },
   {
     id: 'sports-betting',
@@ -49,5 +65,7 @@ export const GAMES: Game[] = [
     description: 'Bet virtual coins on live sports events.',
     href: '/sports',
     tag: 'Live odds',
+    statsCode: 'sports_betting',
+    recordsResults: true,
   },
 ];

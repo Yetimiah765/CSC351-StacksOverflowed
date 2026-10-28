@@ -1,4 +1,7 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { GAMES } from '../../lib/games';
 
 // See __tests__/api/auth.test.ts for the rationale behind this builder shape:
 // chain methods return the same object, `.maybeSingle()` resolves via its own
@@ -93,6 +96,33 @@ describe('Statistics API route', () => {
     const response = await GET(req());
 
     expect((await response.json()).moneyLost).toBe(0);
+  });
+
+  it("returns each game's money won separately, 0 for a game with no results (SRS-118.2)", async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [stat('sports_betting', 300, 120), stat('roulette', 45, 0), stat('blackjack', 0, 80)],
+      error: null,
+    };
+
+    const { games } = await (await GET(req())).json();
+
+    expect(games.sports_betting.moneyWon).toBe(300);
+    expect(games.roulette.moneyWon).toBe(45);
+    expect(games.blackjack.moneyWon).toBe(0);
+    expect(games.poker.moneyWon).toBe(0);
+    expect(games.slots.moneyWon).toBe(0);
+  });
+
+  it('covers every casino game and sports betting in the database (SRS-118.2)', async () => {
+    // The game codes seeded into the games table, which player_game_stats uses.
+    const schema = readFileSync(join(__dirname, '../../supabase/schema.sql'), 'utf8');
+    const seeded = schema.match(/INSERT INTO games \(game_code, display_name\) VALUES([^;]+);/)![1];
+    const codes = [...seeded.matchAll(/\('([a-z_]+)'/g)].map((match) => match[1]);
+
+    const { games } = await (await GET(req())).json();
+
+    expect(GAMES.map((game) => game.statsCode).sort()).toEqual([...codes].sort());
+    expect(Object.keys(games).sort()).toEqual([...codes].sort());
   });
 
   it('returns 401 without a token', async () => {

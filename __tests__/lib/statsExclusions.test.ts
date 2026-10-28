@@ -68,3 +68,26 @@ describe('Money won and lost exclusions in the database', () => {
     }
   });
 });
+
+describe('One set of rules for overall and per-game money won and lost', () => {
+  it('keeps money won and lost only per game, never as separate overall totals (SRS-118.5)', () => {
+    // Every table, in every file, that has a money won or lost column.
+    const tablesWithMoneyColumns = new Set<string>();
+    for (const { sql } of sqlFiles()) {
+      for (const [, table, columns] of sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?(\w+)\s*\(([\s\S]*?)\n\);/g)) {
+        if (/^\s+\w*money_(?:won|lost)\w*\s/m.test(columns)) tablesWithMoneyColumns.add(table);
+      }
+      for (const [, table] of sql.matchAll(/ALTER TABLE (?:IF EXISTS )?(\w+)\s+ADD COLUMN (?:IF NOT EXISTS )?\w*money_(?:won|lost)/g)) {
+        tablesWithMoneyColumns.add(table);
+      }
+    }
+    expect([...tablesWithMoneyColumns]).toEqual(['player_game_stats']);
+
+    // Each row there is one real game, so there is no "overall" row either.
+    const schema = sqlFiles().find((file) => file.name === 'schema.sql')!.sql;
+    const seeded = schema.match(/INSERT INTO games \(game_code, display_name\) VALUES([^;]+);/)![1];
+    expect([...seeded.matchAll(/\('([a-z_]+)'/g)].map((match) => match[1]).sort()).toEqual(
+      ['blackjack', 'poker', 'roulette', 'slots', 'sports_betting']
+    );
+  });
+});

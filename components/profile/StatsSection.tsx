@@ -6,13 +6,15 @@ import { GAMES } from '../../lib/games';
 export interface PlayerStats {
   moneyWon: number;
   moneyLost: number;
+  // Keyed by each game's statsCode (lib/games.ts).
+  games: Record<string, { moneyWon: number }>;
 }
 
 // The profile page's statistics section: money won and money lost, with the
-// overall totals on top and one row per game below (SRS-117, SRS-118). Time
-// played is no longer tracked (UR-116 was removed on 2026-10-27). The totals
-// are shown (SRS-117.2, SRS-117.5); the per-game values are dashes until
-// they're connected.
+// overall totals on top (SRS-117.2, SRS-117.5) and each game's money won
+// below (SRS-118.2). Time played is no longer tracked (UR-116 was removed on
+// 2026-10-27). A game that doesn't save its results yet says so instead of
+// showing a misleading 0.
 export default function StatsSection({ stats, loadError }: { stats: PlayerStats | null; loadError: string }) {
   const totals = [
     { label: 'Money won', value: stats?.moneyWon, color: 'text-emerald-300' },
@@ -44,15 +46,22 @@ export default function StatsSection({ stats, loadError }: { stats: PlayerStats 
         {/* Per game */}
         <h3 className="mt-6 text-sm uppercase tracking-widest text-slate-400">By game</h3>
         <ul className="mt-2 divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-950/70">
-          {GAMES.map((game) => (
-            <li key={game.id} className="flex items-center justify-between px-4 py-3 text-sm">
-              <span className="text-slate-200">{game.name}</span>
-              <span className="text-slate-500">—</span>
-            </li>
-          ))}
+          {GAMES.map((game) => {
+            const result = stats?.games[game.statsCode];
+            return (
+              <li key={game.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm">
+                <span className="text-slate-200">{game.name}</span>
+                {!game.recordsResults ? (
+                  <span className="text-slate-500">Not recorded yet</span>
+                ) : result ? (
+                  <span className="text-emerald-300">Won {result.moneyWon.toLocaleString('en-US')}</span>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
-
-        <p className="mt-4 text-xs text-slate-500">Statistics start counting once the games record results.</p>
       </div>
     </section>
   );

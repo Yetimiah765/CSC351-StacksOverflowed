@@ -48,10 +48,14 @@ export default function StatsSection({ stats, loadError }: { stats: PlayerStats 
         <ul className="mt-2 divide-y divide-slate-800 rounded-2xl border border-slate-800 bg-slate-950/70">
           {GAMES.map((game) => {
             const result = stats?.games[game.statsCode];
+            // A game's figures always show once it has any, so the rows add up
+            // to the totals even before its recordsResults flag is set
+            // (SRS-118.5).
+            const hasFigures = result !== undefined && (result.moneyWon > 0 || result.moneyLost > 0);
             return (
               <li key={game.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-3 text-sm">
                 <span className="text-slate-200">{game.name}</span>
-                {!game.recordsResults ? (
+                {!game.recordsResults && !hasFigures ? (
                   <span className="text-slate-500">Not recorded yet</span>
                 ) : result ? (
                   <span className="flex gap-4">

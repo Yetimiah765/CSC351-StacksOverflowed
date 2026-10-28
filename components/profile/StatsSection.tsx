@@ -5,17 +5,18 @@ import { GAMES } from '../../lib/games';
 // What GET /api/profile/stats returns.
 export interface PlayerStats {
   moneyWon: number;
+  moneyLost: number;
 }
 
 // The profile page's statistics section: money won and money lost, with the
 // overall totals on top and one row per game below (SRS-117, SRS-118). Time
-// played is no longer tracked (UR-116 was removed on 2026-10-27). The total
-// money won is shown (SRS-117.2); the other values are dashes until they're
-// connected.
+// played is no longer tracked (UR-116 was removed on 2026-10-27). The totals
+// are shown (SRS-117.2, SRS-117.5); the per-game values are dashes until
+// they're connected.
 export default function StatsSection({ stats, loadError }: { stats: PlayerStats | null; loadError: string }) {
   const totals = [
     { label: 'Money won', value: stats?.moneyWon, color: 'text-emerald-300' },
-    { label: 'Money lost', value: undefined, color: 'text-slate-300' },
+    { label: 'Money lost', value: stats?.moneyLost, color: 'text-rose-300' },
   ];
 
   return (

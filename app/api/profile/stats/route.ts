@@ -1,9 +1,10 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requirePlayerId } from '../../../../lib/auth';
 
-// SRS-117.2: the logged-in player's money won, for the profile's statistics
-// section. Results are kept in player_game_stats, one row per game, and the
-// overall total is the sum of those rows rather than a stored figure.
+// SRS-117.2 / SRS-117.5: the logged-in player's money won and money lost, for
+// the profile's statistics section. Results are kept in player_game_stats,
+// one row per game, and the overall totals are the sums of those rows rather
+// than stored figures.
 export async function GET(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -13,12 +14,13 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabase
     .from('player_game_stats')
-    .select('game_code, money_won')
+    .select('game_code, money_won, money_lost')
     .eq('player_id', playerId);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
-  const rows = (data ?? []) as { game_code: string; money_won: number }[];
+  const rows = (data ?? []) as { game_code: string; money_won: number; money_lost: number }[];
   const moneyWon = rows.reduce((total, row) => total + Number(row.money_won), 0);
+  const moneyLost = rows.reduce((total, row) => total + Number(row.money_lost), 0);
 
-  return Response.json({ moneyWon }, { status: 200 });
+  return Response.json({ moneyWon, moneyLost }, { status: 200 });
 }

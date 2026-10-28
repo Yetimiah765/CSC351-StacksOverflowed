@@ -77,6 +77,24 @@ describe('Statistics API route', () => {
     expect((await response.json()).moneyWon).toBe(0);
   });
 
+  it("returns the player's total money lost across every game (SRS-117.5)", async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [stat('sports_betting', 300, 120), stat('roulette', 45, 0), stat('blackjack', 0, 80)],
+      error: null,
+    };
+
+    const response = await GET(req());
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ moneyWon: 345, moneyLost: 200 });
+  });
+
+  it('reports 0 money lost for a player with no recorded results (SRS-117.5)', async () => {
+    const response = await GET(req());
+
+    expect((await response.json()).moneyLost).toBe(0);
+  });
+
   it('returns 401 without a token', async () => {
     const response = await GET(req(null));
 

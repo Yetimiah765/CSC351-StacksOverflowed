@@ -198,7 +198,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     sendAction,
   } = usePokerChannel<PokerTableBroadcast>(
     config ? pokerTableChannelName(config.id) : null,
-    Boolean(token && profile),
+    // Connect while the profile loads, not after.
+    Boolean(token),
     (state) => {
       setTableState(state);
       setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);

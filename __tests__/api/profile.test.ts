@@ -101,6 +101,14 @@ describe('Profile API routes', () => {
     });
   });
 
+  it('GET ?photo=none leaves the photo column out (the poker pages, which wait for it)', async () => {
+    const response = await GET(new Request('http://localhost/api/profile?photo=none', { headers: { authorization: 'Bearer valid-token' } }));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).profile).toMatchObject({ playerId: 1, username: 'testuser1', balance: 1000, profilePhotoDataUrl: null });
+    expect(tables.players.select).toHaveBeenCalledWith(expect.not.stringContaining('profile_photo'));
+  });
+
   it('GET returns 401 without a token', async () => {
     const response = await GET(req('GET', undefined, null));
     expect(response.status).toBe(401);

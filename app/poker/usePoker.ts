@@ -55,14 +55,23 @@ export function usePlayerProfile() {
       return;
     }
 
-    fetch('/api/profile', { headers: { Authorization: `Bearer ${stored}` } })
+    // Without the full-size photo, which can take seconds to arrive; the
+    // small avatar thumbnail follows on its own.
+    fetch('/api/profile?photo=none', { headers: { Authorization: `Bearer ${stored}` } })
       .then(async (res) => {
         const data = await res.json();
         if (!res.ok) {
           setError(data.error || 'Failed to load your profile.');
           return;
         }
-        setProfile(data.profile);
+        const loaded = data.profile as OwnProfile;
+        setProfile(loaded);
+        fetch(`/api/players/${loaded.playerId}/avatar`)
+          .then((avatar) => (avatar.ok ? avatar.json() : null))
+          .then((avatar: { avatarUrl?: string | null } | null) => {
+            if (avatar?.avatarUrl) setProfile((current) => (current ? { ...current, profilePhotoDataUrl: avatar.avatarUrl ?? null } : current));
+          })
+          .catch(() => {});
       })
       .finally(() => setLoading(false));
   }, []);

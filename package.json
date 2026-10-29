@@ -14,18 +14,23 @@
     "sync:sports": "tsx scripts/syncSports.ts"
   },
   "dependencies": {
+    "@react-three/drei": "9.122.0",
+    "@react-three/fiber": "8.17.14",
+    "@react-three/postprocessing": "2.19.1",
     "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^2.4.3",
     "dotenv": "^18.0.6",
     "next": "14.2.15",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "sharp": "^0.35.5"
+    "sharp": "^0.35.5",
+    "three": "0.180.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "20.16.11",
     "@types/react": "18.3.12",
+    "@types/three": "0.180.0",
     "autoprefixer": "10.4.20",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.16",

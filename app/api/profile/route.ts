@@ -18,24 +18,20 @@ interface ProfileRow {
   profile_photo: string | null;
 }
 
-async function loadProfile(supabase: SupabaseClient, playerId: number) {
-  const { data: player, error: playerError } = await supabase
-    .from('players')
-    .select('player_id, first_name, last_name, bio, balance, profile_photo')
-    .eq('player_id', playerId)
-    .maybeSingle();
+// `withPhoto: false` leaves out the photo (up to 5MB, more as base64), for
+// pages that only need the name and balance and show the small avatar
+// thumbnail instead — the poker pages, which wait for this before joining.
+async function loadProfile(supabase: SupabaseClient, playerId: number, withPhoto = true) {
+  const columns = `player_id, first_name, last_name, bio, balance${withPhoto ? ', profile_photo' : ''}`;
+  const [{ data: player, error: playerError }, { data: usernameRow }] = await Promise.all([
+    supabase.from('players').select(columns).eq('player_id', playerId).maybeSingle(),
+    supabase.from('usernames').select('username').eq('player_id', playerId).eq('is_current', true).maybeSingle(),
+  ]);
 
   if (playerError) return { profile: null, error: playerError };
   if (!player) return { profile: null, error: null };
 
-  const row = player as ProfileRow;
-
-  const { data: usernameRow } = await supabase
-    .from('usernames')
-    .select('username')
-    .eq('player_id', playerId)
-    .eq('is_current', true)
-    .maybeSingle();
+  const row = player as unknown as ProfileRow;
 
   return {
     profile: {
@@ -45,7 +41,7 @@ async function loadProfile(supabase: SupabaseClient, playerId: number) {
       username: usernameRow?.username ?? null,
       bio: row.bio,
       balance: row.balance,
-      profilePhotoDataUrl: photoToDataUrl(row.profile_photo),
+      profilePhotoDataUrl: photoToDataUrl(row.profile_photo ?? null),
     },
     error: null,
   };
@@ -137,7 +133,8 @@ export async function GET(request: Request) {
   const { playerId, errorResponse } = await requirePlayerId(request, supabase);
   if (errorResponse) return errorResponse;
 
-  const { profile, error } = await loadProfile(supabase, playerId!);
+  const withPhoto = new URL(request.url).searchParams.get('photo') !== 'none';
+  const { profile, error } = await loadProfile(supabase, playerId!, withPhoto);
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   return Response.json({ profile }, { status: 200 });

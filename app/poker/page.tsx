@@ -163,7 +163,8 @@ export default function PokerLobbyPage() {
 
   const { connected, error: channelError } = usePokerChannel<PokerLobbyState>(
     POKER_LOBBY_CHANNEL_NAME,
-    Boolean(token && profile),
+    // Connect while the profile loads, not after.
+    Boolean(token),
     setLobby
   );
 

@@ -54,7 +54,7 @@ export const GAMES: Game[] = [
     id: 'slots',
     name: 'Slots',
     description: 'Spin the reels and line up matching symbols.',
-    href: null,
+    href: '/slots',
     tag: 'Reels',
     statsCode: 'slots',
     recordsResults: false,

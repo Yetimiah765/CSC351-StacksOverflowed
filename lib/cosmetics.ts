@@ -40,6 +40,17 @@ export function toCosmetic(row: CosmeticRow): Cosmetic {
   };
 }
 
+// A player's collection in the order the profile lists it: defaults first
+// (the leftmost item in each row, SRS-119.2), then the rest in the order
+// they were won. Used by the owner's own collection and their public
+// profile (SRS-121.9), so the two always match.
+export function orderCollection(rows: { acquired_at: string; cosmetics: CosmeticRow }[]): Cosmetic[] {
+  return rows
+    .map((row) => ({ ...toCosmetic(row.cosmetics), acquiredAt: row.acquired_at }))
+    .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.acquiredAt.localeCompare(b.acquiredAt) || a.cosmeticId - b.cosmeticId)
+    .map(({ acquiredAt: _acquiredAt, ...cosmetic }) => cosmetic);
+}
+
 const CATEGORY_ORDER = new Map(COSMETIC_CATEGORIES.map(({ category }, i) => [category, i]));
 export const byCategory = (a: Cosmetic, b: Cosmetic) =>
   (CATEGORY_ORDER.get(a.category) ?? 0) - (CATEGORY_ORDER.get(b.category) ?? 0) || a.cosmeticId - b.cosmeticId;

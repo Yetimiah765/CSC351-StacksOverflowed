@@ -1,13 +1,13 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { photoToAvatarDataUrl } from '../../../../../lib/playerDisplay';
 import { sumMoney } from '../../../../../lib/playerStats';
-import { toCosmetic, type Cosmetic, type CosmeticCategory, type CosmeticRow } from '../../../../../lib/cosmetics';
+import { orderCollection, toCosmetic, type Cosmetic, type CosmeticCategory, type CosmeticRow } from '../../../../../lib/cosmetics';
 
 // A player's public profile (UR-121): what other players and guests may see
 // (SRS-NFR-106). It reads only the columns it returns, so private account
 // fields never leave the database: the username (SRS-121.3), bio
 // (SRS-121.4), photo (SRS-121.5), overall money won and lost (SRS-121.7,
-// SRS-121.8), and equipped cosmetics (SRS-121.13).
+// SRS-121.8), and equipped (SRS-121.13) and owned (SRS-121.9) cosmetics.
 //
 // Never reads the request, so like ./avatar it must opt out of Next's static
 // caching, or a changed profile would never show.
@@ -31,6 +31,8 @@ export interface PublicProfile {
   moneyLost: number;
   // The equipped card, chip and profile outline; null for an empty slot.
   equipped: Record<CosmeticCategory, Cosmetic | null>;
+  // Every cosmetic they own, in the same order as their own profile.
+  owned: Cosmetic[];
 }
 
 export async function GET(_request: Request, { params }: { params: { playerId: string } }) {
@@ -48,13 +50,15 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     { data: player, error: playerError },
     { data: stats, error: statsError },
     { data: equippedRows, error: equippedError },
+    { data: ownedRows, error: ownedError },
   ] = await Promise.all([
     supabase.from('usernames').select('username').eq('player_id', playerId).eq('is_current', true).maybeSingle(),
     supabase.from('players').select('bio, profile_photo').eq('player_id', playerId).maybeSingle(),
     supabase.from('player_game_stats').select('money_won, money_lost').eq('player_id', playerId),
     supabase.from('player_equipped_cosmetics').select(`category, cosmetics(${COSMETIC_COLUMNS})`).eq('player_id', playerId),
+    supabase.from('player_cosmetics').select(`acquired_at, cosmetics(${COSMETIC_COLUMNS})`).eq('player_id', playerId),
   ]);
-  const error = usernameError ?? playerError ?? statsError ?? equippedError;
+  const error = usernameError ?? playerError ?? statsError ?? equippedError ?? ownedError;
   if (error) return Response.json({ error: error.message }, { status: 500 });
   // Every account has a current username, so none means no such player.
   if (!usernameRow || !player) return Response.json({ error: 'Player not found.' }, { status: 404 });
@@ -67,6 +71,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     moneyWon: sumMoney(stats ?? [], 'money_won'),
     moneyLost: sumMoney(stats ?? [], 'money_lost'),
     equipped: { Card: null, Chip: null, 'Profile Outline': null },
+    owned: orderCollection((ownedRows ?? []) as unknown as { acquired_at: string; cosmetics: CosmeticRow }[]),
   };
   for (const row of (equippedRows ?? []) as unknown as { category: CosmeticCategory; cosmetics: CosmeticRow | null }[]) {
     if (row.cosmetics && row.category in profile.equipped) profile.equipped[row.category] = toCosmetic(row.cosmetics);

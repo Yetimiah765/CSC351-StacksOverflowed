@@ -28,6 +28,7 @@ const tables = {
   players: makeTableMock(),
   player_game_stats: makeTableMock(),
   player_equipped_cosmetics: makeTableMock(),
+  player_cosmetics: makeTableMock(),
 };
 const from = vi.fn((table: keyof typeof tables) => tables[table]);
 
@@ -159,6 +160,28 @@ describe('Public profile API route', () => {
     const { equipped } = await (await get('7')).json();
 
     expect(equipped).toEqual({ Card: null, Chip: null, 'Profile Outline': null });
+  });
+
+  it('returns every cosmetic the player owns, in the same order as their own profile (SRS-121.9)', async () => {
+    const cosmetic = (cosmetic_id: number, category: string, asset_path: string, is_default = false, is_holographic = false) => ({
+      cosmetic_id, cosmetic_name: asset_path, category, is_default, asset_path, is_holographic,
+    });
+    tables.player_cosmetics.defaultResult = {
+      data: [
+        { acquired_at: '2026-10-21T10:00:00Z', cosmetics: cosmetic(5, 'Chip', 'neon-volt') },
+        { acquired_at: '2026-10-20T10:00:00Z', cosmetics: cosmetic(46, 'Card', 'holo-neon', false, true) },
+        { acquired_at: '2026-09-01T10:00:00Z', cosmetics: cosmetic(2, 'Chip', 'classic-red', true) },
+        { acquired_at: '2026-09-01T10:00:00Z', cosmetics: cosmetic(1, 'Card', 'classic-navy', true) },
+      ],
+      error: null,
+    };
+
+    const { owned } = await (await get('7')).json();
+
+    // Defaults first, then the rest in the order they were won.
+    expect(owned.map((c: { artKey: string }) => c.artKey)).toEqual(['classic-navy', 'classic-red', 'holo-neon', 'neon-volt']);
+    expect(owned[2]).toMatchObject({ cosmeticId: 46, isHolographic: true, isDefault: false });
+    expect(tables.player_cosmetics.eq).toHaveBeenCalledWith('player_id', 7);
   });
 
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {

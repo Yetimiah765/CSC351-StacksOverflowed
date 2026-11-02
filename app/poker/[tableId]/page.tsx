@@ -26,6 +26,7 @@ import {
 import { EMOTE_SHOW_MS } from '../../../lib/emotes';
 import EmoteArt from '../../../components/emotes/EmoteArt';
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
+import { publicProfilePath } from '../../../lib/publicProfile';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
 import ActionCallout, { calloutDuration } from '../ActionCallout';
@@ -1016,6 +1017,16 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             // The button stays on its seat between hands, like a real table.
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
             const seatCosmetics = seat.playerId ? cosmetics[seat.playerId] : undefined;
+            // SRS-121.1: a seated player's photo and name open their public
+            // profile, in a new tab so the hand carries on here.
+            const profileLink = seat.playerId
+              ? {
+                  href: publicProfilePath(seat.playerId),
+                  target: '_blank',
+                  rel: 'noopener noreferrer',
+                  title: isOwnSeat ? 'View your public profile' : `View ${seat.username ?? 'this player'}'s profile`,
+                }
+              : null;
             // Only until the seat acts: after that the bet is theirs, not just the blind.
             const blindLabel = !inHandPhase || seat.hasActed
               ? null
@@ -1190,37 +1201,45 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     className={`relative z-10 h-14 w-14 shrink-0 rounded-full sm:h-16 sm:w-16 ${award && showdown ? 'poker-win-glow' : ''}`}
                     style={award && showdown ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
                   >
-                    <button
-                      type="button"
-                      disabled={!isPickable}
-                      onClick={() => setSelectedSeat(seat.seatNumber)}
-                      aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
-                      aria-pressed={isPickable ? isSelected : undefined}
-                      className={`h-full w-full overflow-hidden rounded-full transition disabled:cursor-default ${
-                        isActive
-                          ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
-                          : seat.playerId
-                            ? seatCosmetics?.outline
+                    {seat.playerId && profileLink ? (
+                      <Link
+                        {...profileLink}
+                        aria-label={`${profileLink.title} (opens in a new tab)`}
+                        className={`block h-full w-full overflow-hidden rounded-full transition hover:brightness-110 ${
+                          isActive
+                            ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
+                            : seatCosmetics?.outline
                               ? 'border-2 border-transparent bg-slate-900 shadow-lg shadow-black/60'
                               : isOwnSeat
                                 ? 'border-2 border-emerald-300 bg-slate-900 shadow-[0_0_20px_rgba(110,231,183,0.45)]'
                                 : 'border-2 border-slate-300/40 bg-slate-900 shadow-lg shadow-black/60'
-                            : isSelected
-                              ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
-                              : isPickable
-                                ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
-                                : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
-                      }`}
-                    >
-                      {seat.playerId ? (
-                        avatars[seat.playerId] ? (
+                        }`}
+                      >
+                        {avatars[seat.playerId] ? (
                           <img src={avatars[seat.playerId] as string} alt="" className="h-full w-full object-cover" />
                         ) : (
                           <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-emerald-200">
                             {seat.username?.[0]?.toUpperCase()}
                           </span>
-                        )
-                      ) : (
+                        )}
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={!isPickable}
+                        onClick={() => setSelectedSeat(seat.seatNumber)}
+                        aria-label={isPickable ? `Pick seat ${seat.seatNumber}` : undefined}
+                        aria-pressed={isPickable ? isSelected : undefined}
+                        className={`h-full w-full overflow-hidden rounded-full transition disabled:cursor-default ${
+                          isActive
+                            ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
+                            : isSelected
+                              ? 'scale-110 border-2 border-amber-300 bg-amber-950/80 shadow-[0_0_22px_rgba(252,211,77,0.55)]'
+                              : isPickable
+                                ? 'border-2 border-dashed border-emerald-200/40 bg-slate-950/70 hover:scale-105 hover:border-amber-300 hover:bg-amber-950/40'
+                                : 'border-2 border-dashed border-slate-600/40 bg-slate-950/60'
+                        }`}
+                      >
                         <span
                           className={`flex h-full w-full items-center justify-center text-xs font-semibold uppercase tracking-wider ${
                             isSelected ? 'text-amber-200' : isPickable ? 'text-emerald-200/70' : 'text-slate-600'
@@ -1228,8 +1247,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         >
                           {isPickable ? 'Sit' : seat.seatNumber}
                         </span>
-                      )}
-                    </button>
+                      </button>
+                    )}
                     {seat.playerId ? <ProfileOutline artKey={seatCosmetics?.outline} /> : null}
                   </div>
 
@@ -1256,7 +1275,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                             : 'text-slate-500'
                       }`}
                     >
-                      {seat.playerId ? (isOwnSeat ? 'You' : seat.username) : isSelected ? 'Your pick' : `Seat ${seat.seatNumber}`}
+                      {profileLink ? (
+                        <Link {...profileLink} className="underline-offset-2 hover:underline">
+                          {isOwnSeat ? 'You' : seat.username}
+                        </Link>
+                      ) : isSelected ? (
+                        'Your pick'
+                      ) : (
+                        `Seat ${seat.seatNumber}`
+                      )}
                     </p>
                     {seat.chipStack !== null ? (
                       <p className="flex items-center justify-center gap-1 text-[11px] font-semibold tabular-nums text-amber-300">

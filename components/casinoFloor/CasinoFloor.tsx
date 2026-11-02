@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { INTERACTIVE_OBJECTS, type FloorObject } from '../../lib/casinoFloor';
+import { INTERACTIVE_OBJECTS, SEAT_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
 import { playHref, useSignedIn } from '../useSignedIn';
 import type { WalkInput } from './Scene';
 
@@ -20,7 +20,9 @@ import type { WalkInput } from './Scene';
 // (into the screen at the sports bar), then the game opens — guests are sent
 // to log in (SRS-108.3), and a game that isn't ready says so. A plain
 // list of the games sits under the floor for anyone who'd rather not walk,
-// or whose browser can't draw 3D (SRS-107.1).
+// or whose browser can't draw 3D (SRS-107.1). The seat taken is remembered
+// for the tab, so back from the game the player is seen getting up from it
+// (SRS-108.6).
 
 const display = Oswald({ weight: ['500', '700'], subsets: ['latin'], display: 'swap' });
 
@@ -49,6 +51,33 @@ function FloorMessage({ text }: { text: string }) {
   );
 }
 
+// The seat lives in sessionStorage, which can be blocked (a private window,
+// say); then there's just nothing to get up from.
+function readTakenSeat(): TakenSeat | null {
+  try {
+    return parseTakenSeat(sessionStorage.getItem(SEAT_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function rememberTakenSeat(seat: TakenSeat) {
+  try {
+    sessionStorage.setItem(SEAT_KEY, serializeTakenSeat(seat));
+  } catch {
+    // Not remembered: the player just appears at the door next time.
+  }
+}
+
+// Once they're up, a reload starts at the door as usual.
+function forgetTakenSeat() {
+  try {
+    sessionStorage.removeItem(SEAT_KEY);
+  } catch {
+    // Nothing to forget.
+  }
+}
+
 function canDraw3d() {
   try {
     const canvas = document.createElement('canvas');
@@ -65,8 +94,14 @@ export default function CasinoFloor() {
   const [near, setNear] = useState<FloorObject | null>(null);
   const nearRef = useRef<FloorObject | null>(null);
   const [webgl, setWebgl] = useState<boolean | null>(null);
+  // The seat taken to open a game, read once the page is in the browser:
+  // undefined until then, null when there's nothing to get up from.
+  const [returning, setReturning] = useState<TakenSeat | null | undefined>(undefined);
 
-  useEffect(() => setWebgl(canDraw3d()), []);
+  useEffect(() => {
+    setWebgl(canDraw3d());
+    setReturning(readTakenSeat());
+  }, []);
 
   // The game being sat down at (the scene plays the sitting and the camera
   // flying in), then, once that's over, the one whose page is opening.
@@ -83,10 +118,11 @@ export default function CasinoFloor() {
   // Seated, the camera over the table: open the game — guests go to log in
   // (SRS-108.3). The scene stops drawing, holding that last frame while the
   // page (already prefetched) loads.
-  const seated = useRef<(object: FloorObject) => void>(() => {});
-  seated.current = (object) => {
+  const seated = useRef<(object: FloorObject, spot: number | null) => void>(() => {});
+  seated.current = (object, spot) => {
     const href = object.interactive?.href;
     if (!href) return;
+    rememberTakenSeat({ object, spot });
     setOpening(true);
     router.push(playHref(signedIn, href));
   };
@@ -172,7 +208,7 @@ export default function CasinoFloor() {
 
       {/* The floor fills the rest of the window (on a phone, a fixed height). */}
       <div className="relative h-[70vh] min-h-[320px] overflow-hidden rounded-xl border border-white/10 bg-[#06030a] shadow-[0_20px_60px_rgba(0,0,0,0.6)] lg:h-auto lg:min-h-0 lg:flex-1">
-        {webgl === null ? (
+        {webgl === null || returning === undefined ? (
           <FloorMessage text="Opening the casino…" />
         ) : webgl ? (
           <div
@@ -189,7 +225,9 @@ export default function CasinoFloor() {
               }}
               onPlay={(object) => play.current(object)}
               playing={playing}
-              onSeated={(object) => seated.current(object)}
+              onSeated={(object, spot) => seated.current(object, spot)}
+              returning={returning}
+              onStood={forgetTakenSeat}
               paused={opening}
             />
           </div>

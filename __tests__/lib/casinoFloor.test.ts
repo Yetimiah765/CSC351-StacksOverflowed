@@ -10,6 +10,8 @@ import {
   moveWithCollisions,
   chairTile,
   nearbyObjectAt,
+  parseTakenSeat,
+  serializeTakenSeat,
   nearestChair,
   nearestScreen,
   pieceLayout,
@@ -152,5 +154,42 @@ describe('taking a seat', () => {
     expect(nearestScreen(sports, { x: 20, y: 11 })).toBe(0);
     expect(nearestScreen(sports, { x: 23, y: 11 })).toBe(1);
     expect(nearestChair(byId('shop'), { x: 13, y: 8.6 })).toBeNull();
+  });
+});
+
+describe('getting up after a game (SRS-108.6)', () => {
+  const object = (id: string) => INTERACTIVE_OBJECTS.find((candidate) => candidate.id === id)!;
+
+  it('remembers the chair taken at a table, and reads it back', () => {
+    const poker = object('poker');
+    const raw = serializeTakenSeat({ object: poker, spot: 3 });
+    expect(JSON.parse(raw)).toEqual({ objectId: 'poker', spot: 3 });
+    expect(parseTakenSeat(raw)).toEqual({ object: poker, spot: 3 });
+  });
+
+  it('remembers a screen at the sports bar, and no seat at the shop counter', () => {
+    const bar = object('sports-betting');
+    expect(parseTakenSeat(serializeTakenSeat({ object: bar, spot: 1 }))).toEqual({ object: bar, spot: 1 });
+    const shop = object('shop');
+    expect(parseTakenSeat(serializeTakenSeat({ object: shop, spot: null }))).toEqual({ object: shop, spot: null });
+  });
+
+  it('ignores nothing, garbage, an unknown game, or a chair the table does not have', () => {
+    const chairs = pieceLayout(object('blackjack')).chairs.length;
+    for (const raw of [
+      null,
+      '',
+      'not json',
+      'null',
+      JSON.stringify({ objectId: 'plant-1', spot: null }),
+      JSON.stringify({ objectId: 'baccarat', spot: 0 }),
+      JSON.stringify({ objectId: 'blackjack', spot: chairs }),
+      JSON.stringify({ objectId: 'blackjack', spot: -1 }),
+      JSON.stringify({ objectId: 'blackjack', spot: 1.5 }),
+      JSON.stringify({ objectId: 'blackjack', spot: '0' }),
+    ]) {
+      expect(parseTakenSeat(raw), String(raw)).toBeNull();
+    }
+    expect(parseTakenSeat(JSON.stringify({ objectId: 'blackjack', spot: chairs - 1 }))).not.toBeNull();
   });
 });

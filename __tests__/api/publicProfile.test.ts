@@ -239,6 +239,13 @@ describe('Public profile API route', () => {
     }
   });
 
+  it('cannot be used to look a player up by username or search text (SRS-121.2)', async () => {
+    for (const text of ['Ace777', 'jortiz', 'ace%', '*', '7 OR 1=1', '%25']) {
+      expect((await get(text)).status, text).toBe(400);
+    }
+    expect(from).not.toHaveBeenCalled();
+  });
+
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {
     tables.usernames.maybeSingleResult = { data: null, error: null };
     tables.players.maybeSingleResult = { data: null, error: null };

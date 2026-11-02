@@ -24,8 +24,9 @@ const RESULT_DELAY_MS = 250;
 // as soon as the purchase is saved without a duplicate refund giving the
 // result away. A holographic win gets a rainbow frame and its own line (SRS-127.6), shown
 // only once the reel has stopped so it doesn't give the result away either.
-// With `buyAgain`, the result also offers Buy again (SRS-127.7), disabled
-// with its reason shown when the box can't be bought again right now.
+// With `buyAgain`, the result also offers Buy again (SRS-127.7), which buys
+// the same box straight away; it's disabled, with its reason shown, when the
+// box can't be bought again right now. While it buys, Close waits too.
 export default function BlindBoxReveal({
   boxName,
   rewards,
@@ -37,7 +38,7 @@ export default function BlindBoxReveal({
   rewards: Pick<Cosmetic, 'cosmeticId' | 'category' | 'artKey'>[];
   result: BoxResult;
   onClose: () => void;
-  buyAgain?: { label: string; description: string; blocker: string | null; onClick: () => void };
+  buyAgain?: { label: string; description: string; blocker: string | null; busy: boolean; error: string; onClick: () => void };
 }) {
   const [instant] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -63,11 +64,11 @@ export default function BlindBoxReveal({
     if (!done) return;
     closeButtonRef.current?.focus();
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !buyAgain?.busy) onClose();
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [done, onClose]);
+  }, [done, onClose, buyAgain?.busy]);
 
   const strip = Array.from({ length: (CYCLES + 1) * rewards.length }, (_, i) => rewards[i % rewards.length]);
   const holographic = done && result.cosmetic.isHolographic;
@@ -144,7 +145,7 @@ export default function BlindBoxReveal({
             <button
               type="button"
               onClick={buyAgain.onClick}
-              disabled={Boolean(buyAgain.blocker)}
+              disabled={Boolean(buyAgain.blocker) || buyAgain.busy}
               aria-label={buyAgain.description}
               title={buyAgain.description}
               className="rounded-xl border border-amber-400/60 bg-slate-800 px-3 py-2 text-sm font-semibold text-amber-200 transition hover:border-amber-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
@@ -156,13 +157,18 @@ export default function BlindBoxReveal({
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
-            disabled={!done}
+            disabled={!done || buyAgain?.busy}
             className="w-full rounded-xl bg-emerald-400 px-5 py-2 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {done ? 'Close' : 'Opening…'}
           </button>
         </div>
         {done && buyAgain?.blocker ? <p className="mt-2 text-xs text-slate-400">{buyAgain.blocker}</p> : null}
+        {done && buyAgain?.error ? (
+          <p role="alert" className="mt-2 text-xs text-red-300">
+            {buyAgain.error}
+          </p>
+        ) : null}
       </div>
     </div>
   );

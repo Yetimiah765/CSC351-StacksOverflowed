@@ -124,6 +124,21 @@ export function rewardChances(regularCount: number, holographicCount: number, ho
 // SRS-122.1 / SRS-122.3: whether a box is on sale at `now`. A NULL start or
 // end means no limit on that side; the end time itself is already closed,
 // matching fn_buy_blind_box.
+// SRS-127.7: why the reveal's Buy again can't start another purchase of the
+// box just opened, or null when it can. The shop lists only boxes on sale,
+// so one missing from the list, or a limited box whose sale has since ended,
+// is off sale. The server still checks the purchase itself (SRS-124.5).
+export function buyAgainBlocker(
+  box: { price: number; availableUntil: string | null },
+  stillListed: boolean,
+  balance: number | null,
+  now: number = Date.now()
+): string | null {
+  if (!stillListed || (box.availableUntil && now >= Date.parse(box.availableUntil))) return 'This box is no longer on sale.';
+  if (balance !== null && balance < box.price) return `You need ${(box.price - balance).toLocaleString('en-US')} more coins.`;
+  return null;
+}
+
 export function isBoxOnSale(
   box: { is_available: boolean; available_from: string | null; available_until: string | null },
   now: number = Date.now()

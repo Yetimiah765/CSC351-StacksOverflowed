@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requirePlayerId } from '../../../../lib/auth';
 import { GAMES } from '../../../../lib/games';
+import { sumMoney } from '../../../../lib/playerStats';
 
 // SRS-117.2 / SRS-117.5 / SRS-118.2 / SRS-118.4: the logged-in player's money
 // won and money lost, overall and for each game, for the profile's statistics
@@ -20,8 +21,8 @@ export async function GET(request: Request) {
   if (error) return Response.json({ error: error.message }, { status: 500 });
 
   const rows = (data ?? []) as { game_code: string; money_won: number; money_lost: number }[];
-  const moneyWon = rows.reduce((total, row) => total + Number(row.money_won), 0);
-  const moneyLost = rows.reduce((total, row) => total + Number(row.money_lost), 0);
+  const moneyWon = sumMoney(rows, 'money_won');
+  const moneyLost = sumMoney(rows, 'money_lost');
 
   // Every game, keyed by its code; a game with no results yet has 0.
   const games: Record<string, { moneyWon: number; moneyLost: number }> = {};

@@ -1562,6 +1562,10 @@ flowchart LR
 
 *Traces to: UR-127*
 
+**SRS-127.7, JO, Buy again.** After the blind-box reward result is displayed, the system shall offer a Buy again option that starts a new purchase of the same blind box through the purchase confirmation in SRS-124.1, and shall disable it, with the reason shown, when the player's balance is below the box's price or the box is no longer on sale.
+
+*Traces to: UR-124, UR-127*
+
 ### UR-128, JO – Daily Login Box
 
 *User story: As a registered player, I want to open a free Daily Login Box in the Cosmetic Shop to receive a randomized coin reward once every 24 hours, so that I can earn additional virtual currency by returning to the website.*

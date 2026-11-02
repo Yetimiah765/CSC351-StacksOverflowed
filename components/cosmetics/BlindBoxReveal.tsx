@@ -24,16 +24,20 @@ const RESULT_DELAY_MS = 250;
 // as soon as the purchase is saved without a duplicate refund giving the
 // result away. A holographic win gets a rainbow frame and its own line (SRS-127.6), shown
 // only once the reel has stopped so it doesn't give the result away either.
+// With `buyAgain`, the result also offers Buy again (SRS-127.7), disabled
+// with its reason shown when the box can't be bought again right now.
 export default function BlindBoxReveal({
   boxName,
   rewards,
   result,
   onClose,
+  buyAgain,
 }: {
   boxName: string;
   rewards: Pick<Cosmetic, 'cosmeticId' | 'category' | 'artKey'>[];
   result: BoxResult;
   onClose: () => void;
+  buyAgain?: { label: string; description: string; blocker: string | null; onClick: () => void };
 }) {
   const [instant] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -134,15 +138,31 @@ export default function BlindBoxReveal({
           ) : null}
         </div>
 
-        <button
-          ref={closeButtonRef}
-          type="button"
-          onClick={onClose}
-          disabled={!done}
-          className="mt-4 w-full rounded-xl bg-emerald-400 px-5 py-2 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {done ? 'Close' : 'Opening…'}
-        </button>
+        <div className={`mt-4 grid gap-2 ${done && buyAgain ? 'grid-cols-2' : ''}`}>
+          {/* Only once the result shows, so it can't be pressed mid-spin. */}
+          {done && buyAgain ? (
+            <button
+              type="button"
+              onClick={buyAgain.onClick}
+              disabled={Boolean(buyAgain.blocker)}
+              aria-label={buyAgain.description}
+              title={buyAgain.description}
+              className="rounded-xl border border-amber-400/60 bg-slate-800 px-3 py-2 text-sm font-semibold text-amber-200 transition hover:border-amber-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {buyAgain.label}
+            </button>
+          ) : null}
+          <button
+            ref={closeButtonRef}
+            type="button"
+            onClick={onClose}
+            disabled={!done}
+            className="w-full rounded-xl bg-emerald-400 px-5 py-2 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {done ? 'Close' : 'Opening…'}
+          </button>
+        </div>
+        {done && buyAgain?.blocker ? <p className="mt-2 text-xs text-slate-400">{buyAgain.blocker}</p> : null}
       </div>
     </div>
   );

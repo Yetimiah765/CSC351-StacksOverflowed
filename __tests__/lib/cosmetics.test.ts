@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { CHIP_SKIN_VALUES, COSMETIC_ART_KEYS, drawCosmetic } from '../../lib/cosmeticArt';
-import { byCategory, duplicateRefund, isBoxOnSale, OUTLINE_ACCENTS, rewardChances, type Cosmetic } from '../../lib/cosmetics';
+import { buyAgainBlocker, byCategory, duplicateRefund, isBoxOnSale, OUTLINE_ACCENTS, rewardChances, type Cosmetic } from '../../lib/cosmetics';
 
 describe('blind box rules', () => {
   it('refunds half the price on a duplicate, rounded up (SRS-126.3, SRS-126.4)', () => {
@@ -106,5 +106,32 @@ describe('cosmetic artwork', () => {
 
   it('returns null for an unknown art key', () => {
     expect(drawCosmetic('nope', 'x')).toBeNull();
+  });
+});
+
+describe('Buy again on the blind box reveal (SRS-127.7)', () => {
+  const neon = { price: 350, availableUntil: null };
+  const halloween = { price: 625, availableUntil: '2026-11-01T04:00:00Z' };
+
+  it('is available while the box is on sale and the player can afford it', () => {
+    expect(buyAgainBlocker(neon, true, 1150)).toBeNull();
+    expect(buyAgainBlocker(neon, true, 350)).toBeNull();
+    expect(buyAgainBlocker(halloween, true, 1000, Date.parse('2026-10-31T20:00:00Z'))).toBeNull();
+  });
+
+  it('says how many more coins are needed when the balance is below the price', () => {
+    expect(buyAgainBlocker(neon, true, 175)).toBe('You need 175 more coins.');
+    expect(buyAgainBlocker(halloween, true, 0, Date.parse('2026-10-31T20:00:00Z'))).toBe('You need 625 more coins.');
+  });
+
+  it('is off once the box is no longer on sale, whatever the balance', () => {
+    // Gone from the shop's list...
+    expect(buyAgainBlocker(neon, false, 5000)).toBe('This box is no longer on sale.');
+    // ...or a limited box whose sale ended while the shop was open.
+    expect(buyAgainBlocker(halloween, true, 5000, Date.parse('2026-11-01T04:00:00Z'))).toBe('This box is no longer on sale.');
+  });
+
+  it('leaves the balance check to the server when the balance is not known yet', () => {
+    expect(buyAgainBlocker(neon, true, null)).toBeNull();
   });
 });

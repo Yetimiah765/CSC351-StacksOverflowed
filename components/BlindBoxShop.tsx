@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { BALANCE_CHANGED_EVENT, notifyBalanceChanged } from '../lib/balanceEvents';
-import { COSMETIC_CATEGORIES, type Cosmetic } from '../lib/cosmetics';
+import { buyAgainBlocker, COSMETIC_CATEGORIES, type Cosmetic } from '../lib/cosmetics';
 import BlindBoxReveal, { type BoxResult } from './cosmetics/BlindBoxReveal';
 import CosmeticArt from './cosmetics/CosmeticArt';
 
@@ -55,8 +55,9 @@ function lastDay(availableUntil: string) {
 // The blind boxes on the Cosmetic Shop page (UR-122 - UR-127): each box on
 // sale with its description, price, odds and possible rewards (SRS-122.1,
 // SRS-122.2, SRS-123.2), a confirmation before any coins are taken
-// (SRS-124.1 - SRS-124.3), then the reveal. Guests can browse but must log
-// in to buy.
+// (SRS-124.1 - SRS-124.3), then the reveal, whose Buy again goes back to the
+// same box's confirmation (SRS-127.7). Guests can browse but must log in to
+// buy.
 export default function BlindBoxShop() {
   const [token, setToken] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<ShopBox[] | null>(null);
@@ -327,6 +328,19 @@ export default function BlindBoxShop() {
           rewards={reveal.box.rewards}
           result={reveal.result}
           onClose={() => setReveal(null)}
+          // SRS-127.7: back to the same box's confirmation (SRS-124.1), so
+          // nothing is taken without confirming again.
+          buyAgain={{
+            label: `Buy again · ${reveal.box.price.toLocaleString('en-US')}`,
+            description: `Buy the ${reveal.box.name} again for ${reveal.box.price.toLocaleString('en-US')} coins`,
+            blocker: buyAgainBlocker(reveal.box, Boolean(boxes?.some((box) => box.boxId === reveal.box.boxId)), balance),
+            onClick: () => {
+              const box = boxes?.find((candidate) => candidate.boxId === reveal.box.boxId) ?? reveal.box;
+              setReveal(null);
+              setBuyError('');
+              setConfirming(box);
+            },
+          }}
         />
       ) : null}
     </section>

@@ -20,10 +20,74 @@ body {
    --reel-stop to how far its strip travels before it stops. */
 @keyframes reel-spin {
   from {
-    transform: translateY(0);
+    transform: translateY(var(--reel-start, 0));
   }
   to {
     transform: translateY(var(--reel-stop));
+  }
+}
+
+/* The Daily Login Box's slot machine (components/SlotReveal.tsx). The lever
+   swings down towards the viewer and springs back: seen from the front, its
+   rod shrinks to nothing and flips below its hub (lever-rod), while the ball
+   at its end follows it down, growing as it comes closer (lever-ball). The
+   reels blur while they spin (reel-blur) and the cabinet's bulbs chase
+   (slot-bulb), faster once there's a win. */
+@keyframes lever-rod {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  20%,
+  77% {
+    transform: scaleY(0);
+  }
+  40%,
+  55% {
+    transform: scaleY(-0.75);
+  }
+}
+
+@keyframes lever-ball {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  20%,
+  77% {
+    transform: translateY(var(--lever-length)) scale(1.35);
+  }
+  40%,
+  55% {
+    transform: translateY(calc(var(--lever-length) * 1.75)) scale(1.1);
+  }
+}
+
+@keyframes reel-blur {
+  0%,
+  100% {
+    filter: blur(0);
+  }
+  15%,
+  75% {
+    filter: blur(1.4px);
+  }
+}
+
+@keyframes slot-bulb {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot-bulb {
+    animation: none !important;
+    opacity: 0.8;
   }
 }
 

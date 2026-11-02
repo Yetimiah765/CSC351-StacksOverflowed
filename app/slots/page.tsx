@@ -47,6 +47,10 @@ export default function SlotsPage() {
       .then(async (res) => {
         const data = await res.json().catch(() => null);
         if (!res.ok || !Array.isArray(data?.betAmounts)) throw new Error();
+        if (data.betAmounts.length === 0) {
+          setLoadError('No bet amounts are set up yet, so the slot machine is closed.');
+          return;
+        }
         setBetAmounts(data.betAmounts);
         setBet(data.defaultBet ?? initialSlotBet(data.betAmounts));
       })
@@ -125,13 +129,15 @@ export default function SlotsPage() {
               })}
             </div>
           )}
-          <p className="mt-3 text-center text-sm text-rose-100/80">
-            {bet === null ? 'Loading bets…' : (
-              <>
-                Bet: <span className="font-bold text-white">{bet} coins</span> per spin
-              </>
-            )}
-          </p>
+          {!loadError && (
+            <p className="mt-3 text-center text-sm text-rose-100/80">
+              {bet === null ? 'Loading bets…' : (
+                <>
+                  Bet: <span className="font-bold text-white">{bet} coins</span> per spin
+                </>
+              )}
+            </p>
+          )}
         </section>
       </div>
     </main>

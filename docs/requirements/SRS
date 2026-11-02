@@ -930,6 +930,8 @@ flowchart LR
 
 *User story: As a player, I want to permanently delete my account after confirming my decision and entering my current password, so that I can permanently remove my information from the platform.*
 
+*Revised on 2026-11-02, agreed with SP and JN: an account is now deleted immediately instead of waiting in a pending-deletion state for its activity to settle. SRS-106.6, SRS-106.9 and SRS-106.10 were reworded, SRS-106.7 and SRS-106.8 were removed (their numbers are not reused), and SRS-106.11 was added.*
+
 **SRS-106.1, JO, Account-deletion confirmation.** The system shall display a confirmation prompt before beginning permanent account deletion.
 
 *Traces to: UR-106*
@@ -950,25 +952,25 @@ flowchart LR
 
 *Traces to: UR-106*
 
-**SRS-106.6, JO, Pending-deletion state.** If the player confirms account deletion while unresolved account activity exists, the system shall place the account into a pending-deletion state.
+**SRS-106.6, JO, Immediate deletion.** After the player confirms account deletion and verifies their password, the system shall permanently delete the account immediately, without waiting for unresolved account activity, unless SRS-106.10 prevents the deletion.
 
 *Traces to: UR-106*
 
-**SRS-106.7, JO, Pending-deletion account-access restriction.** While an account is pending deletion, the system shall deny attempts to authenticate to or resume an interactive session for that account.
+**SRS-106.7, JO, Pending-deletion account-access restriction.** *Removed on 2026-11-02: accounts are deleted immediately (SRS-106.6), so an account is never left pending deletion.*
 
-*Traces to: UR-106*
+**SRS-106.8, JO, Pending-deletion activity restriction.** *Removed on 2026-11-02: accounts are deleted immediately (SRS-106.6), so an account is never left pending deletion.*
 
-**SRS-106.8, JO, Pending-deletion activity restriction.** While an account is pending deletion, the system shall reject any new player-initiated request to begin a game, place a wager, make a purchase, edit profile information, or perform another account action.
+**SRS-106.9, JO, Forfeited single-player activity.** When an account is deleted, the system shall cancel any blackjack hand in play and any unsettled regular sports wager without paying out or refunding its stake.
 
-*Traces to: UR-106*
+*Traces to: UR-106, UR-205, UR-901*
 
-**SRS-106.9, JO, Existing activity settlement.** The system shall continue processing unresolved activity that existed before the account entered the pending-deletion state until that activity reaches a final result.
+**SRS-106.10, JO, Poker seat restriction.** The system shall refuse to delete an account while the player is seated at a poker table, and shall tell the player to leave the table first.
 
-*Traces to: UR-106*
+*Traces to: UR-106, UR-001*
 
-**SRS-106.10, JO, Final deletion trigger.** After all unresolved account activity reaches a final result, the system shall initiate permanent account deletion.
+**SRS-106.11, JO, Showdown stake retention.** When an account with an unsettled Showdown entry is deleted, the system shall keep that entry's stake in the Showdown pool and, when the Showdown settles, shall divide the whole pool among the remaining players who backed the winning team, without paying the deleted account. If no remaining player backed the winning team, the system shall return the remaining players' stakes.
 
-*Traces to: UR-106*
+*Traces to: UR-106, UR-214*
 
 # Home Page
 
@@ -1476,7 +1478,7 @@ flowchart LR
 
 *Traces to: UR-124*
 
-**SRS-124.8, JO, Purchase authentication restriction.** The system shall allow only authenticated players with active accounts to purchase blind boxes, shall direct unauthenticated guests to log in instead of purchasing, and shall reject purchase requests from unauthenticated users or accounts pending deletion.
+**SRS-124.8, JO, Purchase authentication restriction.** The system shall allow only authenticated players with active accounts to purchase blind boxes, shall direct unauthenticated guests to log in instead of purchasing, and shall reject purchase requests from unauthenticated users or accounts that are not active.
 
 *Traces to: UR-103, UR-106, UR-124*
 
@@ -1640,7 +1642,7 @@ flowchart LR
 
 *Traces to: UR-128*
 
-**SRS-128.20, JO, Authentication restriction.** The system shall allow only authenticated players with active accounts to open the Daily Login Box and shall reject opening requests from unauthenticated users or accounts pending deletion.
+**SRS-128.20, JO, Authentication restriction.** The system shall allow only authenticated players with active accounts to open the Daily Login Box and shall reject opening requests from unauthenticated users or accounts that are not active.
 
 *Traces to: UR-103, UR-106, UR-128*
 

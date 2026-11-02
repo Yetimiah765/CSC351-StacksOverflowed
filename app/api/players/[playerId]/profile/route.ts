@@ -5,7 +5,8 @@ import { sumMoney } from '../../../../../lib/playerStats';
 // A player's public profile (UR-121): what other players and guests may see
 // (SRS-NFR-106). It reads only the columns it returns, so private account
 // fields never leave the database: the username (SRS-121.3), bio
-// (SRS-121.4), photo (SRS-121.5) and overall money won (SRS-121.7).
+// (SRS-121.4), photo (SRS-121.5), and overall money won and lost
+// (SRS-121.7, SRS-121.8).
 //
 // Never reads the request, so like ./avatar it must opt out of Next's static
 // caching, or a changed profile would never show.
@@ -24,6 +25,7 @@ export interface PublicProfile {
   photoUrl: string | null;
   // Overall only, added up the same way as the owner's own statistics.
   moneyWon: number;
+  moneyLost: number;
 }
 
 export async function GET(_request: Request, { params }: { params: { playerId: string } }) {
@@ -43,7 +45,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
   ] = await Promise.all([
     supabase.from('usernames').select('username').eq('player_id', playerId).eq('is_current', true).maybeSingle(),
     supabase.from('players').select('bio, profile_photo').eq('player_id', playerId).maybeSingle(),
-    supabase.from('player_game_stats').select('money_won').eq('player_id', playerId),
+    supabase.from('player_game_stats').select('money_won, money_lost').eq('player_id', playerId),
   ]);
   const error = usernameError ?? playerError ?? statsError;
   if (error) return Response.json({ error: error.message }, { status: 500 });
@@ -56,6 +58,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     bio: player.bio?.trim() ? player.bio : null,
     photoUrl: await photoToAvatarDataUrl(player.profile_photo, PHOTO_SIZE),
     moneyWon: sumMoney(stats ?? [], 'money_won'),
+    moneyLost: sumMoney(stats ?? [], 'money_lost'),
   };
   return Response.json(profile, { status: 200 });
 }

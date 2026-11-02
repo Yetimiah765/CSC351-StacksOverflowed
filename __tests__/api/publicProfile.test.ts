@@ -209,6 +209,36 @@ describe('Public profile API route', () => {
     expect(tables.player_game_stats.select).toHaveBeenCalledWith('money_won, money_lost');
   });
 
+  it('never asks for or returns private account information (SRS-121.12)', async () => {
+    // Even if the database handed back whole rows, private fields included...
+    tables.players.maybeSingleResult = {
+      data: {
+        bio: 'Hi', profile_photo: null, player_id: 7, first_name: 'Ada', last_name: 'Lovelace', birthday: '1990-12-10',
+        password_hash: '$2a$10$abcdefghijklmnopqrstuv', balance: 98765, account_status: 'Active',
+      },
+      error: null,
+    };
+    tables.usernames.maybeSingleResult = { data: { username: 'Ace777', player_id: 7, reserved_until: null }, error: null };
+
+    const body = await (await get('7')).json();
+
+    // ...the answer holds only the public fields.
+    expect(Object.keys(body).sort()).toEqual(['bio', 'equipped', 'moneyLost', 'moneyWon', 'owned', 'photoUrl', 'playerId', 'username']);
+    const text = JSON.stringify(body);
+    for (const secret of ['Ada', 'Lovelace', '1990-12-10', '$2a$', '98765', 'password', 'balance', 'birthday', 'first_name', 'last_name']) {
+      expect(text, secret).not.toContain(secret);
+    }
+
+    // And it never asks the database for them in the first place.
+    expect(tables.players.select.mock.calls).toEqual([['bio, profile_photo']]);
+    expect(tables.usernames.select.mock.calls).toEqual([['username']]);
+    const tablesRead = from.mock.calls.map(([table]) => table);
+    expect(tablesRead).not.toContain('player_sessions');
+    for (const [columns] of Object.values(tables).flatMap((table) => table.select.mock.calls)) {
+      expect(columns, columns).not.toMatch(/\*|first_name|last_name|birthday|password|balance|token/);
+    }
+  });
+
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {
     tables.usernames.maybeSingleResult = { data: null, error: null };
     tables.players.maybeSingleResult = { data: null, error: null };

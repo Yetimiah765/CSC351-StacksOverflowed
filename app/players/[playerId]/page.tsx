@@ -12,7 +12,8 @@ import type { PublicProfile } from '../../api/players/[playerId]/profile/route';
 // included, and it only ever receives the fields cleared for public viewing
 // (SRS-NFR-106): the username (SRS-121.3), bio (SRS-121.4), photo
 // (SRS-121.5), overall money won and lost (SRS-121.7, SRS-121.8), and
-// equipped cosmetics, with the outline around the photo (SRS-121.13).
+// equipped cosmetics, with the outline around the photo (SRS-121.13), and
+// the whole collection (SRS-121.9).
 export default function PublicProfilePage() {
   const { playerId } = useParams<{ playerId: string }>();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -106,6 +107,24 @@ export default function PublicProfilePage() {
           </div>
         </section>
 
+        {/* Overall only: per-game figures stay private (SRS-121.11). */}
+        <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
+          <h2 className="text-xl font-semibold">Money won and lost</h2>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {[
+              { label: 'Money won', value: profile.moneyWon, color: 'text-emerald-300' },
+              { label: 'Money lost', value: profile.moneyLost, color: 'text-rose-300' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
+                <p className="text-xs uppercase tracking-widest text-slate-400">{label}</p>
+                <p className={`mt-1 text-2xl font-semibold ${color}`}>
+                  {value.toLocaleString('en-US')} <span className="text-sm font-normal text-slate-400">coins</span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
         <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
           <h2 className="text-xl font-semibold">Equipped</h2>
           <ul className="mt-4 flex flex-wrap gap-4">
@@ -139,21 +158,51 @@ export default function PublicProfilePage() {
           </ul>
         </section>
 
-        {/* Overall only: per-game figures stay private (SRS-121.11). */}
         <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
-          <h2 className="text-xl font-semibold">Money won and lost</h2>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {[
-              { label: 'Money won', value: profile.moneyWon, color: 'text-emerald-300' },
-              { label: 'Money lost', value: profile.moneyLost, color: 'text-rose-300' },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
-                <p className="text-xs uppercase tracking-widest text-slate-400">{label}</p>
-                <p className={`mt-1 text-2xl font-semibold ${color}`}>
-                  {value.toLocaleString('en-US')} <span className="text-sm font-normal text-slate-400">coins</span>
-                </p>
-              </div>
-            ))}
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-xl font-semibold">Collection</h2>
+            <p className="text-sm text-slate-400">
+              {profile.owned.length} {profile.owned.length === 1 ? 'cosmetic' : 'cosmetics'}
+            </p>
+          </div>
+          <div className="mt-4 divide-y divide-slate-800">
+            {COSMETIC_CATEGORIES.map(({ category, label }) => {
+              const items = profile.owned.filter((cosmetic) => cosmetic.category === category);
+              return (
+                <div key={category} className="py-4 first:pt-0 last:pb-0">
+                  <h3 className="text-sm uppercase tracking-widest text-slate-400">{label}</h3>
+                  {items.length === 0 ? (
+                    <p className="mt-2 text-sm text-slate-500">None yet.</p>
+                  ) : (
+                    <ul className="mt-3 flex gap-3 overflow-x-auto pb-1">
+                      {items.map((cosmetic) => {
+                        const isEquipped = profile.equipped[category]?.cosmeticId === cosmetic.cosmeticId;
+                        return (
+                          <li key={cosmetic.cosmeticId} className="w-24 shrink-0">
+                            <div
+                              className={`flex h-24 w-24 items-center justify-center rounded-xl border-2 bg-slate-950 p-2 ${
+                                isEquipped ? 'border-emerald-400' : 'border-slate-800'
+                              }`}
+                            >
+                              <CosmeticArt artKey={cosmetic.artKey} category={cosmetic.category} />
+                            </div>
+                            <p className="mt-1 truncate text-center text-xs text-slate-300" title={cosmetic.name}>
+                              {cosmetic.name}
+                            </p>
+                            {cosmetic.isHolographic ? (
+                              <p className="bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text text-center text-[11px] font-semibold text-transparent">
+                                Holographic
+                              </p>
+                            ) : null}
+                            {isEquipped ? <p className="text-center text-[11px] font-semibold text-emerald-300">Equipped</p> : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
       </div>

@@ -2197,6 +2197,10 @@ CREATE TABLE slot_bet_amounts (
                     CHECK (bet_amount > 0)
 );
 
+-- SRS-306.1: the five bets a player may choose before a spin.
+INSERT INTO slot_bet_amounts (bet_amount)
+VALUES (5), (10), (25), (50), (100);
+
 -- Table: slot_spins
 -- Reviewed by: CL (Cris Luperon)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-306.1, SRS-307.1, SRS-309.1

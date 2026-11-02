@@ -113,6 +113,26 @@ describe('Public profile API route', () => {
     expect((await (await get('7')).json()).moneyWon).toBe(0);
   });
 
+  it("returns the player's overall money lost across every game (SRS-121.8)", async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [
+        { money_won: 300, money_lost: 120 },
+        { money_won: 45, money_lost: 0 },
+        { money_won: 0, money_lost: 80 },
+      ],
+      error: null,
+    };
+
+    const body = await (await get('7')).json();
+
+    expect([body.moneyWon, body.moneyLost]).toEqual([345, 200]);
+    expect(tables.player_game_stats.select).toHaveBeenCalledWith('money_won, money_lost');
+  });
+
+  it('shows 0 money lost for a player with no results (SRS-121.8)', async () => {
+    expect((await (await get('7')).json()).moneyLost).toBe(0);
+  });
+
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {
     tables.usernames.maybeSingleResult = { data: null, error: null };
     tables.players.maybeSingleResult = { data: null, error: null };

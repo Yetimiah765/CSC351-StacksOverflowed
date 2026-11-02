@@ -9,7 +9,7 @@ import type { PublicProfile } from '../../api/players/[playerId]/profile/route';
 // Another player's public profile (UR-121). Anyone can open it, guests
 // included, and it only ever receives the fields cleared for public viewing
 // (SRS-NFR-106): the username (SRS-121.3), bio (SRS-121.4), photo
-// (SRS-121.5) and overall money won (SRS-121.7).
+// (SRS-121.5), and overall money won and lost (SRS-121.7, SRS-121.8).
 export default function PublicProfilePage() {
   const { playerId } = useParams<{ playerId: string }>();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -93,7 +93,10 @@ export default function PublicProfilePage() {
         <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
           <h2 className="text-xl font-semibold">Money won and lost</h2>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            {[{ label: 'Money won', value: profile.moneyWon, color: 'text-emerald-300' }].map(({ label, value, color }) => (
+            {[
+              { label: 'Money won', value: profile.moneyWon, color: 'text-emerald-300' },
+              { label: 'Money lost', value: profile.moneyLost, color: 'text-rose-300' },
+            ].map(({ label, value, color }) => (
               <div key={label} className="rounded-2xl border border-slate-800 bg-slate-950/70 p-4">
                 <p className="text-xs uppercase tracking-widest text-slate-400">{label}</p>
                 <p className={`mt-1 text-2xl font-semibold ${color}`}>

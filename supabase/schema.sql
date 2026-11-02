@@ -82,7 +82,7 @@ CREATE TABLE games (
 
 -- Table: players
 -- Reviewed by: JO (James Ortiz)
--- Supports: SRS-101.1, SRS-101.2, SRS-101.3, SRS-101.10, SRS-102.1, SRS-102.2, SRS-102.3, SRS-103.2, SRS-104.5, SRS-104.6, SRS-106.3, SRS-106.6, SRS-106.7, SRS-106.8, SRS-109.1, SRS-109.2, SRS-109.3, SRS-110.1, SRS-110.5, SRS-112.1, SRS-112.3, SRS-112.6, SRS-114.1, SRS-114.2, SRS-114.4, SRS-114.5, SRS-115.1, SRS-115.2, SRS-115.3, SRS-115.4, SRS-115.6, SRS-8.1, SRS-8.2, SRS-8.3, SRS-121.4, SRS-121.5, SRS-NFR-101, SRS-NFR-102
+-- Supports: SRS-101.1, SRS-101.2, SRS-101.3, SRS-101.10, SRS-102.1, SRS-102.2, SRS-102.3, SRS-103.2, SRS-104.5, SRS-104.6, SRS-106.3, SRS-106.6, SRS-109.1, SRS-109.2, SRS-109.3, SRS-110.1, SRS-110.5, SRS-112.1, SRS-112.3, SRS-112.6, SRS-114.1, SRS-114.2, SRS-114.4, SRS-114.5, SRS-115.1, SRS-115.2, SRS-115.3, SRS-115.4, SRS-115.6, SRS-8.1, SRS-8.2, SRS-8.3, SRS-121.4, SRS-121.5, SRS-NFR-101, SRS-NFR-102
 -- Purpose: Stores each registered player's account, authentication hash, virtual-currency balance, and profile details.
 CREATE TABLE players (
     player_id               SERIAL       PRIMARY KEY,
@@ -274,7 +274,7 @@ $$;
 
 -- Table: player_sessions
 -- Reviewed by: JO (James Ortiz)
--- Supports: SRS-103.3, SRS-103.4, SRS-103.5, SRS-103.6, SRS-103.7, SRS-103.8, SRS-105.1, SRS-105.2, SRS-105.3, SRS-106.7
+-- Supports: SRS-103.3, SRS-103.4, SRS-103.5, SRS-103.6, SRS-103.7, SRS-103.8, SRS-105.1, SRS-105.2, SRS-105.3, SRS-106.3
 -- Purpose: Stores the single active authenticated session for each player so a new login or duplicated tab can invalidate it.
 CREATE TABLE player_sessions (
     session_id      SERIAL       PRIMARY KEY,

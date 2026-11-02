@@ -53,7 +53,9 @@ export async function POST(request: Request) {
       return invalidCredentials();
     }
 
-    // SRS-106.7: a pending-deletion account cannot be accessed.
+    // Accounts are deleted immediately (SRS-106.6), so none is left pending
+    // deletion any more, but the schema still allows the status, so a
+    // pending-deletion account stays locked out (formerly SRS-106.7).
     if (player.account_status === 'Pending Deletion') {
       return Response.json(
         { error: 'This account is pending deletion and cannot be accessed.' },

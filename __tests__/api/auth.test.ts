@@ -441,7 +441,7 @@ describe('Auth API routes', () => {
       expect((await response.json()).player.balance).toBe(1000);
     });
 
-    it('rejects a pending-deletion account (SRS-106.7)', async () => {
+    it('rejects a pending-deletion account', async () => {
       await seedPlayer({ accountStatus: 'Pending Deletion' });
 
       const response = await loginPost(loginRequest({ username: 'gooduser1', password }));

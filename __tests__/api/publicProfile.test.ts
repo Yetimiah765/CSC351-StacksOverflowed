@@ -184,6 +184,31 @@ describe('Public profile API route', () => {
     expect(tables.player_cosmetics.eq).toHaveBeenCalledWith('player_id', 7);
   });
 
+  it("never returns another player's per-game money won or lost (SRS-121.11)", async () => {
+    // A player with results in three games.
+    tables.player_game_stats.defaultResult = {
+      data: [
+        { game_code: 'sports_betting', money_won: 300, money_lost: 120 },
+        { game_code: 'roulette', money_won: 45, money_lost: 0 },
+        { game_code: 'blackjack', money_won: 0, money_lost: 80 },
+      ],
+      error: null,
+    };
+
+    const response = await get('7');
+    const body = await response.json();
+
+    // Only the two overall totals...
+    expect([body.moneyWon, body.moneyLost]).toEqual([345, 200]);
+    expect(body).not.toHaveProperty('games');
+    // ...with no game named anywhere and no single game's figure on its own.
+    const text = JSON.stringify(body);
+    for (const code of ['sports_betting', 'roulette', 'blackjack', 'poker', 'slots']) expect(text).not.toContain(code);
+    for (const figure of [300, 120, 45, 80]) expect(Object.values(body)).not.toContain(figure);
+    // The route never even asks which game a figure came from.
+    expect(tables.player_game_stats.select).toHaveBeenCalledWith('money_won, money_lost');
+  });
+
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {
     tables.usernames.maybeSingleResult = { data: null, error: null };
     tables.players.maybeSingleResult = { data: null, error: null };

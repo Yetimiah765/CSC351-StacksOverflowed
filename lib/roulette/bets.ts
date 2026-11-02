@@ -112,6 +112,15 @@ export function spotWins(spot: BetSpot, n: number): boolean {
   }
 }
 
+/**
+ * The pending bets on the table once a spin's result is shown: none after
+ * Spin (SRS-305.3), the same bets at the same amounts after Let it ride
+ * (SRS-305.4).
+ */
+export function betsAfterSpin<B>(bets: Record<string, B>, letItRide: boolean): Record<string, B> {
+  return letItRide ? { ...bets } : {};
+}
+
 /** Coins a bet returns: its stake plus x times its stake on a win, else 0 (SRS-304.1). */
 export function betReturn(spot: BetSpot, amount: number, n: number): number {
   return spotWins(spot, n) ? amount * (payoutMultiplier(spot) + 1) : 0;

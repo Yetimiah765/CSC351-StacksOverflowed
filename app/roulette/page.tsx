@@ -7,6 +7,7 @@ import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import {
   CHIP_VALUES,
   MAX_TOTAL_BET,
+  betsAfterSpin,
   pocketColor,
   spotKey,
   spotLabel,
@@ -103,6 +104,8 @@ export default function RoulettePage() {
   const [message, setMessage] = useState<string | null>(null);
   // The committed result, held back until the wheel stops (SRS-304.2).
   const committed = useRef<SpinResponse | null>(null);
+  // Whether the spin in progress was started with Let it ride (SRS-305.4).
+  const rideRef = useRef(false);
 
   // SRS-301.10 / SRS-108.3: only signed-in players can play; guests log in first.
   useEffect(() => {
@@ -168,8 +171,9 @@ export default function RoulettePage() {
     setMessage(null);
   }
 
-  async function spin() {
+  async function spin(letItRide: boolean) {
     if (spinning || pending.length === 0 || !token) return; // SRS-302.4, SRS-302.5
+    rideRef.current = letItRide;
     setSpinning(true);
     setMessage(null);
 
@@ -218,9 +222,14 @@ export default function RoulettePage() {
     setBalance(result.balance);
     notifyBalanceChanged();
     setHistory((prev) => [result.number, ...prev].slice(0, 12));
-    // SRS-305.3: settled bets leave the table.
-    setBets({});
-    setPlacements([]);
+    // SRS-305.3: settled bets leave the table, unless the spin was a Let it
+    // ride (SRS-305.4), which leaves the same bets pending for the next spin.
+    const letItRide = rideRef.current;
+    setBets((prev) => betsAfterSpin(prev, letItRide));
+    if (!letItRide) setPlacements([]);
+    else if (totalBet > result.balance) {
+      setMessage("Your bets are now more than your balance. Remove some or clear them to spin again."); // SRS-301.7
+    }
     setSpinning(false);
   }
 
@@ -375,9 +384,19 @@ export default function RoulettePage() {
                 >
                   Clear Bets
                 </button>
+                {/* SRS-305.4: spin and keep these bets on the table afterwards. */}
                 <button
                   type="button"
-                  onClick={spin}
+                  onClick={() => spin(true)}
+                  disabled={spinning || pending.length === 0}
+                  title="Spin, then keep the same bets on the table until you clear them"
+                  className="rounded-lg border-2 border-emerald-400 bg-emerald-600/80 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  Let it ride
+                </button>
+                <button
+                  type="button"
+                  onClick={() => spin(false)}
                   disabled={spinning || pending.length === 0}
                   className="rounded-lg bg-gradient-to-b from-yellow-300 to-amber-500 px-8 py-2 text-base font-bold text-amber-950 shadow-lg shadow-amber-500/30 hover:brightness-110 disabled:opacity-40"
                 >

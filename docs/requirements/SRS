@@ -2099,7 +2099,11 @@ Traces to: UR-216
 
 *Traces to: UR-305*
 
-**SRS-305.3, CL, Settled bets leave the table.** After a spin's result is displayed, the system shall remove that spin's settled bets from the table, so that the next spin begins with no pending bets.
+**SRS-305.3, CL, Settled bets leave the table.** After a spin's result is displayed, the system shall remove that spin's settled bets from the table, so that the next spin begins with no pending bets, unless the spin was started with Let it ride per SRS-305.4.
+
+*Traces to: UR-305*
+
+**SRS-305.4, CL, Let it ride.** The system shall provide a "Let it ride" control beside Spin, enabled and disabled under the same conditions as Spin (SRS-302.4). Selecting it shall start a spin exactly as Spin does, and after that spin's result is displayed the system shall place the same bets, at the same amounts, back on the table as pending bets, which remain until the player changes them, clears them per SRS-305.1, or spins them. Because they are pending, they shall not be deducted until the next spin (SRS-301.8), and that spin shall be validated per SRS-301.6 and SRS-301.7 like any other.
 
 *Traces to: UR-305*
 

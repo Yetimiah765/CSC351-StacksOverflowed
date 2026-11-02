@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // See __tests__/api/auth.test.ts for the rationale behind this builder shape:
@@ -49,7 +50,7 @@ describe('Public profile API route', () => {
       table.maybeSingleResult = { data: null, error: null };
     }
     tables.usernames.maybeSingleResult = { data: { username: 'Ace777' }, error: null };
-    tables.players.maybeSingleResult = { data: { bio: null }, error: null };
+    tables.players.maybeSingleResult = { data: { bio: null, profile_photo: null }, error: null };
   });
 
   it("returns the player's current username to anyone (SRS-121.3)", async () => {
@@ -62,19 +63,37 @@ describe('Public profile API route', () => {
   });
 
   it("returns the player's bio (SRS-121.4)", async () => {
-    tables.players.maybeSingleResult = { data: { bio: 'High roller from Tampa.\nPoker nights only.' }, error: null };
+    tables.players.maybeSingleResult = { data: { bio: 'High roller from Tampa.\nPoker nights only.', profile_photo: null }, error: null };
 
     const response = await get('7');
 
     expect((await response.json()).bio).toBe('High roller from Tampa.\nPoker nights only.');
-    expect(tables.players.select).toHaveBeenCalledWith('bio');
+    expect(tables.players.select).toHaveBeenCalledWith('bio, profile_photo');
   });
 
   it('returns no bio when the player has not written one (SRS-121.4)', async () => {
     for (const bio of [null, '', '   ']) {
-      tables.players.maybeSingleResult = { data: { bio }, error: null };
+      tables.players.maybeSingleResult = { data: { bio, profile_photo: null }, error: null };
       expect((await (await get('7')).json()).bio, JSON.stringify(bio)).toBeNull();
     }
+  });
+
+  it("returns the player's photo, resized to 256px (SRS-121.5)", async () => {
+    // A real 600x400 PNG, stored the way PostgREST returns bytea.
+    const png = await sharp({ create: { width: 600, height: 400, channels: 3, background: '#2a9d8f' } }).png().toBuffer();
+    tables.players.maybeSingleResult = { data: { bio: null, profile_photo: `\\x${png.toString('hex')}` }, error: null };
+
+    const { photoUrl } = await (await get('7')).json();
+
+    expect(photoUrl).toMatch(/^data:image\/png;base64,/);
+    const resized = await sharp(Buffer.from(photoUrl.split(',')[1], 'base64')).metadata();
+    expect([resized.format, resized.width, resized.height]).toEqual(['png', 256, 256]);
+  });
+
+  it('returns no photo, for the blank default icon, when there is none (SRS-121.5)', async () => {
+    const { photoUrl } = await (await get('7')).json();
+
+    expect(photoUrl).toBeNull();
   });
 
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {

@@ -1,7 +1,7 @@
 'use client';
 
 import { Oswald } from 'next/font/google';
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useRef, useState } from 'react';
 import { DAILY_LOGIN_BOX_REWARDS } from '../lib/dailyLoginBox';
 
 const AMOUNTS: number[] = DAILY_LOGIN_BOX_REWARDS.map((option) => option.amount);
@@ -15,9 +15,9 @@ const ITEM_HEIGHT_PX = 64;
 const WINDOW_HEIGHT_PX = 144;
 const CENTRE_OFFSET_PX = (WINDOW_HEIGHT_PX - ITEM_HEIGHT_PX) / 2;
 
-// The lever is pulled first (lever-rod / lever-ball in app/globals.css): it
-// reaches the bottom at LEVER_DOWN_MS, when the reels start, and springs back
-// by LEVER_MS. Each reel then passes through the amounts a few more times
+// The machine waits for the player to pull the lever. Pulled (lever-rod /
+// lever-ball in app/globals.css), it reaches the bottom at LEVER_DOWN_MS,
+// when the reels start, and springs back by LEVER_MS. Each reel then passes through the amounts a few more times
 // than the one before it and stops later, so they land left to right.
 const LEVER_MS = 900;
 const LEVER_DOWN_MS = 380;
@@ -35,10 +35,11 @@ const RESULT_DELAY_MS = 250;
 const BULBS_ACROSS = 9;
 const BULBS_DOWN = 7;
 
-// The Daily Login Box reveal (SRS-128.10): a slot machine pops up, its lever
-// is pulled, and its three reels spin and stop on the reward. It is only
-// shown after the reward has been saved (SRS-128.9), so closing the tab
-// mid-spin loses nothing. Its backdrop covers the nav bar, so the shop page
+// The Daily Login Box reveal (SRS-128.10): a slot machine pops up and asks
+// the player to pull its lever (click it, or Enter/Space, as it has focus);
+// then its three reels spin and stop on the reward. It is only shown after
+// the reward has been saved (SRS-128.9), so the pull only plays the reveal,
+// and closing the tab before or mid-spin loses nothing. Its backdrop covers the nav bar, so the shop page
 // refreshes the nav's balance as soon as the reward is saved without the
 // balance giving the reward away.
 export default function SlotReveal({
@@ -48,14 +49,31 @@ export default function SlotReveal({
   reward: number;
   onClose: () => void;
 }) {
-  // Visitors who turn off animations see the result right away. The window
-  // check keeps this safe to render on the server.
+  // Visitors who turn off animations still pull the lever, then see the
+  // result right away. The window check keeps this safe to render on the
+  // server.
   const [instant] = useState(
     () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
   );
-  const [stopped, setStopped] = useState(instant);
-  const [done, setDone] = useState(instant);
+  const [pulled, setPulled] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [done, setDone] = useState(false);
+  const leverRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+
+  // The lever has focus from the start, so Enter or Space pulls it.
+  useEffect(() => {
+    leverRef.current?.focus();
+  }, []);
+
+  function pull() {
+    if (pulled) return;
+    setPulled(true);
+    if (instant) {
+      setStopped(true);
+      setDone(true);
+    }
+  }
 
   // The last reel's animationend marks the stop. The reels use a CSS
   // animation (reel-spin in app/globals.css), which is timed by the clock
@@ -63,10 +81,10 @@ export default function SlotReveal({
   // time. The animationend event itself can arrive late (e.g. in a
   // background tab), so this backup timer fires just after the planned stop.
   useEffect(() => {
-    if (instant) return;
+    if (instant || !pulled) return;
     const backup = setTimeout(() => setStopped(true), LAST_STOP_MS + 50);
     return () => clearTimeout(backup);
-  }, [instant]);
+  }, [instant, pulled]);
 
   useEffect(() => {
     if (!stopped || instant) return;
@@ -138,12 +156,16 @@ export default function SlotReveal({
                   const stopIndex = reel.cycles * AMOUNTS.length + rewardIndex;
                   const stopAt = `${CENTRE_OFFSET_PX - stopIndex * ITEM_HEIGHT_PX}px`;
                   const isLastReel = reelIndex === REELS.length - 1;
+                  // Waiting for the pull, each reel rests on its first amount.
+                  const resting = { transform: `translateY(${CENTRE_OFFSET_PX}px)` };
                   return (
                     <div key={reelIndex} className="relative h-36 overflow-hidden rounded-lg bg-gradient-to-b from-stone-300 via-stone-50 to-stone-300">
                       <div
                         onAnimationEnd={isLastReel ? (event) => event.animationName === 'reel-spin' && setStopped(true) : undefined}
                         style={
-                          instant
+                          !pulled
+                            ? resting
+                            : instant
                             ? { transform: `translateY(${stopAt})` }
                             : ({
                                 '--reel-start': `${CENTRE_OFFSET_PX}px`,
@@ -176,16 +198,22 @@ export default function SlotReveal({
               </div>
             </div>
 
-            {/* The win display: nothing given away until the reels stop. */}
-            <div className="mt-4 rounded-lg border-2 border-black bg-black px-3 py-1.5 font-mono text-xl font-bold uppercase tracking-[0.25em] text-red-500 shadow-[inset_0_0_12px_rgba(239,68,68,0.35)] [text-shadow:0_0_8px_rgba(239,68,68,0.9)]">
-              {done ? `Win ${reward.toLocaleString('en-US')}` : 'Good luck'}
+            {/* The win display: the prompt, then nothing given away until the reels stop. */}
+            <div className="mt-4 whitespace-nowrap rounded-lg border-2 border-black bg-black px-2 py-1.5 font-mono text-base font-bold uppercase tracking-[0.12em] text-red-500 sm:px-3 sm:text-xl sm:tracking-[0.2em] shadow-[inset_0_0_12px_rgba(239,68,68,0.35)] [text-shadow:0_0_8px_rgba(239,68,68,0.9)]">
+              {!pulled ? (
+                <span className="slot-blink inline-block">Pull the lever</span>
+              ) : done ? (
+                `Win ${reward.toLocaleString('en-US')}`
+              ) : (
+                'Good luck'
+              )}
             </div>
 
             {/* Coin tray */}
             <div aria-hidden="true" className="mx-6 mt-4 h-6 rounded-b-2xl rounded-t-md border-t-4 border-amber-300/70 bg-gradient-to-b from-black to-slate-800 shadow-[inset_0_4px_8px_rgba(0,0,0,0.9)]" />
           </div>
 
-          <Lever animate={!instant} />
+          <Lever ref={leverRef} pulled={pulled} animate={!instant} onPull={pull} />
         </div>
 
         {/* Kept empty (but sized) until the reels stop, so nothing gives the
@@ -206,7 +234,7 @@ export default function SlotReveal({
           disabled={!done}
           className="mt-4 w-full rounded-xl bg-emerald-400 px-5 py-2 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {done ? 'Close' : 'Spinning…'}
+          {done ? 'Close' : pulled ? 'Spinning…' : 'Pull the lever to spin'}
         </button>
       </div>
     </div>
@@ -214,29 +242,52 @@ export default function SlotReveal({
 }
 
 // The lever on the machine's right side: a chrome mount and hub, a rod, and
-// a red ball. Pulled, it swings down towards the viewer and springs back up
-// (lever-rod / lever-ball in app/globals.css).
-function Lever({ animate }: { animate: boolean }) {
+// a red ball. It's a button: until it's pulled, the ball glows and an arrow
+// under it bounces. Pulled, it swings down towards the viewer and springs
+// back up (lever-rod / lever-ball in app/globals.css).
+const Lever = forwardRef<HTMLButtonElement, { pulled: boolean; animate: boolean; onPull: () => void }>(function Lever(
+  { pulled, animate, onPull },
+  ref
+) {
   const timing = `${LEVER_MS}ms ease-in-out both`;
+  const swing = pulled && animate;
   return (
-    <div
-      aria-hidden="true"
-      className="absolute -right-7 top-[42%] h-10 w-8"
+    <button
+      ref={ref}
+      type="button"
+      onClick={onPull}
+      disabled={pulled}
+      aria-label="Pull the lever"
+      title={pulled ? undefined : 'Pull the lever'}
+      className="group absolute -right-7 top-[42%] h-10 w-8 rounded-full outline-none disabled:cursor-default [&:not(:disabled)]:cursor-pointer"
       style={{ '--lever-length': `${LEVER_LENGTH_PX}px` } as React.CSSProperties}
     >
+      {/* Until it's pulled: the arrow saying where to pull, and the whole lever's reach clickable. */}
+      {!pulled ? (
+        <>
+          <span aria-hidden="true" className="absolute -bottom-8 left-1/2 -translate-x-1/2 text-2xl font-bold leading-none text-amber-200 drop-shadow-[0_0_6px_rgba(253,230,138,0.8)]">
+            <span className="slot-hint inline-block">↓</span>
+          </span>
+          <span aria-hidden="true" className="absolute bottom-0 left-0 h-[8.5rem] w-12 -translate-x-1" />
+        </>
+      ) : null}
       {/* Mount on the cabinet's side, and the hub the lever turns on */}
-      <div className="absolute inset-y-0 left-0 w-3 rounded-r-md bg-gradient-to-r from-slate-500 to-slate-200" />
-      <div className="absolute left-1.5 top-1.5 h-7 w-7 rounded-full bg-gradient-to-br from-slate-50 via-slate-300 to-slate-600 shadow-[0_2px_6px_rgba(0,0,0,0.6)]" />
+      <span aria-hidden="true" className="absolute inset-y-0 left-0 w-3 rounded-r-md bg-gradient-to-r from-slate-500 to-slate-200" />
+      <span aria-hidden="true" className="absolute left-1.5 top-1.5 h-7 w-7 rounded-full bg-gradient-to-br from-slate-50 via-slate-300 to-slate-600 shadow-[0_2px_6px_rgba(0,0,0,0.6)]" />
       {/* Rod, pivoting on the hub's centre */}
-      <div
+      <span
+        aria-hidden="true"
         className="absolute bottom-5 left-[17px] w-2 origin-bottom rounded-full bg-gradient-to-r from-slate-400 via-slate-50 to-slate-500"
-        style={{ height: LEVER_LENGTH_PX, animation: animate ? `lever-rod ${timing}` : undefined }}
+        style={{ height: LEVER_LENGTH_PX, animation: swing ? `lever-rod ${timing}` : undefined }}
       />
-      {/* Ball at the rod's end */}
-      <div
-        className="absolute left-[3px] h-9 w-9 rounded-full bg-[radial-gradient(circle_at_32%_30%,#fecaca_0%,#ef4444_38%,#991b1b_75%,#450a0a_100%)] shadow-[0_4px_10px_rgba(0,0,0,0.6)]"
-        style={{ bottom: 20 + LEVER_LENGTH_PX - 18, animation: animate ? `lever-ball ${timing}` : undefined }}
+      {/* Ball at the rod's end: glowing while it waits to be pulled */}
+      <span
+        aria-hidden="true"
+        className={`absolute left-[3px] h-9 w-9 rounded-full bg-[radial-gradient(circle_at_32%_30%,#fecaca_0%,#ef4444_38%,#991b1b_75%,#450a0a_100%)] shadow-[0_4px_10px_rgba(0,0,0,0.6)] transition group-hover:brightness-125 group-focus-visible:ring-4 group-focus-visible:ring-amber-300 ${
+          pulled ? '' : 'slot-ball-glow'
+        }`}
+        style={{ bottom: 20 + LEVER_LENGTH_PX - 18, animation: swing ? `lever-ball ${timing}` : undefined }}
       />
-    </div>
+    </button>
   );
-}
+});

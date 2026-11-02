@@ -1618,7 +1618,7 @@ flowchart LR
 
 *Traces to: UR-128*
 
-**SRS-128.10, JO, Opening animation.** After the box-opening transaction has been successfully committed, the system shall display an animation revealing the selected coin reward to the player.
+**SRS-128.10, JO, Opening animation.** After the box-opening transaction has been successfully committed, the system shall display a slot machine, prompt the player to pull its lever, and, once the lever is pulled, display an animation revealing the selected coin reward to the player.
 
 *Traces to: UR-128*
 

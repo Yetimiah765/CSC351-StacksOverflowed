@@ -84,10 +84,59 @@ body {
   }
 }
 
+/* Waiting for the pull: the LED prompt blinks, the arrow by the lever
+   bounces, and the lever's ball glows. */
+.slot-blink {
+  animation: slot-blink 900ms steps(2, jump-none) infinite;
+}
+
+.slot-hint {
+  animation: slot-hint 900ms ease-in-out infinite;
+}
+
+.slot-ball-glow {
+  animation: slot-ball-glow 1200ms ease-in-out infinite;
+}
+
+@keyframes slot-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes slot-hint {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(5px);
+  }
+}
+
+@keyframes slot-ball-glow {
+  0%,
+  100% {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6), 0 0 0 0 rgba(253, 230, 138, 0);
+  }
+  50% {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6), 0 0 18px 6px rgba(253, 230, 138, 0.75);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .slot-bulb {
     animation: none !important;
     opacity: 0.8;
+  }
+  .slot-blink,
+  .slot-hint,
+  .slot-ball-glow {
+    animation: none !important;
   }
 }
 

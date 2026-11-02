@@ -11,6 +11,7 @@ import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection, { type PlayerStats } from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
 import { notifyAppearanceChanged } from '../../lib/balanceEvents';
+import { publicProfilePath } from '../../lib/publicProfile';
 import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
 
 interface Profile {
@@ -219,7 +220,7 @@ export default function ProfilePage() {
           {/* What other players see (UR-121). */}
           {profile ? (
             <Link
-              href={`/players/${profile.playerId}`}
+              href={publicProfilePath(profile.playerId)}
               className="text-sm text-slate-400 underline-offset-2 hover:text-emerald-200 hover:underline"
             >
               View your public profile

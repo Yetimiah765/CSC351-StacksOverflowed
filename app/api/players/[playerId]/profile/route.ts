@@ -1,12 +1,13 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { photoToAvatarDataUrl } from '../../../../../lib/playerDisplay';
 import { sumMoney } from '../../../../../lib/playerStats';
+import { toCosmetic, type Cosmetic, type CosmeticCategory, type CosmeticRow } from '../../../../../lib/cosmetics';
 
 // A player's public profile (UR-121): what other players and guests may see
 // (SRS-NFR-106). It reads only the columns it returns, so private account
 // fields never leave the database: the username (SRS-121.3), bio
-// (SRS-121.4), photo (SRS-121.5), and overall money won and lost
-// (SRS-121.7, SRS-121.8).
+// (SRS-121.4), photo (SRS-121.5), overall money won and lost (SRS-121.7,
+// SRS-121.8), and equipped cosmetics (SRS-121.13).
 //
 // Never reads the request, so like ./avatar it must opt out of Next's static
 // caching, or a changed profile would never show.
@@ -15,6 +16,8 @@ export const dynamic = 'force-dynamic';
 // The photo shows at 112px, so this is sharp on high-density screens while
 // staying far smaller than an upload can be (up to 5MB, SRS-115.3).
 const PHOTO_SIZE = 256;
+
+const COSMETIC_COLUMNS = 'cosmetic_id, cosmetic_name, category, is_default, asset_path, is_holographic';
 
 export interface PublicProfile {
   playerId: number;
@@ -26,6 +29,8 @@ export interface PublicProfile {
   // Overall only, added up the same way as the owner's own statistics.
   moneyWon: number;
   moneyLost: number;
+  // The equipped card, chip and profile outline; null for an empty slot.
+  equipped: Record<CosmeticCategory, Cosmetic | null>;
 }
 
 export async function GET(_request: Request, { params }: { params: { playerId: string } }) {
@@ -42,12 +47,14 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     { data: usernameRow, error: usernameError },
     { data: player, error: playerError },
     { data: stats, error: statsError },
+    { data: equippedRows, error: equippedError },
   ] = await Promise.all([
     supabase.from('usernames').select('username').eq('player_id', playerId).eq('is_current', true).maybeSingle(),
     supabase.from('players').select('bio, profile_photo').eq('player_id', playerId).maybeSingle(),
     supabase.from('player_game_stats').select('money_won, money_lost').eq('player_id', playerId),
+    supabase.from('player_equipped_cosmetics').select(`category, cosmetics(${COSMETIC_COLUMNS})`).eq('player_id', playerId),
   ]);
-  const error = usernameError ?? playerError ?? statsError;
+  const error = usernameError ?? playerError ?? statsError ?? equippedError;
   if (error) return Response.json({ error: error.message }, { status: 500 });
   // Every account has a current username, so none means no such player.
   if (!usernameRow || !player) return Response.json({ error: 'Player not found.' }, { status: 404 });
@@ -59,6 +66,10 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     photoUrl: await photoToAvatarDataUrl(player.profile_photo, PHOTO_SIZE),
     moneyWon: sumMoney(stats ?? [], 'money_won'),
     moneyLost: sumMoney(stats ?? [], 'money_lost'),
+    equipped: { Card: null, Chip: null, 'Profile Outline': null },
   };
+  for (const row of (equippedRows ?? []) as unknown as { category: CosmeticCategory; cosmetics: CosmeticRow | null }[]) {
+    if (row.cosmetics && row.category in profile.equipped) profile.equipped[row.category] = toCosmetic(row.cosmetics);
+  }
   return Response.json(profile, { status: 200 });
 }

@@ -29,6 +29,7 @@ const tables = {
   player_game_stats: makeTableMock(),
   player_equipped_cosmetics: makeTableMock(),
   player_cosmetics: makeTableMock(),
+  player_sessions: makeTableMock(),
 };
 const from = vi.fn((table: keyof typeof tables) => tables[table]);
 
@@ -38,9 +39,11 @@ vi.mock('../../lib/supabase', () => ({
 
 import { getSupabaseClient } from '../../lib/supabase';
 import { GET } from '../../app/api/players/[playerId]/profile/route';
+import { GET as getOwnStats } from '../../app/api/profile/stats/route';
 
-// Anyone may ask: no Authorization header.
-const get = (playerId: string) => GET(new Request(`http://localhost/api/players/${playerId}/profile`), { params: { playerId } });
+// Anyone may ask: no Authorization header unless a test passes one.
+const get = (playerId: string, headers: Record<string, string> = {}) =>
+  GET(new Request(`http://localhost/api/players/${playerId}/profile`, { headers }), { params: { playerId } });
 
 describe('Public profile API route', () => {
   beforeEach(() => {
@@ -244,6 +247,40 @@ describe('Public profile API route', () => {
       expect((await get(text)).status, text).toBe(400);
     }
     expect(from).not.toHaveBeenCalled();
+  });
+
+  it('gives a guest and another logged-in player the same public-only answer (SRS-NFR-106)', async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [{ game_code: 'sports_betting', money_won: 300, money_lost: 120 }, { game_code: 'roulette', money_won: 45, money_lost: 0 }],
+      error: null,
+    };
+    tables.player_sessions.maybeSingleResult = { data: { player_id: 9 }, error: null };
+
+    const asGuest = await get('7');
+    const asOtherPlayer = await get('7', { authorization: 'Bearer another-players-token' });
+
+    expect([asGuest.status, asOtherPlayer.status]).toEqual([200, 200]);
+    const guestBody = await asGuest.json();
+    expect(await asOtherPlayer.json()).toEqual(guestBody);
+    // Being logged in unlocks nothing: the route never even looks at the session.
+    expect(from).not.toHaveBeenCalledWith('player_sessions');
+    expect(guestBody).not.toHaveProperty('games');
+  });
+
+  it("still gives the owner their own overall and per-game statistics (SRS-NFR-106)", async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [{ game_code: 'sports_betting', money_won: 300, money_lost: 120 }, { game_code: 'roulette', money_won: 45, money_lost: 0 }],
+      error: null,
+    };
+    tables.player_sessions.maybeSingleResult = { data: { player_id: 7 }, error: null };
+
+    const response = await getOwnStats(new Request('http://localhost/api/profile/stats', { headers: { authorization: 'Bearer owner-token' } }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect([body.moneyWon, body.moneyLost]).toEqual([345, 120]);
+    expect(body.games.sports_betting).toEqual({ moneyWon: 300, moneyLost: 120 });
+    expect(body.games.roulette).toEqual({ moneyWon: 45, moneyLost: 0 });
   });
 
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {

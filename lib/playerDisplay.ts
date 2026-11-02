@@ -24,11 +24,12 @@ const AVATAR_THUMBNAIL_SIZE = 96;
 // to 5MB (SRS-115.3) — serving it full-size over a bandwidth-limited link
 // (e.g. an ngrok tunnel for cross-network testing) makes the poker table
 // take a long time to populate. Resizing to a small thumbnail here keeps
-// the bytes actually sent proportional to how the image is used.
-export async function photoToAvatarDataUrl(hexBytea: string | null): Promise<string | null> {
+// the bytes actually sent proportional to how the image is used. `size`
+// lets a bigger picture (the public profile's photo) ask for more pixels.
+export async function photoToAvatarDataUrl(hexBytea: string | null, size = AVATAR_THUMBNAIL_SIZE): Promise<string | null> {
   if (!hexBytea) return null;
   const thumbnail = await sharp(hexByteaToBuffer(hexBytea))
-    .resize(AVATAR_THUMBNAIL_SIZE, AVATAR_THUMBNAIL_SIZE, { fit: 'cover' })
+    .resize(size, size, { fit: 'cover' })
     .png()
     .toBuffer();
   return `data:image/png;base64,${thumbnail.toString('base64')}`;

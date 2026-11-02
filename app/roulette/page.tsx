@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import BackToHome from '../../components/BackToHome';
 import RouletteWheel from '../../components/roulette/RouletteWheel';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import {
@@ -239,6 +240,7 @@ export default function RoulettePage() {
   return (
     <main className="min-h-page bg-[radial-gradient(ellipse_at_top,_#064e3b_0%,_#020617_60%)] px-4 py-8 text-slate-100">
       <div className="mx-auto w-full max-w-6xl">
+        <BackToHome className="mb-4" />
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Roulette</h1>

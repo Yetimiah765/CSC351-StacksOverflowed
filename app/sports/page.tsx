@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import BackToHome from '../../components/BackToHome';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EventListing, OptionSide, SportsEvent, SportsMarket, SportsOption } from '../../lib/sports/events';
 import { potentialPayout } from '../../lib/sports/payout';
@@ -1025,6 +1026,7 @@ export default function SportsBettingPage() {
       className={`min-h-page bg-slate-950 bg-[radial-gradient(ellipse_80%_40%_at_50%_-10%,rgba(56,189,248,0.14),transparent)] px-4 py-6 text-slate-100 sm:px-6 ${selection && view === 'games' ? 'pb-[28rem] lg:pb-10' : ''}`}
     >
       <div className="mx-auto w-full max-w-5xl">
+        <BackToHome className="mb-4" />
         <header className="relative overflow-hidden rounded-3xl border border-sky-400/20 bg-slate-900">
           <HighlightReel />
           {/* Darken and tint the clips so the title and tabs stay readable. */}

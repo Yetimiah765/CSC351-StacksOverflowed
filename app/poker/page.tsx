@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import BackToHome from '../../components/BackToHome';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { MAX_BUY_IN_MULTIPLIER, MIN_BUY_IN_MULTIPLIER } from '../../lib/pokerTable';
@@ -207,6 +208,7 @@ export default function PokerLobbyPage() {
   return (
     <Room>
       <section className="w-full max-w-4xl">
+        <BackToHome className="mb-6" />
         <header className="flex flex-col gap-6 border-b border-white/10 pb-8 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <PokerRoomEyebrow />
@@ -269,12 +271,6 @@ export default function PokerLobbyPage() {
           </div>
         )}
 
-        <p className="mt-12 text-sm text-slate-400">
-          Back to{' '}
-          <Link href="/" className="text-emerald-300 hover:underline">
-            home
-          </Link>
-        </p>
       </section>
     </Room>
   );

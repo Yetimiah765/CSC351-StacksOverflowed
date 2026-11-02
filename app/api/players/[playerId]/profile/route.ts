@@ -1,10 +1,11 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { photoToAvatarDataUrl } from '../../../../../lib/playerDisplay';
+import { sumMoney } from '../../../../../lib/playerStats';
 
 // A player's public profile (UR-121): what other players and guests may see
 // (SRS-NFR-106). It reads only the columns it returns, so private account
 // fields never leave the database: the username (SRS-121.3), bio
-// (SRS-121.4) and photo (SRS-121.5).
+// (SRS-121.4), photo (SRS-121.5) and overall money won (SRS-121.7).
 //
 // Never reads the request, so like ./avatar it must opt out of Next's static
 // caching, or a changed profile would never show.
@@ -21,6 +22,8 @@ export interface PublicProfile {
   bio: string | null;
   // A resized PNG data URL, or null for the blank default icon.
   photoUrl: string | null;
+  // Overall only, added up the same way as the owner's own statistics.
+  moneyWon: number;
 }
 
 export async function GET(_request: Request, { params }: { params: { playerId: string } }) {
@@ -33,11 +36,16 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
 
-  const [{ data: usernameRow, error: usernameError }, { data: player, error: playerError }] = await Promise.all([
+  const [
+    { data: usernameRow, error: usernameError },
+    { data: player, error: playerError },
+    { data: stats, error: statsError },
+  ] = await Promise.all([
     supabase.from('usernames').select('username').eq('player_id', playerId).eq('is_current', true).maybeSingle(),
     supabase.from('players').select('bio, profile_photo').eq('player_id', playerId).maybeSingle(),
+    supabase.from('player_game_stats').select('money_won').eq('player_id', playerId),
   ]);
-  const error = usernameError ?? playerError;
+  const error = usernameError ?? playerError ?? statsError;
   if (error) return Response.json({ error: error.message }, { status: 500 });
   // Every account has a current username, so none means no such player.
   if (!usernameRow || !player) return Response.json({ error: 'Player not found.' }, { status: 404 });
@@ -47,6 +55,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     username: usernameRow.username,
     bio: player.bio?.trim() ? player.bio : null,
     photoUrl: await photoToAvatarDataUrl(player.profile_photo, PHOTO_SIZE),
+    moneyWon: sumMoney(stats ?? [], 'money_won'),
   };
   return Response.json(profile, { status: 200 });
 }

@@ -26,6 +26,7 @@ function makeTableMock() {
 const tables = {
   usernames: makeTableMock(),
   players: makeTableMock(),
+  player_game_stats: makeTableMock(),
 };
 const from = vi.fn((table: keyof typeof tables) => tables[table]);
 
@@ -94,6 +95,22 @@ describe('Public profile API route', () => {
     const { photoUrl } = await (await get('7')).json();
 
     expect(photoUrl).toBeNull();
+  });
+
+  it("returns the player's overall money won across every game (SRS-121.7)", async () => {
+    tables.player_game_stats.defaultResult = {
+      data: [{ money_won: 300 }, { money_won: 45 }, { money_won: 0 }],
+      error: null,
+    };
+
+    const response = await get('7');
+
+    expect((await response.json()).moneyWon).toBe(345);
+    expect(tables.player_game_stats.eq).toHaveBeenCalledWith('player_id', 7);
+  });
+
+  it('shows 0 money won for a player with no results (SRS-121.7)', async () => {
+    expect((await (await get('7')).json()).moneyWon).toBe(0);
   });
 
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {

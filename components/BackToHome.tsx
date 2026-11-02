@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 // SRS-108.5: each game's way back to the home page (the casino floor), since
 // the nav bar has no Home button. One look on every game: blackjack,
-// roulette, the sportsbook, the poker lobby, and the cosmetic shop.
+// roulette, slots, the sportsbook, the poker lobby, and the cosmetic shop.
 export default function BackToHome({ className = '' }: { className?: string }) {
   return (
     <Link

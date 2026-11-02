@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import BackToHome from '../../components/BackToHome';
 import SlotSymbol, { type SlotSymbolName } from '../../components/slots/SlotSymbol';
 import { initialSlotBet } from '../../lib/slots';
 
@@ -60,6 +61,7 @@ export default function SlotsPage() {
   return (
     <main className="min-h-page bg-[radial-gradient(ellipse_at_top,#4c0519_0%,#1c0510_55%,#0a0206_100%)] px-4 py-8 text-white">
       <div className="mx-auto flex max-w-2xl flex-col items-center gap-6">
+        <BackToHome className="self-start" />
         <header className="flex w-full flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black tracking-tight text-amber-300">Slot Machine</h1>

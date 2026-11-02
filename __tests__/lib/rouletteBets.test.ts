@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WHEEL_ORDER, betReturn, pocketColor, spotWins, type BetSpot } from '../../lib/roulette/bets';
+import { WHEEL_ORDER, betReturn, betsAfterSpin, pocketColor, spotWins, type BetSpot } from '../../lib/roulette/bets';
 
 const OUTSIDE: BetSpot[] = [
   { type: 'Red' },
@@ -55,5 +55,27 @@ describe('roulette bets (SRS-301.3, SRS-301.4)', () => {
     expect(betReturn({ type: 'Red' }, 25, 1)).toBe(50); // 1:1
     expect(betReturn({ type: 'Dozen3' }, 10, 30)).toBe(30); // 2:1
     expect(betReturn({ type: 'Column2' }, 10, 3)).toBe(0);
+  });
+});
+
+describe('betsAfterSpin', () => {
+  const bets = {
+    'Number:17': { spot: { type: 'Number', number: 17 } as BetSpot, amount: 50 },
+    Red: { spot: { type: 'Red' } as BetSpot, amount: 10 },
+  };
+
+  it('clears the table after Spin (SRS-305.3)', () => {
+    expect(betsAfterSpin(bets, false)).toEqual({});
+  });
+
+  it('keeps the same bets at the same amounts after Let it ride (SRS-305.4)', () => {
+    expect(betsAfterSpin(bets, true)).toEqual(bets);
+  });
+
+  it('returns a copy, so changing the next bets never touches the last spin', () => {
+    const kept = betsAfterSpin(bets, true);
+    expect(kept).not.toBe(bets);
+    delete kept.Red;
+    expect(Object.keys(bets)).toEqual(['Number:17', 'Red']);
   });
 });

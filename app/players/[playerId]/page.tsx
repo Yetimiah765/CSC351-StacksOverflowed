@@ -3,13 +3,16 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import CosmeticArt from '../../../components/cosmetics/CosmeticArt';
 import DefaultAvatar from '../../../components/profile/DefaultAvatar';
+import { COSMETIC_CATEGORIES } from '../../../lib/cosmetics';
 import type { PublicProfile } from '../../api/players/[playerId]/profile/route';
 
 // Another player's public profile (UR-121). Anyone can open it, guests
 // included, and it only ever receives the fields cleared for public viewing
 // (SRS-NFR-106): the username (SRS-121.3), bio (SRS-121.4), photo
-// (SRS-121.5), and overall money won and lost (SRS-121.7, SRS-121.8).
+// (SRS-121.5), overall money won and lost (SRS-121.7, SRS-121.8), and
+// equipped cosmetics, with the outline around the photo (SRS-121.13).
 export default function PublicProfilePage() {
   const { playerId } = useParams<{ playerId: string }>();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -39,6 +42,8 @@ export default function PublicProfilePage() {
       cancelled = true;
     };
   }, [playerId]);
+
+  const outline = profile?.equipped['Profile Outline'] ?? null;
 
   if (status === 'loading') {
     return (
@@ -71,13 +76,25 @@ export default function PublicProfilePage() {
       <div className="mx-auto w-full max-w-4xl space-y-6">
         <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
           <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
-            {/* The uploaded photo, or the same blank icon as the profile. */}
-            <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 border-slate-700 bg-slate-800">
-              {profile.photoUrl ? (
-                <img src={profile.photoUrl} alt={`${profile.username}'s profile photo`} className="h-full w-full object-cover" />
-              ) : (
-                <DefaultAvatar />
-              )}
+            {/* The uploaded photo, or the same blank icon as the profile, inside
+                their equipped outline, which hangs 28px past each side (m-7). */}
+            <div className={`relative shrink-0 ${outline ? 'm-7' : ''}`}>
+              <div
+                className={`flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-2 bg-slate-800 ${
+                  outline ? 'border-transparent' : 'border-slate-700'
+                }`}
+              >
+                {profile.photoUrl ? (
+                  <img src={profile.photoUrl} alt={`${profile.username}'s profile photo`} className="h-full w-full object-cover" />
+                ) : (
+                  <DefaultAvatar />
+                )}
+              </div>
+              {outline ? (
+                <span aria-hidden="true" className="pointer-events-none absolute -inset-7 z-10">
+                  <CosmeticArt artKey={outline.artKey} avatar={false} className="h-full w-full" />
+                </span>
+              ) : null}
             </div>
 
             <div className="min-w-0 flex-1 text-center sm:text-left">
@@ -87,6 +104,39 @@ export default function PublicProfilePage() {
               {profile.bio ? <p className="mt-4 whitespace-pre-wrap break-words text-slate-200">{profile.bio}</p> : null}
             </div>
           </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
+          <h2 className="text-xl font-semibold">Equipped</h2>
+          <ul className="mt-4 flex flex-wrap gap-4">
+            {COSMETIC_CATEGORIES.map(({ category, label }) => {
+              const cosmetic = profile.equipped[category];
+              return (
+                <li key={category} className="w-32">
+                  <p className="whitespace-nowrap text-xs uppercase tracking-widest text-slate-400">{label}</p>
+                  <div className="mt-2 flex h-28 w-28 items-center justify-center rounded-xl border-2 border-slate-800 bg-slate-950 p-2">
+                    {cosmetic ? (
+                      <CosmeticArt artKey={cosmetic.artKey} category={cosmetic.category} />
+                    ) : (
+                      <span className="text-xs text-slate-500">None</span>
+                    )}
+                  </div>
+                  {cosmetic ? (
+                    <>
+                      <p className="mt-1 w-28 truncate text-center text-xs text-slate-300" title={cosmetic.name}>
+                        {cosmetic.name}
+                      </p>
+                      {cosmetic.isHolographic ? (
+                        <p className="w-28 bg-gradient-to-r from-pink-300 via-amber-200 to-cyan-300 bg-clip-text text-center text-[11px] font-semibold text-transparent">
+                          Holographic
+                        </p>
+                      ) : null}
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         </section>
 
         {/* Overall only: per-game figures stay private (SRS-121.11). */}

@@ -27,6 +27,7 @@ const tables = {
   usernames: makeTableMock(),
   players: makeTableMock(),
   player_game_stats: makeTableMock(),
+  player_equipped_cosmetics: makeTableMock(),
 };
 const from = vi.fn((table: keyof typeof tables) => tables[table]);
 
@@ -131,6 +132,33 @@ describe('Public profile API route', () => {
 
   it('shows 0 money lost for a player with no results (SRS-121.8)', async () => {
     expect((await (await get('7')).json()).moneyLost).toBe(0);
+  });
+
+  it("returns the player's equipped card, chip and profile outline (SRS-121.13)", async () => {
+    const cosmetic = (cosmetic_id: number, cosmetic_name: string, category: string, asset_path: string, is_holographic = false) => ({
+      cosmetic_id, cosmetic_name, category, is_default: false, asset_path, is_holographic,
+    });
+    tables.player_equipped_cosmetics.defaultResult = {
+      data: [
+        { category: 'Card', cosmetics: cosmetic(46, 'Neon Prism', 'Card', 'holo-neon', true) },
+        { category: 'Chip', cosmetics: cosmetic(5, 'Neon Volt', 'Chip', 'neon-volt') },
+        { category: 'Profile Outline', cosmetics: cosmetic(6, 'Neon Halo', 'Profile Outline', 'neon-halo') },
+      ],
+      error: null,
+    };
+
+    const { equipped } = await (await get('7')).json();
+
+    expect(equipped.Card).toEqual({ cosmeticId: 46, name: 'Neon Prism', category: 'Card', artKey: 'holo-neon', isDefault: false, isHolographic: true });
+    expect(equipped.Chip.artKey).toBe('neon-volt');
+    expect(equipped['Profile Outline'].artKey).toBe('neon-halo');
+    expect(tables.player_equipped_cosmetics.eq).toHaveBeenCalledWith('player_id', 7);
+  });
+
+  it('returns null for an empty slot (SRS-121.13)', async () => {
+    const { equipped } = await (await get('7')).json();
+
+    expect(equipped).toEqual({ Card: null, Chip: null, 'Profile Outline': null });
   });
 
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {

@@ -24,6 +24,7 @@ function makeTableMock() {
 
 const tables = {
   usernames: makeTableMock(),
+  players: makeTableMock(),
 };
 const from = vi.fn((table: keyof typeof tables) => tables[table]);
 
@@ -48,6 +49,7 @@ describe('Public profile API route', () => {
       table.maybeSingleResult = { data: null, error: null };
     }
     tables.usernames.maybeSingleResult = { data: { username: 'Ace777' }, error: null };
+    tables.players.maybeSingleResult = { data: { bio: null }, error: null };
   });
 
   it("returns the player's current username to anyone (SRS-121.3)", async () => {
@@ -59,8 +61,25 @@ describe('Public profile API route', () => {
     expect(tables.usernames.eq).toHaveBeenCalledWith('is_current', true);
   });
 
+  it("returns the player's bio (SRS-121.4)", async () => {
+    tables.players.maybeSingleResult = { data: { bio: 'High roller from Tampa.\nPoker nights only.' }, error: null };
+
+    const response = await get('7');
+
+    expect((await response.json()).bio).toBe('High roller from Tampa.\nPoker nights only.');
+    expect(tables.players.select).toHaveBeenCalledWith('bio');
+  });
+
+  it('returns no bio when the player has not written one (SRS-121.4)', async () => {
+    for (const bio of [null, '', '   ']) {
+      tables.players.maybeSingleResult = { data: { bio }, error: null };
+      expect((await (await get('7')).json()).bio, JSON.stringify(bio)).toBeNull();
+    }
+  });
+
   it('returns 404 for a player who does not exist (SRS-121.3)', async () => {
     tables.usernames.maybeSingleResult = { data: null, error: null };
+    tables.players.maybeSingleResult = { data: null, error: null };
 
     const response = await get('999');
 

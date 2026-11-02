@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import BioEditor from '../../components/profile/BioEditor';
@@ -213,7 +214,18 @@ export default function ProfilePage() {
   return (
     <main className="min-h-page bg-slate-950 px-6 py-12 text-slate-100">
       <div className="mx-auto w-full max-w-4xl space-y-6">
-        <h1 className="text-3xl font-semibold">Your profile</h1>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h1 className="text-3xl font-semibold">Your profile</h1>
+          {/* What other players see (UR-121). */}
+          {profile ? (
+            <Link
+              href={`/players/${profile.playerId}`}
+              className="text-sm text-slate-400 underline-offset-2 hover:text-emerald-200 hover:underline"
+            >
+              View your public profile
+            </Link>
+          ) : null}
+        </div>
 
         {error ? (
           <p className="rounded-xl border border-red-800 bg-red-900/30 p-3 text-sm text-red-300">{error}</p>

@@ -1450,7 +1450,7 @@ flowchart LR
 
 *User story: As a player, I want to purchase a blind box using my available virtual-currency balance, so that I can receive a randomized cosmetic.*
 
-**SRS-124.1, JO, Purchase confirmation.** Before deducting any currency, the system shall display a confirmation prompt asking the player to confirm the selected blind-box purchase.
+**SRS-124.1, JO, Purchase confirmation.** Before deducting any currency, the system shall display a confirmation prompt asking the player to confirm the selected blind-box purchase, except for a Buy again purchase under SRS-127.7, whose blind box the player has already confirmed.
 
 *Traces to: UR-124*
 
@@ -1562,7 +1562,7 @@ flowchart LR
 
 *Traces to: UR-127*
 
-**SRS-127.7, JO, Buy again.** After the blind-box reward result is displayed, the system shall offer a Buy again option that starts a new purchase of the same blind box through the purchase confirmation in SRS-124.1, and shall disable it, with the reason shown, when the player's balance is below the box's price or the box is no longer on sale.
+**SRS-127.7, JO, Buy again.** After the blind-box reward result is displayed, the system shall offer a Buy again option that immediately purchases the same blind box again, without another confirmation prompt, and shall disable it, with the reason shown, when the player's balance is below the box's price or the box is no longer on sale.
 
 *Traces to: UR-124, UR-127*
 

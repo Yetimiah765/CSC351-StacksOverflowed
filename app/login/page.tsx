@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import CardsAndChipsBackground from '../../components/auth/CardsAndChipsBackground';
+import PokerWinHeader from '../../components/auth/PokerWinHeader';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,21 +36,28 @@ export default function LoginPage() {
 
   // SRS-103.9: the same wide form as sign-up (SRS-101.12), username and
   // password side by side (stacked on a phone), and no website name of its
-  // own, since the nav bar shows it (SRS-107.5).
+  // own, since the nav bar shows it (SRS-107.5). SRS-103.10: sign-up's
+  // falling cards and chips (SRS-101.13) behind it, and its own header across
+  // the top: one animation of a won poker hand, its pot stacked into towers.
   return (
-    <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
-      <section className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/30 sm:p-10">
-        <h1 className="text-4xl font-semibold">Welcome back</h1>
+    <main className="relative min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-10">
+      <CardsAndChipsBackground />
+      <section className="relative w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/40 sm:p-12 sm:pb-16">
+        <div className="-mx-8 -mt-8 mb-10 overflow-hidden rounded-t-[23px] border-b border-white/10 sm:-mx-12 sm:-mt-12">
+          <PokerWinHeader />
+        </div>
+        <h1 className="text-4xl font-semibold sm:text-5xl">Welcome back</h1>
 
-        <form onSubmit={handleSubmit} className="mt-8 grid gap-5 sm:grid-cols-2">
+        <form onSubmit={handleSubmit} className="mt-12 grid items-start gap-x-6 gap-y-10 sm:grid-cols-2">
           <label className="block text-base text-slate-200">
             Username
             <input
               type="text"
               value={username}
+              autoComplete="username"
               onChange={(event) => setUsername(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
               placeholder="your_username"
             />
           </label>
@@ -58,9 +67,10 @@ export default function LoginPage() {
             <input
               type="password"
               value={password}
+              autoComplete="current-password"
               onChange={(event) => setPassword(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
               placeholder="••••••••"
             />
           </label>
@@ -68,7 +78,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-emerald-400 px-4 py-3 text-lg font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70 sm:col-span-2"
+            className="mt-4 w-full rounded-xl bg-emerald-400 px-4 py-5 text-lg font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70 sm:col-span-2"
           >
             {loading ? 'Signing in…' : 'Log in'}
           </button>
@@ -76,7 +86,7 @@ export default function LoginPage() {
 
         {message ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">{message}</p> : null}
 
-        <div className="mt-6 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
+        <div className="mt-12 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
           <p>
             Need an account? <Link href="/register" className="text-emerald-300 hover:underline">Create one here</Link>
           </p>

@@ -403,6 +403,19 @@ body {
 .moment-bar { transform: scaleX(var(--s2)); animation: moment-bar calc(2.8s * var(--pace, 1)) ease-in-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-grow { animation: moment-grow calc(0.7s * var(--pace, 1)) ease-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-spin { animation: moment-spin calc(1s * var(--pace, 1)) ease-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
+/* The login header (components/auth/PokerWinHeader.tsx): a chip settling on
+   its tower with a small bounce, and a sheen passing over the finished towers
+   every few seconds (it rests off to the side, outside the towers' clip). */
+@keyframes moment-settle {
+  0%, 100% { transform: none; }
+  40% { transform: translateY(-2.5px); }
+}
+@keyframes moment-sweep {
+  0% { transform: none; }
+  20%, 100% { transform: translateX(320px); }
+}
+.moment-settle { animation: moment-settle calc(0.22s * var(--pace, 1)) ease-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
+.moment-sweep { transform: translateX(320px); animation: moment-sweep 4.5s ease-in-out infinite; }
 /* Parts of a scene turn, flip and grow about their own middle unless they
    say otherwise. */
 .moment-scene :is(.moment-in, .moment-pop, .moment-out, .moment-blink, .moment-turn, .moment-bulge, .moment-coin, .moment-away,
@@ -415,7 +428,7 @@ body {
   .moment-in, .moment-pop, .moment-out, .moment-blink, .moment-reel, .moment-drop,
   .moment-kick, .moment-dive, .moment-lever-rod, .moment-lever-ball, .moment-flip-away, .moment-flip-show, .moment-away, .moment-sparkle,
   .moment-sparkle-burst, .moment-chase-a, .moment-chase-b, .moment-ticker, .moment-bar, .moment-grow, .moment-spin,
-  .moment-turn, .moment-fly-x, .moment-fly-y, .moment-bulge, .moment-coin { animation: none !important; }
+  .moment-turn, .moment-fly-x, .moment-fly-y, .moment-bulge, .moment-coin, .moment-settle, .moment-sweep { animation: none !important; }
 }
 
 /* Poker table (app/poker/[tableId]/page.tsx). Each animated element is

@@ -32,34 +32,35 @@ export default function LoginPage() {
     }
   }
 
+  // SRS-103.9: the same wide form as sign-up (SRS-101.12), username and
+  // password side by side (stacked on a phone), and no website name of its
+  // own, since the nav bar shows it (SRS-107.5).
   return (
     <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
-      <section className="w-full max-w-md rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/30">
-        <p className="text-sm uppercase tracking-[0.25em] text-emerald-300">Stacks Overflowed</p>
-        <h1 className="mt-4 text-3xl font-semibold">Welcome back</h1>
-        <p className="mt-2 text-slate-300">Log in with your username and password.</p>
+      <section className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/30 sm:p-10">
+        <h1 className="text-4xl font-semibold">Welcome back</h1>
 
-        <form onSubmit={handleSubmit} className="mt-8 space-y-4">
-          <label className="block text-sm text-slate-200">
+        <form onSubmit={handleSubmit} className="mt-8 grid gap-5 sm:grid-cols-2">
+          <label className="block text-base text-slate-200">
             Username
             <input
               type="text"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
+              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
               placeholder="your_username"
             />
           </label>
 
-          <label className="block text-sm text-slate-200">
+          <label className="block text-base text-slate-200">
             Password
             <input
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
+              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none ring-0 transition focus:border-emerald-400"
               placeholder="••••••••"
             />
           </label>
@@ -67,20 +68,22 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-emerald-400 px-4 py-3 font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
+            className="w-full rounded-xl bg-emerald-400 px-4 py-3 text-lg font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70 sm:col-span-2"
           >
             {loading ? 'Signing in…' : 'Log in'}
           </button>
         </form>
 
-        {message ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-sm text-slate-100">{message}</p> : null}
+        {message ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">{message}</p> : null}
 
-        <p className="mt-6 text-sm text-slate-300">
-          Need an account? <Link href="/register" className="text-emerald-300 hover:underline">Create one here</Link>
-        </p>
-        <p className="mt-2 text-sm text-slate-300">
-          Back to <Link href="/" className="text-emerald-300 hover:underline">home</Link>
-        </p>
+        <div className="mt-6 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
+          <p>
+            Need an account? <Link href="/register" className="text-emerald-300 hover:underline">Create one here</Link>
+          </p>
+          <p>
+            Back to <Link href="/" className="text-emerald-300 hover:underline">home</Link>
+          </p>
+        </div>
       </section>
     </main>
   );

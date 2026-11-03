@@ -886,6 +886,10 @@ flowchart LR
 
 *Traces to: UR-103*
 
+**SRS-103.9, JO, Login form layout.** On laptop and desktop screens, the login page shall place the username and password fields side by side in a form that is wider than it is tall, and shall not repeat the website's name already shown in the navigation bar (SRS-107.5).
+
+*Traces to: UR-103*
+
 ### UR-104, JO – Account Validation
 
 *User story: As a player, I want the website to validate my registration and login information, so that invalid information is rejected and my account can be securely accessed.*

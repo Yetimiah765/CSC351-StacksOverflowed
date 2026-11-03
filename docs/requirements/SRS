@@ -830,6 +830,10 @@ flowchart LR
 
 *Traces to: UR-101*
 
+**SRS-101.12, JO, Sign-up form layout.** On laptop and desktop screens, the sign-up page shall arrange the registration fields side by side in a form that is wider than it is tall, and shall not repeat the website's name already shown in the navigation bar (SRS-107.5).
+
+*Traces to: UR-101*
+
 ### UR-102, JO – Age Requirement
 
 *User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*
@@ -879,6 +883,10 @@ flowchart LR
 *Traces to: UR-103*
 
 **SRS-103.8, JO, Reauthentication after duplication.** After duplicated authenticated tabs are invalidated, the player shall be required to successfully log in again before accessing the account.
+
+*Traces to: UR-103*
+
+**SRS-103.9, JO, Login form layout.** On laptop and desktop screens, the login page shall place the username and password fields side by side in a form that is wider than it is tall, and shall not repeat the website's name already shown in the navigation bar (SRS-107.5).
 
 *Traces to: UR-103*
 
@@ -994,6 +1002,10 @@ flowchart LR
 
 *Traces to: UR-107, UR-128*
 
+**SRS-107.5, JO, Website name in the navigation bar.** The navigation bar shall display the website's name, Stacks Overflowed, at its left on every page, as a link to the home page.
+
+*Traces to: UR-107*
+
 ### UR-108, JO – Select Game
 
 *User story: As a logged-in player, I want to select an available game from the home page, so that I can begin playing.*
@@ -1011,6 +1023,14 @@ flowchart LR
 *Traces to: UR-108*
 
 **SRS-108.4, JO, Guest gameplay restriction.** The system shall not begin gameplay for an unauthenticated guest.
+
+*Traces to: UR-108*
+
+**SRS-108.5, JO, Return to the home page.** The main page of each game, and the Cosmetic Shop, shall provide a back button that returns the player to the home page.
+
+*Traces to: UR-108*
+
+**SRS-108.6, JO, Getting up from a game.** When a player returns to the home page from a game they opened by taking a seat on the casino floor, the home page shall show the player's character getting up from that seat, the reverse of sitting down, before the player can walk again.
 
 *Traces to: UR-108*
 
@@ -1450,7 +1470,7 @@ flowchart LR
 
 *User story: As a player, I want to purchase a blind box using my available virtual-currency balance, so that I can receive a randomized cosmetic.*
 
-**SRS-124.1, JO, Purchase confirmation.** Before deducting any currency, the system shall display a confirmation prompt asking the player to confirm the selected blind-box purchase.
+**SRS-124.1, JO, Purchase confirmation.** Before deducting any currency, the system shall display a confirmation prompt asking the player to confirm the selected blind-box purchase, except for a Buy again purchase under SRS-127.7, whose blind box the player has already confirmed.
 
 *Traces to: UR-124*
 
@@ -1562,7 +1582,7 @@ flowchart LR
 
 *Traces to: UR-127*
 
-**SRS-127.7, JO, Buy again.** After the blind-box reward result is displayed, the system shall offer a Buy again option that starts a new purchase of the same blind box through the purchase confirmation in SRS-124.1, and shall disable it, with the reason shown, when the player's balance is below the box's price or the box is no longer on sale.
+**SRS-127.7, JO, Buy again.** After the blind-box reward result is displayed, the system shall offer a Buy again option that immediately purchases the same blind box again, without another confirmation prompt, and shall disable it, with the reason shown, when the player's balance is below the box's price or the box is no longer on sale.
 
 *Traces to: UR-124, UR-127*
 
@@ -1606,7 +1626,7 @@ flowchart LR
 
 *Traces to: UR-128*
 
-**SRS-128.10, JO, Opening animation.** After the box-opening transaction has been successfully committed, the system shall display an animation revealing the selected coin reward to the player.
+**SRS-128.10, JO, Opening animation.** After the box-opening transaction has been successfully committed, the system shall display a slot machine, prompt the player to pull its lever, and, once the lever is pulled, display an animation revealing the selected coin reward to the player.
 
 *Traces to: UR-128*
 
@@ -2067,7 +2087,7 @@ Traces to: UR-216
 
 *Traces to: UR-303*
 
-**SRS-303.5, CL, Win celebration.** When a spin's net result is a win, the system shall display a celebration animation together with the amount won.
+**SRS-303.5, CL, Win or loss animation.** When a spin's result is displayed, the system shall compare the coins its bets returned with the coins staked. When the spin's net result is a win, the system shall display a celebration animation together with the amount won; when it is a loss, the system shall display a distinct losing animation together with the amount lost; when the spin breaks even, the system shall display neither and shall state that the player broke even.
 
 *Traces to: UR-303*
 
@@ -2099,7 +2119,11 @@ Traces to: UR-216
 
 *Traces to: UR-305*
 
-**SRS-305.3, CL, Settled bets leave the table.** After a spin's result is displayed, the system shall remove that spin's settled bets from the table, so that the next spin begins with no pending bets.
+**SRS-305.3, CL, Settled bets leave the table.** After a spin's result is displayed, the system shall remove that spin's settled bets from the table, so that the next spin begins with no pending bets other than bets that are riding per SRS-305.4.
+
+*Traces to: UR-305*
+
+**SRS-305.4, CL, Let it ride.** The system shall provide a "Let it ride" control beside Spin, enabled and disabled under the same conditions as Spin (SRS-302.4). Selecting it shall start a spin exactly as Spin does and shall make every bet in that spin, at its full amount, a riding bet. After each spin's result is displayed, whether that spin was started with Spin or Let it ride, the system shall keep every riding bet on the table at its riding amount as a pending bet, until the player removes it with Undo or clears it per SRS-305.1; chips added to the table and spun with Spin shall leave the table per SRS-305.3, even when added to a riding bet. The system shall mark riding bets on the table so the player can tell them apart. Riding bets are pending, so they shall not be deducted until a spin (SRS-301.8), and each spin shall be validated per SRS-301.6 and SRS-301.7 like any other.
 
 *Traces to: UR-305*
 

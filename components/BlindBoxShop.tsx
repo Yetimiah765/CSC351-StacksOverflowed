@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BALANCE_CHANGED_EVENT, notifyBalanceChanged } from '../lib/balanceEvents';
 import { buyAgainBlocker, COSMETIC_CATEGORIES, type Cosmetic } from '../lib/cosmetics';
 import BlindBoxReveal, { type BoxResult } from './cosmetics/BlindBoxReveal';
@@ -55,9 +55,9 @@ function lastDay(availableUntil: string) {
 // The blind boxes on the Cosmetic Shop page (UR-122 - UR-127): each box on
 // sale with its description, price, odds and possible rewards (SRS-122.1,
 // SRS-122.2, SRS-123.2), a confirmation before any coins are taken
-// (SRS-124.1 - SRS-124.3), then the reveal, whose Buy again goes back to the
-// same box's confirmation (SRS-127.7). Guests can browse but must log in to
-// buy.
+// (SRS-124.1 - SRS-124.3), then the reveal, whose Buy again buys the same
+// box straight away, without asking again (SRS-127.7). Guests can browse but
+// must log in to buy.
 export default function BlindBoxShop() {
   const [token, setToken] = useState<string | null>(null);
   const [boxes, setBoxes] = useState<ShopBox[] | null>(null);
@@ -67,7 +67,12 @@ export default function BlindBoxShop() {
   const [confirming, setConfirming] = useState<ShopBox | null>(null);
   const [buying, setBuying] = useState(false);
   const [buyError, setBuyError] = useState('');
-  const [reveal, setReveal] = useState<{ box: ShopBox; result: BoxResult } | null>(null);
+  // `id` counts purchases, so a Buy again result remounts the reveal and its
+  // reel spins from the start.
+  const [reveal, setReveal] = useState<{ id: number; box: ShopBox; result: BoxResult } | null>(null);
+  const purchases = useRef(0);
+  // Set at once, unlike `buying`, so a double click can't buy twice.
+  const buyingRef = useRef(false);
 
   const load = useCallback(async (playerToken: string | null) => {
     const headers: HeadersInit = playerToken ? { Authorization: `Bearer ${playerToken}` } : {};
@@ -118,9 +123,11 @@ export default function BlindBoxShop() {
     return () => window.removeEventListener('keydown', handleKey);
   }, [confirming, buying]);
 
-  async function handleBuy() {
-    if (!confirming || !token || buying) return;
-    const box = confirming;
+  // Buys one box: from its confirmation (SRS-124.1), or straight from the
+  // reveal's Buy again, whose box the player already confirmed (SRS-127.7).
+  async function purchase(box: ShopBox) {
+    if (!token || buyingRef.current) return;
+    buyingRef.current = true;
     setBuying(true);
     setBuyError('');
     try {
@@ -138,7 +145,8 @@ export default function BlindBoxShop() {
       }
       setConfirming(null);
       setBalance(data.balance);
-      setReveal({ box, result: { cosmetic: data.cosmetic, wasDuplicate: data.wasDuplicate, refund: data.refund } });
+      purchases.current += 1;
+      setReveal({ id: purchases.current, box, result: { cosmetic: data.cosmetic, wasDuplicate: data.wasDuplicate, refund: data.refund } });
       // The new cosmetic now shows as owned in every box that has it.
       setBoxes((previous) =>
         previous?.map((b) => ({
@@ -153,8 +161,13 @@ export default function BlindBoxShop() {
     } catch {
       setBuyError(BUY_FAILED);
     } finally {
+      buyingRef.current = false;
       setBuying(false);
     }
+  }
+
+  function handleBuy() {
+    if (confirming) purchase(confirming);
   }
 
   if (error) {
@@ -324,22 +337,20 @@ export default function BlindBoxShop() {
 
       {reveal ? (
         <BlindBoxReveal
+          key={reveal.id}
           boxName={reveal.box.name}
           rewards={reveal.box.rewards}
           result={reveal.result}
           onClose={() => setReveal(null)}
-          // SRS-127.7: back to the same box's confirmation (SRS-124.1), so
-          // nothing is taken without confirming again.
+          // SRS-127.7: buys the same box again at once, with no second
+          // confirmation, and opens the next reveal.
           buyAgain={{
-            label: `Buy again · ${reveal.box.price.toLocaleString('en-US')}`,
+            label: buying ? 'Buying…' : `Buy again · ${reveal.box.price.toLocaleString('en-US')}`,
             description: `Buy the ${reveal.box.name} again for ${reveal.box.price.toLocaleString('en-US')} coins`,
             blocker: buyAgainBlocker(reveal.box, Boolean(boxes?.some((box) => box.boxId === reveal.box.boxId)), balance),
-            onClick: () => {
-              const box = boxes?.find((candidate) => candidate.boxId === reveal.box.boxId) ?? reveal.box;
-              setReveal(null);
-              setBuyError('');
-              setConfirming(box);
-            },
+            busy: buying,
+            error: buyError,
+            onClick: () => purchase(boxes?.find((candidate) => candidate.boxId === reveal.box.boxId) ?? reveal.box),
           }}
         />
       ) : null}

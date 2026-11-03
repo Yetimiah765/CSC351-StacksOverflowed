@@ -22,6 +22,7 @@ import {
   standingSpots,
   type FloorObject,
   type Point,
+  type TakenSeat,
 } from '../../lib/casinoFloor';
 import {
   BlackjackTable,
@@ -48,7 +49,10 @@ import { carpetTexture, neonTexture, wallTexture } from './textures';
 // to it, or plays it if it's already in reach. Next to a table its nearest
 // chair is outlined; playing walks the player into that chair, sits them
 // down, and flies the camera in over the felt (or, at the sports bar, into
-// the nearest screen) — then the page opens the game.
+// the nearest screen) — then the page opens the game. Coming back from that
+// game, the same plays backwards (SRS-108.6): the player starts in the seat
+// with the camera over the table, the camera pulls back behind them, and
+// they get up beside the chair.
 
 const TILE_M = TILE_METRES;
 const WALL_HEIGHT = 4.6;
@@ -78,8 +82,12 @@ interface Props {
   nearId: string | null;
   /** The game being sat down at (set by the page); the scene plays the sitting and the fly-in. */
   playing: FloorObject | null;
-  /** The fly-in is over: open the game. */
-  onSeated: (object: FloorObject) => void;
+  /** The fly-in is over: open the game. `spot` is the chair (or screen) taken. */
+  onSeated: (object: FloorObject, spot: number | null) => void;
+  /** Back from a game: start in this seat and get up from it (SRS-108.6). */
+  returning?: TakenSeat | null;
+  /** Getting up is over. */
+  onStood?: () => void;
   /** Stop drawing (while a game's page loads), so the page isn't held up. */
   paused?: boolean;
 }
@@ -97,10 +105,16 @@ export interface NearSpot {
   spot: number | null;
 }
 
-/** Taking a seat to play: walk beside the chair, face the table, sit, then the camera flies in. */
+/**
+ * Taking a seat to play: walk beside the chair, face the table, sit, then the
+ * camera flies in. Getting up after the game runs it backwards: 'rise' pulls
+ * the camera back behind the seated player, then they 'stand'.
+ */
 interface Seating {
   object: FloorObject;
-  stage: 'walk' | 'turn' | 'sit' | 'zoom' | 'done';
+  /** The chair (or screen) by index, as the page remembers it. */
+  spot: number | null;
+  stage: 'walk' | 'turn' | 'sit' | 'zoom' | 'done' | 'rise' | 'stand';
   /** Seconds into the current stage. */
   t: number;
   /** World positions on the floor, metres: beside the chair, and the seat. */
@@ -133,6 +147,7 @@ function planSeating(object: FloorObject, spot: number | null, from: THREE.Vecto
   const seat = spot === null ? undefined : layout.chairs[spot];
   const plan: Seating = {
     object,
+    spot,
     stage: 'zoom',
     t: 0,
     approach: null,
@@ -170,6 +185,26 @@ function planSeating(object: FloorObject, spot: number | null, from: THREE.Vecto
   return plan;
 }
 
+/**
+ * Getting up again after a game (SRS-108.6): the plan for sitting down in
+ * that seat, played backwards. Nobody sits at a screen or the shop counter,
+ * so there the player stands on the nearest open spot in front of it.
+ */
+function planRising(object: FloorObject, spot: number | null): Seating {
+  const [sx, sz] = toWorld(START.x + 0.5, START.y + 0.5);
+  const plan = planSeating(object, spot, new THREE.Vector2(sx, sz));
+  plan.stage = 'rise';
+  plan.t = 0;
+  if (!plan.seatAt) {
+    const view = new THREE.Vector2(plan.zoomTo.position.x, plan.zoomTo.position.z);
+    const spots = standingSpots(object).map((point) => new THREE.Vector2(...toWorld(point.x + 0.5, point.y + 0.5)));
+    plan.approach = spots.sort((a, b) => a.distanceTo(view) - b.distanceTo(view))[0] ?? view;
+    const [cx, cz] = toWorld(object.x + object.w / 2, object.y + object.h / 2);
+    plan.facing = Math.atan2(cx - plan.approach.x, cz - plan.approach.y);
+  }
+  return plan;
+}
+
 function Player({
   input,
   onNear,
@@ -178,6 +213,7 @@ function Player({
   tile,
   seating,
   onSeated,
+  onStood,
 }: {
   input: MutableRefObject<WalkInput>;
   onNear: (near: NearSpot) => void;
@@ -186,7 +222,8 @@ function Player({
   tile: MutableRefObject<Point>;
   /** Set to start taking a seat; Player plans and plays it. */
   seating: MutableRefObject<{ object: FloorObject; spot: number | null } | Seating | null>;
-  onSeated: (object: FloorObject) => void;
+  onSeated: (object: FloorObject, spot: number | null) => void;
+  onStood?: () => void;
 }) {
   const body = useRef<THREE.Group>(null);
   const motion = useRef<Motion>({ speed: 0 });
@@ -215,6 +252,58 @@ function Player({
       plan = planSeating(plan.object, plan.spot, new THREE.Vector2(wx, wz));
       seating.current = plan;
       path.current = [];
+    }
+    if (plan && 'stage' in plan && (plan.stage === 'rise' || plan.stage === 'stand') && plan.approach) {
+      plan.t += delta;
+      motion.current.speed = 0;
+      if (!plan.zoomFrom) {
+        // The first frame back: in the seat (or at the screen or counter),
+        // facing the game, with the camera where it flew in to and the
+        // orbit set to end up behind them.
+        heading.current = plan.facing;
+        camera.current.yaw = plan.facing + Math.PI;
+        if (plan.seatAt) {
+          seat.current = { amount: 1, handsY: plan.seatedHands.y, handsZ: plan.seatedHands.z };
+        }
+        plan.zoomFrom = { position: plan.zoomTo.position.clone(), look: plan.zoomTo.look.clone() };
+      }
+      let here = (plan.seatAt ?? plan.approach).clone();
+      let finished = false;
+      if (plan.stage === 'stand' && plan.seatAt) {
+        const k = smooth(plan.t / SIT_SECONDS);
+        seat.current.amount = 1 - k;
+        here = plan.seatAt.clone().lerp(plan.approach, k);
+        finished = plan.t >= SIT_SECONDS;
+      }
+      position.current = { x: here.x / TILE_M + COLS / 2, y: here.y / TILE_M + ROWS / 2 };
+      if (body.current) {
+        body.current.position.set(here.x, 0, here.y);
+        body.current.rotation.y = heading.current;
+      }
+      const height = 1.45 - seat.current.amount * 0.4;
+      if (plan.stage === 'rise') {
+        // The camera pulls back from over the table to behind the player.
+        const k = smooth(plan.t / ZOOM_SECONDS);
+        const pose = followPose(here.x, here.y, height);
+        view.position.lerpVectors(plan.zoomFrom.position, pose.position, k);
+        lookAt.current.lerpVectors(plan.zoomFrom.look, pose.look, k);
+        view.lookAt(lookAt.current);
+        if (plan.t >= ZOOM_SECONDS) {
+          plan.stage = 'stand';
+          plan.t = 0;
+          finished = !plan.seatAt;
+        }
+      } else {
+        followWith(here.x, here.y, height, delta);
+      }
+      if (finished) {
+        // On their feet: walking is theirs again.
+        seat.current.amount = 0;
+        seating.current = null;
+        tile.current = { x: Math.floor(position.current.x), y: Math.floor(position.current.y) };
+        onStood?.();
+      }
+      return;
     }
     if (plan && 'stage' in plan) {
       plan.t += delta;
@@ -264,7 +353,7 @@ function Player({
         view.lookAt(lookAt.current);
         if (plan.stage === 'zoom' && plan.t >= ZOOM_SECONDS) {
           plan.stage = 'done';
-          onSeated(plan.object);
+          onSeated(plan.object, plan.spot);
         }
         return;
       }
@@ -332,11 +421,11 @@ function Player({
     followWith(wx, wz, 1.45, delta);
   });
 
-  /** The camera: behind and above, easing after the player; kept inside the room. */
-  function followWith(wx: number, wz: number, height: number, delta: number) {
+  /** Where the following camera sits, and what it looks at: behind and above the player, kept inside the room. */
+  function followPose(wx: number, wz: number, height: number) {
     const { yaw, pitch, distance } = camera.current;
-    const target = new THREE.Vector3(wx, height, wz);
-    const desired = new THREE.Vector3(
+    const look = new THREE.Vector3(wx, height, wz);
+    const position = new THREE.Vector3(
       wx + Math.sin(yaw) * Math.cos(pitch) * distance,
       height + Math.sin(pitch) * distance,
       wz + Math.cos(yaw) * Math.cos(pitch) * distance
@@ -344,12 +433,18 @@ function Player({
     const halfW = (COLS / 2 - 1.3) * TILE_M;
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = (ROWS / 2) * TILE_M + 2.2;
-    desired.x = THREE.MathUtils.clamp(desired.x, -halfW, halfW);
-    desired.z = THREE.MathUtils.clamp(desired.z, back, front);
-    desired.y = THREE.MathUtils.clamp(desired.y, 0.6, WALL_HEIGHT - 0.3);
+    position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
+    position.z = THREE.MathUtils.clamp(position.z, back, front);
+    position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);
+    return { position, look };
+  }
+
+  /** The camera: easing after the player into its following pose. */
+  function followWith(wx: number, wz: number, height: number, delta: number) {
+    const pose = followPose(wx, wz, height);
     const ease = 1 - Math.exp(-delta * 7);
-    view.position.lerp(desired, ease);
-    lookAt.current.lerp(target, 1 - Math.exp(-delta * 12));
+    view.position.lerp(pose.position, ease);
+    lookAt.current.lerp(pose.look, 1 - Math.exp(-delta * 12));
     view.lookAt(lookAt.current);
   }
 
@@ -524,7 +619,7 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
   }
 }
 
-function Floor({ onNear, onPlay, nearId, input, playing, onSeated }: Props) {
+function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
   const [nearSpot, setNearSpot] = useState<number | null>(null);
@@ -541,8 +636,10 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated }: Props) {
     },
     [onNear]
   );
-  // Asked to play: take the outlined chair.
-  const seating = useRef<{ object: FloorObject; spot: number | null } | Seating | null>(null);
+  // Asked to play: take the outlined chair. Back from a game, first get up
+  // from the seat taken to play it (SRS-108.6).
+  const [rising] = useState(() => (returning ? planRising(returning.object, returning.spot) : null));
+  const seating = useRef<{ object: FloorObject; spot: number | null } | Seating | null>(rising);
   useEffect(() => {
     if (playing && !seating.current) seating.current = { object: playing, spot: nearSpotRef.current };
   }, [playing]);
@@ -621,7 +718,16 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated }: Props) {
         })}
       </group>
 
-      <Player input={input} onNear={handleNear} path={path} camera={camera} tile={playerTile} seating={seating} onSeated={onSeated} />
+      <Player
+        input={input}
+        onNear={handleNear}
+        path={path}
+        camera={camera}
+        tile={playerTile}
+        seating={seating}
+        onSeated={onSeated}
+        onStood={onStood}
+      />
 
       {near?.interactive && !playing ? (
         <Html position={[toWorld(near.x + near.w / 2, 0)[0], near.kind === 'sports-betting' ? 2.75 : 2.2, toWorld(0, near.y + near.h / 2)[1]]} center zIndexRange={[20, 0]}>

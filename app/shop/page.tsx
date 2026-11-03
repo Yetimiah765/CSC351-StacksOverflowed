@@ -1,3 +1,4 @@
+import BackToHome from '../../components/BackToHome';
 import BlindBoxShop from '../../components/BlindBoxShop';
 import DailyLoginBox from '../../components/DailyLoginBox';
 
@@ -7,6 +8,7 @@ export default function ShopPage() {
   return (
     <main className="min-h-page bg-slate-950 px-6 py-12 text-slate-100">
       <section className="mx-auto w-full max-w-3xl space-y-6">
+        <BackToHome />
         <h1 className="text-3xl font-semibold">Cosmetic Shop</h1>
         <DailyLoginBox />
         <BlindBoxShop />

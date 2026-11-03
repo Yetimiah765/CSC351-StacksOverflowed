@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { Oswald } from 'next/font/google';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -12,9 +13,14 @@ import DefaultAvatar from './profile/DefaultAvatar';
 // players, after the page is up, instead of in every page's first load.
 const CosmeticArt = dynamic(() => import('./cosmetics/CosmeticArt'), { ssr: false });
 
+// The same display face as the casino floor's signs.
+const display = Oswald({ weight: ['700'], subsets: ['latin'], display: 'swap' });
+
 // Rendered on every page by app/layout.tsx. It is h-16 (4rem) tall, which
 // is why pages use `min-h-page` (see tailwind.config.js) instead of
-// `min-h-screen`.
+// `min-h-screen`. The website's name sits at the left and links home
+// (SRS-107.5); games have their own back buttons, and the shop is a stop on
+// the casino floor.
 export default function NavBar() {
   const pathname = usePathname();
   const [signedIn, setSignedIn] = useState(false);
@@ -113,21 +119,16 @@ export default function NavBar() {
 
   return (
     <header className="sticky top-0 z-40 h-16 border-b border-slate-800 bg-slate-950/90 backdrop-blur">
-      {/* Full width: Home and the cart at the left edge, the balance and
+      {/* Full width: the website's name at the left edge, the balance and
           profile at the right, at any window size. */}
-      <nav className="flex h-full items-center justify-between px-4 sm:px-6">
-        <div className="flex items-center gap-2">
-          <NavIcon href="/" label="Home" active={pathname === '/'}>
-            <path d="M3 11.5 12 4l9 7.5" />
-            <path d="M5.5 10v9.5h13V10" />
-            <path d="M10 19.5v-5h4v5" />
-          </NavIcon>
-          <NavIcon href="/shop" label="Cosmetic shop" active={pathname === '/shop'}>
-            <path d="M3 4.5h2.3l2.2 10h10.3l2.2-7.5H6.2" />
-            <circle cx="9.5" cy="19" r="1.3" />
-            <circle cx="17" cy="19" r="1.3" />
-          </NavIcon>
-        </div>
+      <nav className="flex h-full items-center justify-between gap-3 px-4 sm:px-6">
+        <Link
+          href="/"
+          aria-current={pathname === '/' ? 'page' : undefined}
+          className={`${display.className} truncate text-lg font-bold uppercase tracking-[0.12em] text-amber-300 drop-shadow-[0_2px_8px_rgba(251,191,36,0.35)] transition hover:text-amber-200 sm:text-2xl`}
+        >
+          Stacks Overflowed
+        </Link>
 
         <div className="flex items-center gap-3">
           {/* SRS-120.8: bordered in the equipped outline's colors, as a

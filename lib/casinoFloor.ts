@@ -107,6 +107,42 @@ export const DOOR = { x: 12, y: 14, w: 2 };
 
 export const INTERACTIVE_OBJECTS = FLOOR_OBJECTS.filter((object) => object.interactive);
 
+// ---------- getting up again (SRS-108.6) ----------
+// Sitting down to play remembers the seat for this browser tab, so that
+// coming back to the floor from the game, the player is seen getting up from
+// it. It's kept in sessionStorage under SEAT_KEY as { objectId, spot }.
+
+export const SEAT_KEY = 'casino-floor-seat';
+
+export interface TakenSeat {
+  object: FloorObject;
+  /** The chair (or, at the sports bar, the screen) by index; null for none, like the shop counter. */
+  spot: number | null;
+}
+
+/** The remembered seat, if it still names a game on the floor and one of its chairs or screens. */
+export function parseTakenSeat(raw: string | null): TakenSeat | null {
+  if (!raw) return null;
+  let saved: unknown;
+  try {
+    saved = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const { objectId, spot } = (saved ?? {}) as { objectId?: unknown; spot?: unknown };
+  const object = INTERACTIVE_OBJECTS.find((candidate) => candidate.id === objectId);
+  if (!object) return null;
+  if (spot === null) return { object, spot: null };
+  if (typeof spot !== 'number' || !Number.isInteger(spot) || spot < 0) return null;
+  const layout = pieceLayout(object);
+  const places = layout.chairs.length > 0 ? layout.chairs.length : (layout.screens?.length ?? 0);
+  return spot < places ? { object, spot } : null;
+}
+
+export function serializeTakenSeat(seat: TakenSeat): string {
+  return JSON.stringify({ objectId: seat.object.id, spot: seat.spot });
+}
+
 // ---------- each piece's real shape ----------
 // In metres from the middle of the piece's rectangle: x across the room, z
 // towards its front (the room's door side), as the 3D floor draws it.

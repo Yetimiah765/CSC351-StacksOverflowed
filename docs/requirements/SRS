@@ -838,6 +838,10 @@ flowchart LR
 
 *Traces to: UR-101*
 
+**SRS-101.14, JO, Password confirmation.** The system shall require a new player to enter their password twice during registration and shall reject account creation, creating no account, when the two entries do not match.
+
+*Traces to: UR-101*
+
 ### UR-102, JO – Age Requirement
 
 *User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*

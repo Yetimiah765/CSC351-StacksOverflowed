@@ -14,12 +14,13 @@ interface RegisterBody {
   birthday?: string;
   username?: string;
   password?: string;
+  confirmPassword?: string;
 }
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as RegisterBody;
-    const { firstName, lastName, birthday, username, password } = body;
+    const { firstName, lastName, birthday, username, password, confirmPassword } = body;
 
     // SRS-101.1: first name, last name, birthday, username, and password are
     // all required. SRS-101.10: no email is collected.
@@ -46,6 +47,12 @@ export async function POST(request: Request) {
 
     if (!isValidPassword(password)) {
       return Response.json({ error: PASSWORD_RULES_MESSAGE }, { status: 400 });
+    }
+
+    // SRS-101.14: the password is typed twice. There is no account recovery
+    // (SRS-101.11), so a typo here would lock the player out for good.
+    if (password !== confirmPassword) {
+      return Response.json({ error: "The passwords don't match." }, { status: 400 });
     }
 
     if (!isAtLeast21(birthday)) {

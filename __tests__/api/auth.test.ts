@@ -99,6 +99,7 @@ const validRegistration = {
   birthday: '1990-01-01',
   username: 'newuser123',
   password: 'secret123',
+  confirmPassword: 'secret123',
 };
 
 // Lets a registration through: the name is free and the new player row comes back.
@@ -296,6 +297,21 @@ describe('Auth API routes', () => {
     it('rejects a password without both a letter and a number (SRS-101.8)', async () => {
       const response = await registerPost(registerRequest({ ...validRegistration, password: 'allletters' }));
       expect(response.status).toBe(400);
+    });
+
+    it.each([
+      ['a different password', 'secret124'],
+      ['the same password in other capitals', 'SECRET123'],
+      ['missing', undefined],
+    ])('rejects a password confirmation that is %s, creating no account (SRS-101.14)', async (_label, confirmPassword) => {
+      acceptRegistration();
+
+      const response = await registerPost(registerRequest({ ...validRegistration, confirmPassword }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "The passwords don't match." });
+      expect(tables.players.insert).not.toHaveBeenCalled();
+      expect(tables.usernames.insert).not.toHaveBeenCalled();
     });
 
     it('rejects a player under 21 years old (SRS-102.1)', async () => {

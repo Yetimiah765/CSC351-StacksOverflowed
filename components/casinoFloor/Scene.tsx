@@ -7,10 +7,12 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import * as THREE from 'three';
 import {
   COLS,
+  DOOR,
   FLOOR_OBJECTS,
   ROWS,
   START,
   TILE_METRES,
+  entranceWalk,
   findPath,
   isBlocked,
   moveWithCollisions,
@@ -52,7 +54,8 @@ import { carpetTexture, neonTexture, wallTexture } from './textures';
 // the nearest screen) — then the page opens the game. Coming back from that
 // game, the same plays backwards (SRS-108.6): the player starts in the seat
 // with the camera over the table, the camera pulls back behind them, and
-// they get up beside the chair.
+// they get up beside the chair. Just after logging in (SRS-103.12) the player
+// starts out in the lobby instead and walks in through the entrance.
 
 const TILE_M = TILE_METRES;
 const WALL_HEIGHT = 4.6;
@@ -88,6 +91,10 @@ interface Props {
   returning?: TakenSeat | null;
   /** Getting up is over. */
   onStood?: () => void;
+  /** Just logged in: start out in the lobby and walk in through the entrance (SRS-103.12). */
+  entering?: boolean;
+  /** The walk in is over (or was skipped). */
+  onEntered?: () => void;
   /** Stop drawing (while a game's page loads), so the page isn't held up. */
   paused?: boolean;
 }
@@ -205,6 +212,58 @@ function planRising(object: FloorObject, spot: number | null): Seating {
   return plan;
 }
 
+/**
+ * Walking in after logging in (SRS-103.12): the player stands on the red
+ * carpet in the lobby for a moment, then walks in along `points` (the lobby,
+ * the doorway, inside) as the camera swings round from out in the lobby to
+ * behind them. Any key or a click skips to the end.
+ */
+interface WalkIn {
+  /** The walk, world metres. */
+  points: THREE.Vector2[];
+  length: number;
+  /** How far along it the player is, metres, and seconds since it began. */
+  walked: number;
+  t: number;
+  skip: boolean;
+  /** Where the camera starts: out in the lobby, beside and behind the player, looking at the entrance. */
+  from: { position: THREE.Vector3; look: THREE.Vector3 };
+}
+
+/** Seconds standing in the lobby before walking in. */
+const ENTER_WAIT = 0.8;
+
+function planEntrance(): WalkIn {
+  const points = entranceWalk().map((point) => new THREE.Vector2(...toWorld(point.x, point.y)));
+  const length = points.slice(1).reduce((sum, point, i) => sum + point.distanceTo(points[i]!), 0);
+  const lobby = points[0]!;
+  const [, doorZ] = toWorld(0, DOOR.y);
+  return {
+    points,
+    length,
+    walked: 0,
+    t: 0,
+    skip: false,
+    from: { position: new THREE.Vector3(lobby.x + 1.6, 2.2, lobby.y + 3.2), look: new THREE.Vector3(lobby.x, 1.4, doorZ) },
+  };
+}
+
+/** The point `walked` metres along the walk, and the way it's heading there. */
+function alongWalk(points: THREE.Vector2[], walked: number) {
+  let left = walked;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i]!;
+    const b = points[i + 1]!;
+    const leg = a.distanceTo(b);
+    if (left <= leg || i === points.length - 2) {
+      const k = leg > 0 ? Math.min(1, left / leg) : 1;
+      return { here: a.clone().lerp(b, k), heading: Math.atan2(b.x - a.x, b.y - a.y) };
+    }
+    left -= leg;
+  }
+  return { here: points[points.length - 1]!.clone(), heading: Math.PI };
+}
+
 function Player({
   input,
   onNear,
@@ -214,6 +273,8 @@ function Player({
   seating,
   onSeated,
   onStood,
+  walkIn,
+  onEntered,
 }: {
   input: MutableRefObject<WalkInput>;
   onNear: (near: NearSpot) => void;
@@ -224,6 +285,9 @@ function Player({
   seating: MutableRefObject<{ object: FloorObject; spot: number | null } | Seating | null>;
   onSeated: (object: FloorObject, spot: number | null) => void;
   onStood?: () => void;
+  /** The walk in after logging in, while it plays (SRS-103.12). */
+  walkIn: MutableRefObject<WalkIn | null>;
+  onEntered?: () => void;
 }) {
   const body = useRef<THREE.Group>(null);
   const motion = useRef<Motion>({ speed: 0 });
@@ -244,6 +308,46 @@ function Player({
       heading.current += turn * Math.min(1, delta * rate);
       return Math.abs(turn);
     };
+
+    // Walking in after logging in (SRS-103.12): the player isn't steered,
+    // the walk plays out; any key (or a click, see Floor) skips to the end.
+    const entry = walkIn.current;
+    if (entry) {
+      const keys = input.current;
+      if (keys.forward || keys.back || keys.left || keys.right) entry.skip = true;
+      entry.t += delta;
+      if (entry.skip) {
+        entry.walked = entry.length;
+      } else if (entry.t > ENTER_WAIT) {
+        entry.walked = Math.min(entry.length, entry.walked + WALK_SPEED * delta);
+      }
+      const walking = entry.t > ENTER_WAIT && entry.walked < entry.length;
+      const { here, heading: way } = alongWalk(entry.points, entry.walked);
+      motion.current.speed = walking ? WALK_SPEED : 0;
+      if (walking) turnTowards(way, 10);
+      position.current = { x: here.x / TILE_M + COLS / 2, y: here.y / TILE_M + ROWS / 2 };
+      if (body.current) {
+        body.current.position.set(here.x, 0, here.y);
+        body.current.rotation.y = heading.current;
+      }
+      // The camera swings round from out in the lobby to its place behind
+      // the player, arriving as they do.
+      const k = smooth(entry.walked / entry.length);
+      const pose = followPose(here.x, here.y, 1.45);
+      view.position.lerpVectors(entry.from.position, pose.position, k);
+      lookAt.current.lerpVectors(entry.from.look, pose.look, k);
+      view.lookAt(lookAt.current);
+      if (entry.walked >= entry.length) {
+        // In, facing the room where they'd normally start: walking is theirs.
+        heading.current = Math.PI;
+        if (body.current) body.current.rotation.y = heading.current;
+        motion.current.speed = 0;
+        walkIn.current = null;
+        tile.current = { x: Math.floor(position.current.x), y: Math.floor(position.current.y) };
+        onEntered?.();
+      }
+      return;
+    }
 
     // Taking a seat: the player isn't steered, the plan plays out.
     let plan = seating.current;
@@ -497,6 +601,53 @@ function CameraControls({ camera }: { camera: MutableRefObject<Camera> }) {
 }
 
 // ---------- the room ----------
+/**
+ * The entrance (SRS-103.12): an opening in the low front rail where DOOR is,
+ * under a tall brass arch with a lit WELCOME sign, and a red carpet out across
+ * the lobby. The arch is tall and slim so that once the player's inside it
+ * stays above and beside the following camera's view rather than in it.
+ */
+function Entrance() {
+  const [left] = toWorld(DOOR.x, 0);
+  const [right] = toWorld(DOOR.x + DOOR.w, 0);
+  const [, z] = toWorld(0, DOOR.y);
+  const middle = (left + right) / 2;
+  const height = 3.5;
+  const sign = useMemo(() => neonTexture('WELCOME', '#22d3ee'), []);
+  const carpet = 4.8;
+  return (
+    <group>
+      {[left - 0.05, right + 0.05].map((x) => (
+        <mesh key={x} position={[x, height / 2, z]} castShadow>
+          <boxGeometry args={[0.1, height, 0.22]} />
+          <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />
+        </mesh>
+      ))}
+      <mesh position={[middle, height + 0.18, z]} castShadow>
+        <boxGeometry args={[right - left + 0.5, 0.36, 0.26]} />
+        <meshStandardMaterial color="#1b0f2e" roughness={0.6} />
+      </mesh>
+      <mesh position={[middle, height + 0.18, z + 0.135]}>
+        <planeGeometry args={[right - left + 0.3, 0.27]} />
+        <meshStandardMaterial map={sign} emissiveMap={sign} emissive="#ffffff" emissiveIntensity={2.2} transparent toneMapped={false} />
+      </mesh>
+      {/* The red carpet up to the door, edged in gold. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[middle, 0.003, z + carpet / 2]} receiveShadow>
+        <planeGeometry args={[right - left - 0.1, carpet]} />
+        <meshStandardMaterial color="#7f1d1d" roughness={0.9} />
+      </mesh>
+      {[-1, 1].map((side) => (
+        <mesh key={side} rotation={[-Math.PI / 2, 0, 0]} position={[middle + side * ((right - left) / 2 - 0.05), 0.004, z + carpet / 2]}>
+          <planeGeometry args={[0.06, carpet]} />
+          <meshStandardMaterial color="#c9a227" metalness={0.8} roughness={0.3} />
+        </mesh>
+      ))}
+      {/* A warm light over the doorway, outside, so the lobby isn't in the dark. */}
+      <pointLight position={[middle, height - 0.4, z + 1.4]} color="#ffd9a8" intensity={7} distance={7} decay={2} />
+    </group>
+  );
+}
+
 function Room() {
   const width = (COLS - 2) * TILE_M;
   const depth = (ROWS - 3) * TILE_M;
@@ -516,7 +667,7 @@ function Room() {
         <planeGeometry args={[width, depth]} />
         <meshPhysicalMaterial color="#1a0c14" roughness={0.55} metalness={0.3} clearcoat={1} clearcoatRoughness={0.12} />
       </mesh>
-      {/* Back wall with the sign and a neon strip, side walls, a low front wall with the doors */}
+      {/* Back wall with the sign and a neon strip, side walls, a low front wall with the entrance */}
       <mesh position={[0, WALL_HEIGHT / 2, backZ]} receiveShadow>
         <planeGeometry args={[width, WALL_HEIGHT]} />
         <meshStandardMaterial map={walls} roughness={0.7} />
@@ -541,15 +692,24 @@ function Room() {
           </mesh>
         </group>
       ))}
-      {/* A low rail at the front, so the camera can look over it, and the lobby beyond */}
-      <mesh position={[0, 0.25, frontZ]} castShadow receiveShadow>
-        <boxGeometry args={[width, 0.5, 0.2]} />
-        <meshStandardMaterial color="#1b0f2e" roughness={0.6} />
-      </mesh>
-      <mesh position={[0, 0.51, frontZ]}>
-        <boxGeometry args={[width, 0.04, 0.24]} />
-        <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />
-      </mesh>
+      {/* A low rail at the front, so the camera can look over it, either side
+          of the doorway; the entrance; and the lobby beyond */}
+      {[
+        [-width / 2, toWorld(DOOR.x, 0)[0]],
+        [toWorld(DOOR.x + DOOR.w, 0)[0], width / 2],
+      ].map(([from, to]) => (
+        <group key={from}>
+          <mesh position={[(from + to) / 2, 0.25, frontZ]} castShadow receiveShadow>
+            <boxGeometry args={[to - from, 0.5, 0.2]} />
+            <meshStandardMaterial color="#1b0f2e" roughness={0.6} />
+          </mesh>
+          <mesh position={[(from + to) / 2, 0.51, frontZ]}>
+            <boxGeometry args={[to - from, 0.04, 0.24]} />
+            <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />
+          </mesh>
+        </group>
+      ))}
+      <Entrance />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.002, frontZ + 3]} receiveShadow>
         <planeGeometry args={[width + 4, 6]} />
         <meshStandardMaterial map={lobby} roughness={0.95} />
@@ -619,7 +779,7 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
   }
 }
 
-function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood }: Props) {
+function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
   const [nearSpot, setNearSpot] = useState<number | null>(null);
@@ -640,6 +800,24 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
   // from the seat taken to play it (SRS-108.6).
   const [rising] = useState(() => (returning ? planRising(returning.object, returning.spot) : null));
   const seating = useRef<{ object: FloorObject; spot: number | null } | Seating | null>(rising);
+  // Just logged in, and not back from a game: walk in through the entrance
+  // (SRS-103.12).
+  const [entrance] = useState(() => (entering && !rising ? planEntrance() : null));
+  const walkIn = useRef<WalkIn | null>(entrance);
+  // Any key, or pressing anywhere on the floor's view, skips the walk in.
+  const { gl } = useThree();
+  useEffect(() => {
+    const skip = () => {
+      if (walkIn.current) walkIn.current.skip = true;
+    };
+    const element = gl.domElement;
+    element.addEventListener('pointerdown', skip);
+    window.addEventListener('keydown', skip);
+    return () => {
+      element.removeEventListener('pointerdown', skip);
+      window.removeEventListener('keydown', skip);
+    };
+  }, [gl]);
   useEffect(() => {
     if (playing && !seating.current) seating.current = { object: playing, spot: nearSpotRef.current };
   }, [playing]);
@@ -653,6 +831,7 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
   };
 
   function handleFloorClick(event: ThreeEvent<MouseEvent>) {
+    if (walkIn.current) return; // the press that skipped the walk in (see above)
     if (event.delta > 6 || seating.current) return; // a drag to look around, or already sitting down
     event.stopPropagation();
     const tile = {
@@ -727,9 +906,11 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
         seating={seating}
         onSeated={onSeated}
         onStood={onStood}
+        walkIn={walkIn}
+        onEntered={onEntered}
       />
 
-      {near?.interactive && !playing ? (
+      {near?.interactive && !playing && !walkIn.current ? (
         <Html position={[toWorld(near.x + near.w / 2, 0)[0], near.kind === 'sports-betting' ? 2.75 : 2.2, toWorld(0, near.y + near.h / 2)[1]]} center zIndexRange={[20, 0]}>
           <div className="pointer-events-none whitespace-nowrap rounded-md border border-white/20 bg-black/70 px-3 py-1.5 text-sm font-bold uppercase tracking-[0.18em] text-white shadow-[0_0_24px_rgba(255,255,255,0.25)] backdrop-blur">
             {near.interactive.name}

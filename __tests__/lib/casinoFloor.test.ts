@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   COLS,
+  DOOR,
   FLOOR_OBJECTS,
   INTERACTIVE_OBJECTS,
   ROWS,
   START,
+  entranceWalk,
   findPath,
   isBlocked,
   moveWithCollisions,
@@ -14,6 +16,7 @@ import {
   serializeTakenSeat,
   nearestChair,
   nearestScreen,
+  PLAYER_RADIUS,
   pieceLayout,
   standingSpots,
 } from '../../lib/casinoFloor';
@@ -191,5 +194,30 @@ describe('getting up after a game (SRS-108.6)', () => {
       expect(parseTakenSeat(raw), String(raw)).toBeNull();
     }
     expect(parseTakenSeat(JSON.stringify({ objectId: 'blackjack', spot: chairs - 1 }))).not.toBeNull();
+  });
+});
+
+describe('walking in after logging in (SRS-103.12)', () => {
+  const walk = entranceWalk();
+  const [lobby, doorway] = walk;
+  const inside = walk[walk.length - 1]!;
+  // The doorway's opening, kept clear of its posts by the player's width.
+  const inDoorway = (x: number) => x - PLAYER_RADIUS >= DOOR.x && x + PLAYER_RADIUS <= DOOR.x + DOOR.w;
+
+  it('starts out in the lobby, beyond the front of the room, in line with the door', () => {
+    expect(lobby!.y).toBeGreaterThan(ROWS);
+    expect(inDoorway(lobby!.x)).toBe(true);
+  });
+
+  it('crosses the front of the room through the doorway, not the rail beside it', () => {
+    expect(doorway!.y).toBeLessThan(DOOR.y);
+    expect(inDoorway(doorway!.x)).toBe(true);
+    // Straight in from the lobby to the doorway, so it never crosses the rail elsewhere.
+    expect(doorway!.x).toBe(lobby!.x);
+  });
+
+  it('ends where the player normally starts, on a tile they can stand on', () => {
+    expect(inside).toEqual({ x: START.x + 0.5, y: START.y + 0.5 });
+    expect(isBlocked(START.x, START.y)).toBe(false);
   });
 });

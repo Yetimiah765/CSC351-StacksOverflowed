@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { INTERACTIVE_OBJECTS, SEAT_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
+import { ENTRANCE_KEY, INTERACTIVE_OBJECTS, SEAT_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
 import { playHref, useSignedIn } from '../useSignedIn';
 import type { WalkInput } from './Scene';
 
@@ -78,6 +78,25 @@ function forgetTakenSeat() {
   }
 }
 
+// Just logged in (SRS-103.12): the login page leaves ENTRANCE_KEY, and the
+// floor starts with the player walking in through the doors, unless the
+// device asks for reduced motion. It's cleared once they're in.
+function wantsEntrance() {
+  try {
+    return sessionStorage.getItem(ENTRANCE_KEY) === '1' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
+function forgetEntrance() {
+  try {
+    sessionStorage.removeItem(ENTRANCE_KEY);
+  } catch {
+    // Nothing to forget.
+  }
+}
+
 function canDraw3d() {
   try {
     const canvas = document.createElement('canvas');
@@ -97,10 +116,16 @@ export default function CasinoFloor() {
   // The seat taken to open a game, read once the page is in the browser:
   // undefined until then, null when there's nothing to get up from.
   const [returning, setReturning] = useState<TakenSeat | null | undefined>(undefined);
+  // Walking in after logging in (SRS-103.12); never when back from a game.
+  const [entering, setEntering] = useState(false);
 
   useEffect(() => {
     setWebgl(canDraw3d());
-    setReturning(readTakenSeat());
+    const seat = readTakenSeat();
+    setReturning(seat);
+    const walkIn = wantsEntrance() && !seat;
+    if (!walkIn) forgetEntrance();
+    setEntering(walkIn);
   }, []);
 
   // The game being sat down at (the scene plays the sitting and the camera
@@ -228,6 +253,8 @@ export default function CasinoFloor() {
               onSeated={(object, spot) => seated.current(object, spot)}
               returning={returning}
               onStood={forgetTakenSeat}
+              entering={entering}
+              onEntered={forgetEntrance}
               paused={opening}
             />
           </div>

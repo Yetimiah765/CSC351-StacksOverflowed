@@ -105,6 +105,23 @@ export const START: Point & { direction: Direction } = { x: 12, y: 13, direction
 /** The door in the bottom wall (two tiles wide), drawn but not walkable. */
 export const DOOR = { x: 12, y: 14, w: 2 };
 
+// ---------- walking in after logging in (SRS-103.12) ----------
+// Logging in leaves this flag in sessionStorage; the floor then starts with
+// the player out in the lobby, walking in through the door, and clears it
+// once they're in.
+export const ENTRANCE_KEY = 'casino-floor-entrance';
+
+/** The walk in, in tiles: from the lobby a few metres outside the door,
+ * straight through the middle of the doorway, to where the player starts. */
+export function entranceWalk(): Point[] {
+  const doorMiddle = DOOR.x + DOOR.w / 2;
+  return [
+    { x: doorMiddle, y: DOOR.y + 4.2 },
+    { x: doorMiddle, y: DOOR.y - 0.1 },
+    { x: START.x + 0.5, y: START.y + 0.5 },
+  ];
+}
+
 export const INTERACTIVE_OBJECTS = FLOOR_OBJECTS.filter((object) => object.interactive);
 
 // ---------- getting up again (SRS-108.6) ----------

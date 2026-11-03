@@ -1018,6 +1018,10 @@ flowchart LR
 
 *Traces to: UR-108*
 
+**SRS-108.5, JO, Return to the home page.** The main page of each game, and the Cosmetic Shop, shall provide a back button that returns the player to the home page.
+
+*Traces to: UR-108*
+
 ### UR-109, JO – View Balance
 
 *User story: As a player, I want to see my current virtual-currency balance, so that I know how much I have available for gameplay, sports betting, and cosmetic purchases.*

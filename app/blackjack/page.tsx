@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import BackToHome from "../../components/BackToHome";
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { APPEARANCE_CHANGED_EVENT, BALANCE_CHANGED_EVENT, notifyBalanceChanged } from "../../lib/balanceEvents";
 import type { Cosmetic } from "../../lib/cosmetics";
@@ -571,12 +572,10 @@ export default function BlackjackPage() {
     <LooksContext.Provider value={looks}>
       <main className="min-h-page bg-[radial-gradient(ellipse_at_top,_#14532d_0%,_#052e16_30%,_#020617_70%)] px-4 pb-10 pt-6 text-slate-100 sm:px-6">
         <div className="mx-auto w-full max-w-7xl">
+          <BackToHome className="mb-4" />
           {/* Header */}
           <header className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-4">
-              <Link href="/" className="text-sm text-slate-400 transition hover:text-emerald-300">
-                ← All games
-              </Link>
               <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
                 Blackjack
                 <span aria-hidden className="text-xl tracking-[0.15em]">

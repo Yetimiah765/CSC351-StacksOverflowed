@@ -4,6 +4,9 @@ import {
   DOOR,
   FLOOR_OBJECTS,
   FOYER_PLANTS,
+  atCasinoDoors,
+  doorStandingSpots,
+  exitWalk,
   FRONT_WALL_Y,
   GATE_HALF_WIDTH,
   GATE_SHUT,
@@ -332,6 +335,42 @@ describe('the gate in the rail at the front of the floor (SRS-105.4)', () => {
     // Coming back, it swings the other way.
     expect(walk(away.at, { x: 0, y: -pace }, 60, away.gate).gate.way).toBe(1);
     expect(GATE_SWING_SECONDS).toBeLessThan(0.5);
+  });
+});
+
+describe("leaving through the casino's doors (SRS-105.5)", () => {
+  const middle = DOOR.x + DOOR.w / 2;
+
+  it('counts the player as at the doors only in the foyer, right in front of them', () => {
+    expect(atCasinoDoors({ x: middle, y: Math.floor(FRONT_WALL_Y) - PLAYER_RADIUS })).toBe(true);
+    expect(atCasinoDoors(START)).toBe(false);
+    expect(atCasinoDoors({ x: middle, y: DOOR.y + 0.5 })).toBe(false); // by the gate
+    expect(atCasinoDoors({ x: middle - GATE_HALF_WIDTH - 1, y: FRONT_WALL_Y - 0.5 })).toBe(false); // off to the side
+  });
+
+  it('walks a click on the doors to an open spot in reach of them, through the gate', () => {
+    const spots = doorStandingSpots();
+    expect(spots.length).toBeGreaterThan(0);
+    for (const spot of spots) {
+      expect(isBlocked(spot.x, spot.y)).toBe(false);
+      expect(atCasinoDoors({ x: spot.x + 0.5, y: spot.y + 0.5 })).toBe(true);
+    }
+    expect(findPath(START, spots)).not.toBeNull();
+  });
+
+  it('walks out through the doors, down the lobby and out of the front door, the walk in backwards', () => {
+    for (const spot of doorStandingSpots()) {
+      const from = { x: spot.x + 0.5, y: spot.y + 0.5 };
+      const walk = exitWalk(from);
+      expect(walk[0]).toEqual(from);
+      // After stepping across to the middle, it's straight down it, never back.
+      for (const point of walk.slice(1)) expect(point.x).toBe(middle);
+      for (let i = 1; i < walk.length; i++) expect(walk[i]!.y).toBeGreaterThanOrEqual(walk[i - 1]!.y);
+      const ys = walk.map((point) => point.y);
+      expect(ys).toContain(FRONT_WALL_Y);
+      expect(ys).toContain(FRONT_WALL_Y + LOBBY.depth);
+      expect(walk[walk.length - 1]!.y).toBeGreaterThan(FRONT_WALL_Y + LOBBY.depth);
+    }
   });
 });
 

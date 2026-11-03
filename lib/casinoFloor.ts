@@ -590,3 +590,34 @@ export function stepGate(gate: GateState, at: Point, moved: Point, seconds: numb
   const open = target === 1 ? Math.min(1, gate.open + step) : Math.max(0, gate.open - step);
   return { open, way: open === 0 && target === 0 ? 0 : way };
 }
+
+// ---------- leaving through the casino's doors (SRS-105.5) ----------
+
+/** Whether the player at `at` is in reach of the casino's doors, from the foyer: close enough to leave through them. */
+export function atCasinoDoors(at: Point): boolean {
+  return Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH && at.y > FRONT_WALL_Y - 2.4;
+}
+
+/** The open tiles in reach of the casino's doors, where a click on the doors walks the player to. */
+export function doorStandingSpots(): Point[] {
+  const spots: Point[] = [];
+  for (let y = DOOR.y; y < Math.floor(FRONT_WALL_Y); y++) {
+    for (let x = doorMiddle - GATE_HALF_WIDTH; x < doorMiddle + GATE_HALF_WIDTH; x++) {
+      if (!isBlocked(x, y) && atCasinoDoors({ x: x + 0.5, y: y + 0.5 })) spots.push({ x, y });
+    }
+  }
+  return spots;
+}
+
+/** The walk out, in tiles: from `from` (in reach of the doors) to just in front of them, through them and down the lobby, out of the building's front door, and on along the pavement — the walk in backwards. */
+export function exitWalk(from: Point): Point[] {
+  const front = FRONT_WALL_Y + LOBBY.depth;
+  const points = [
+    from,
+    { x: doorMiddle, y: Math.max(from.y, FRONT_WALL_Y - 1.1) },
+    { x: doorMiddle, y: FRONT_WALL_Y },
+    { x: doorMiddle, y: front },
+    { x: doorMiddle, y: front + 6 },
+  ];
+  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}

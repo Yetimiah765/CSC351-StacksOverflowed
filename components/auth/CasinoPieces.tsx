@@ -22,6 +22,11 @@ const CHIP_COLORS: Record<ChipColor, { body: string; center: string; spots: stri
   pink: { body: '#db2777', center: '#be185d', spots: '#f8fafc', ink: '#f8fafc', value: '5000' },
 };
 
+/** A chip colour's paints, for drawing chips other ways (e.g. stacks seen side on). */
+export function chipColors(color: ChipColor) {
+  return CHIP_COLORS[color];
+}
+
 export type BackColor = 'red' | 'navy' | 'green' | 'purple' | 'black' | 'teal';
 
 const BACK_COLORS: Record<BackColor, { body: string; lines: string; center: string }> = {

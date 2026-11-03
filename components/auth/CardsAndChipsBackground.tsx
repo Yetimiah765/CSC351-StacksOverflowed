@@ -1,15 +1,14 @@
 'use client';
 
 import { type CSSProperties } from 'react';
-import CasinoMoments from './CasinoMoments';
 import { CardBack, CardFace, Chip, type BackColor, type ChipColor } from './CasinoPieces';
 
-// SRS-101.13: the sign-up page's background. Behind two slow glows, a collage
-// of game moments flashes in and out (CasinoMoments), and in front of it
+// SRS-101.13: the sign-up page's background. In front of two slow glows,
 // playing cards and poker chips fall slowly in three depths (far ones small,
 // faint and slow), each swaying and turning as it falls; chips tilt like a
 // coin catching the light and a few cards turn over now and then. No card
-// face, chip or card back here appears twice, or in any of the moments. The
+// face, chip or card back here appears twice, or in the header's scenes
+// (CasinoMoments). The
 // `drift-*` keyframes are in app/globals.css; with reduced motion they're
 // paused, so every piece holds still wherever its negative delay put it.
 // Everything is fixed here rather than random, so the server's HTML and the
@@ -62,7 +61,6 @@ export default function CardsAndChipsBackground() {
     <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
       <div className="drift-glow absolute -left-40 top-1/4 h-[30rem] w-[30rem] rounded-full bg-emerald-500/10 blur-3xl" />
       <div className="drift-glow absolute -right-32 bottom-[-6rem] h-[26rem] w-[26rem] rounded-full bg-amber-400/10 blur-3xl [animation-delay:-13s]" />
-      <CasinoMoments />
       {PIECES.map((piece, index) => (
         <FallingPiece key={index} piece={piece} />
       ))}

@@ -2067,7 +2067,7 @@ Traces to: UR-216
 
 *Traces to: UR-303*
 
-**SRS-303.5, CL, Win celebration.** When a spin's net result is a win, the system shall display a celebration animation together with the amount won.
+**SRS-303.5, CL, Win or loss animation.** When a spin's result is displayed, the system shall compare the coins its bets returned with the coins staked. When the spin's net result is a win, the system shall display a celebration animation together with the amount won; when it is a loss, the system shall display a distinct losing animation together with the amount lost; when the spin breaks even, the system shall display neither and shall state that the player broke even.
 
 *Traces to: UR-303*
 

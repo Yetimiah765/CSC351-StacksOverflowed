@@ -3,7 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import RouletteWheel from '../../components/roulette/RouletteWheel';
+import SpinResultBanner from '../../components/roulette/SpinResultBanner';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
+import { spinButtonLabel, spinOutcome } from '../../lib/roulette/result';
 import {
   CHIP_VALUES,
   MAX_TOTAL_BET,
@@ -102,6 +104,8 @@ export default function RoulettePage() {
   const [target, setTarget] = useState<number | null>(null);
   const [lastSpin, setLastSpin] = useState<SpinOutcome | null>(null);
   const [history, setHistory] = useState<number[]>([]);
+  // Counts results shown, so each one replays the win or loss animation.
+  const [resultCount, setResultCount] = useState(0);
   const [message, setMessage] = useState<string | null>(null);
   // The committed result, held back until the wheel stops (SRS-304.2).
   const committed = useRef<SpinResponse | null>(null);
@@ -226,6 +230,7 @@ export default function RoulettePage() {
     setBalance(result.balance);
     notifyBalanceChanged();
     setHistory((prev) => [result.number, ...prev].slice(0, 12));
+    setResultCount((count) => count + 1);
     // SRS-305.3 / SRS-305.4: settled bets leave the table, except riding
     // ones, which stay until the player clears them.
     const kept = betsAfterSpin(bets, rideRef.current);
@@ -251,6 +256,7 @@ export default function RoulettePage() {
   }
 
   const net = lastSpin ? lastSpin.returned - lastSpin.staked : 0;
+  const outcome = lastSpin ? spinOutcome(lastSpin.staked, lastSpin.returned) : null;
 
   return (
     <main className="min-h-page bg-[radial-gradient(ellipse_at_top,_#064e3b_0%,_#020617_60%)] px-4 py-8 text-slate-100">
@@ -269,9 +275,18 @@ export default function RoulettePage() {
         <div className="mt-6 grid gap-8 lg:grid-cols-[20rem_1fr]">
           {/* Wheel and result */}
           <section className="flex flex-col gap-5">
-            <RouletteWheel target={target} spinId={spinId} onStopped={handleStopped} />
+            {/* SRS-303.5: the win or loss animation plays over the wheel once it zooms back out. */}
+            <div className="relative">
+              <RouletteWheel target={target} spinId={spinId} onStopped={handleStopped} />
+              <SpinResultBanner spinKey={resultCount} mood={outcome?.mood ?? null} amount={outcome?.amount ?? 0} />
+            </div>
 
-            <div className="rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-center">
+            <div
+              key={resultCount}
+              className={`rounded-2xl border border-white/10 bg-slate-950/60 p-4 text-center ${
+                !spinning && outcome?.mood === 'win' ? 'roulette-card-win' : ''
+              } ${!spinning && outcome?.mood === 'loss' ? 'roulette-card-loss' : ''}`}
+            >
               {spinning ? (
                 <p className="py-3 text-lg font-semibold text-amber-200">No more bets…</p>
               ) : lastSpin ? (
@@ -286,7 +301,11 @@ export default function RoulettePage() {
                   <div className="text-left">
                     <p className="text-sm capitalize text-slate-300">{pocketColor(lastSpin.number)}</p>
                     <p className={`text-xl font-bold ${net > 0 ? 'text-emerald-300' : net < 0 ? 'text-red-300' : 'text-slate-200'}`}>
-                      {net > 0 ? `+${net}` : net} coins
+                      {outcome?.mood === 'win'
+                        ? `Won ${outcome.amount.toLocaleString()} coins`
+                        : outcome?.mood === 'loss'
+                          ? `Lost ${outcome.amount.toLocaleString()} coins`
+                          : 'Broke even'}
                     </p>
                   </div>
                 </div>
@@ -397,7 +416,7 @@ export default function RoulettePage() {
                   onClick={() => spin(true)}
                   disabled={spinning || pending.length === 0}
                   title="Spin, then keep the same bets on the table until you clear them"
-                  className="rounded-lg border-2 border-emerald-400 bg-emerald-600/80 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 disabled:opacity-40"
+                  className="rounded-lg border-2 border-emerald-400 bg-emerald-600/80 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:border-dashed disabled:border-emerald-400/70 disabled:bg-transparent disabled:text-emerald-200 disabled:shadow-none"
                 >
                   Let it ride
                 </button>
@@ -405,9 +424,16 @@ export default function RoulettePage() {
                   type="button"
                   onClick={() => spin(false)}
                   disabled={spinning || pending.length === 0}
-                  className="rounded-lg bg-gradient-to-b from-yellow-300 to-amber-500 px-8 py-2 text-base font-bold text-amber-950 shadow-lg shadow-amber-500/30 hover:brightness-110 disabled:opacity-40"
+                  // SRS-302.4: disabled with no bets, but it says why instead of only fading out.
+                  className={`min-w-[11rem] rounded-lg border-2 px-8 py-2 text-base font-black uppercase tracking-wide transition ${
+                    spinning
+                      ? 'cursor-wait border-amber-400 bg-amber-900/60 text-amber-200'
+                      : pending.length === 0
+                        ? 'cursor-not-allowed border-dashed border-amber-400/80 bg-slate-950/60 text-amber-200'
+                        : 'roulette-spin-ready border-yellow-200 bg-gradient-to-b from-yellow-300 to-amber-500 text-amber-950 shadow-lg shadow-amber-500/40 hover:brightness-110'
+                  }`}
                 >
-                  {spinning ? 'Spinning…' : 'Spin'}
+                  {spinButtonLabel(spinning, pending.length > 0)}
                 </button>
               </div>
             </div>

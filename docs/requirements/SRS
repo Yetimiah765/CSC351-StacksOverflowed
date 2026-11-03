@@ -994,6 +994,10 @@ flowchart LR
 
 *Traces to: UR-107, UR-128*
 
+**SRS-107.5, JO, Website name in the navigation bar.** The navigation bar shall display the website's name, Stacks Overflowed, at its left on every page, as a link to the home page.
+
+*Traces to: UR-107*
+
 ### UR-108, JO – Select Game
 
 *User story: As a logged-in player, I want to select an available game from the home page, so that I can begin playing.*

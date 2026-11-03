@@ -113,7 +113,7 @@ export default function CasinoFloor() {
       if (key) {
         event.preventDefault();
         // Walking means playing the floor: let go of a focused link or button
-        // (like the nav bar's Home link after coming back from a game), so
+        // (like a game's back button after coming back from it), so
         // Space and Enter then go to the game in reach rather than to it.
         const focused = document.activeElement as HTMLElement | null;
         if (focused?.closest('a, button')) focused.blur();
@@ -150,12 +150,14 @@ export default function CasinoFloor() {
 
   return (
     <div className={`${display.className} flex min-h-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-6`}>
-      {/* Top bar: the name, how to play, and (for guests) sign up or log in. */}
+      {/* How to play, and (for guests) sign up or log in. The website's name
+          is in the nav bar now (SRS-107.5), so it's only named here for
+          screen readers. */}
       <header className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
-        <h1 className="text-xl font-bold uppercase tracking-[0.12em] text-amber-300 drop-shadow-[0_2px_8px_rgba(251,191,36,0.35)] sm:text-2xl">
-          Stacks Overflowed Casino
-        </h1>
-        <p className="hidden uppercase tracking-[0.15em] text-slate-400 md:block">WASD to move · Shift to walk · drag to look · Space to play</p>
+        <h1 className="sr-only">Stacks Overflowed Casino</h1>
+        <p className="hidden flex-1 text-center uppercase tracking-[0.15em] text-slate-400 md:block">
+          WASD to move · Shift to walk · drag to look · Space to play
+        </p>
         {signedIn === false ? (
           <div className="flex gap-2 uppercase tracking-wider">
             <Link href="/register" className="rounded bg-emerald-400 px-4 py-2 font-bold text-slate-950 transition hover:bg-emerald-300">

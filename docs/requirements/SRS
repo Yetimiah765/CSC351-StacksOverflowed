@@ -1420,6 +1420,10 @@ flowchart LR
 
 *Traces to: UR-121*
 
+**SRS-121.14, JO, Profile window during gameplay.** When a player opens another player's public profile during gameplay (SRS-121.1), the system shall show it in a small window over the game, without opening a new browser tab or leaving the game, and the player shall be able to move the window around the screen and close it.
+
+*Traces to: UR-121*
+
 # Cosmetic Shop Page
 
 ### UR-122, JO – Browse Blind Boxes

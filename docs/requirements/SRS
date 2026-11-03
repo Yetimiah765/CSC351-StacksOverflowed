@@ -830,6 +830,10 @@ flowchart LR
 
 *Traces to: UR-101*
 
+**SRS-101.12, JO, Sign-up form layout.** On laptop and desktop screens, the sign-up page shall arrange the registration fields side by side in a form that is wider than it is tall, and shall not repeat the website's name already shown in the navigation bar (SRS-107.5).
+
+*Traces to: UR-101*
+
 ### UR-102, JO – Age Requirement
 
 *User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*

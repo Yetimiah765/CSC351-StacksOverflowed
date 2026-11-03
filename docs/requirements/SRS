@@ -1104,6 +1104,10 @@ flowchart LR
 
 *Traces to: UR-111*
 
+**SRS-111.4, JO, Return to the home page.** The player's profile page shall provide a back button that returns the player to the home page, the same as each game's main page and the Cosmetic Shop (SRS-108.5).
+
+*Traces to: UR-111*
+
 ### UR-112, JO – Edit Profile
 
 *User story: As a logged-in player, I want to update my first name, last name, username, profile photo, and bio, so that my profile and account information remain current.*

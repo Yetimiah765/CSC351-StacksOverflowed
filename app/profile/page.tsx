@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
+import BackToHome from '../../components/BackToHome';
 import BioEditor from '../../components/profile/BioEditor';
 import CosmeticsSection from '../../components/profile/CosmeticsSection';
 import PasswordEditor, { type PasswordChange } from '../../components/profile/PasswordEditor';
@@ -215,6 +216,8 @@ export default function ProfilePage() {
   return (
     <main className="min-h-page bg-slate-950 px-6 py-12 text-slate-100">
       <div className="mx-auto w-full max-w-4xl space-y-6">
+        {/* SRS-111.4: logging in lands here, so give the way back to the floor. */}
+        <BackToHome />
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h1 className="text-3xl font-semibold">Your profile</h1>
           {/* What other players see (UR-121). */}

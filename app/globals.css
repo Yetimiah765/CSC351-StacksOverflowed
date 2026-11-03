@@ -20,10 +20,123 @@ body {
    --reel-stop to how far its strip travels before it stops. */
 @keyframes reel-spin {
   from {
-    transform: translateY(0);
+    transform: translateY(var(--reel-start, 0));
   }
   to {
     transform: translateY(var(--reel-stop));
+  }
+}
+
+/* The Daily Login Box's slot machine (components/SlotReveal.tsx). The lever
+   swings down towards the viewer and springs back: seen from the front, its
+   rod shrinks to nothing and flips below its hub (lever-rod), while the ball
+   at its end follows it down, growing as it comes closer (lever-ball). The
+   reels blur while they spin (reel-blur) and the cabinet's bulbs chase
+   (slot-bulb), faster once there's a win. */
+@keyframes lever-rod {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  20%,
+  77% {
+    transform: scaleY(0);
+  }
+  40%,
+  55% {
+    transform: scaleY(-0.75);
+  }
+}
+
+@keyframes lever-ball {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  20%,
+  77% {
+    transform: translateY(var(--lever-length)) scale(1.35);
+  }
+  40%,
+  55% {
+    transform: translateY(calc(var(--lever-length) * 1.75)) scale(1.1);
+  }
+}
+
+@keyframes reel-blur {
+  0%,
+  100% {
+    filter: blur(0);
+  }
+  15%,
+  75% {
+    filter: blur(1.4px);
+  }
+}
+
+@keyframes slot-bulb {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Waiting for the pull: the LED prompt blinks, the arrow by the lever
+   bounces, and the lever's ball glows. */
+.slot-blink {
+  animation: slot-blink 900ms steps(2, jump-none) infinite;
+}
+
+.slot-hint {
+  animation: slot-hint 900ms ease-in-out infinite;
+}
+
+.slot-ball-glow {
+  animation: slot-ball-glow 1200ms ease-in-out infinite;
+}
+
+@keyframes slot-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes slot-hint {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(5px);
+  }
+}
+
+@keyframes slot-ball-glow {
+  0%,
+  100% {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6), 0 0 0 0 rgba(253, 230, 138, 0);
+  }
+  50% {
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.6), 0 0 18px 6px rgba(253, 230, 138, 0.75);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot-bulb {
+    animation: none !important;
+    opacity: 0.8;
+  }
+  .slot-blink,
+  .slot-hint,
+  .slot-ball-glow {
+    animation: none !important;
   }
 }
 

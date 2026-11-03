@@ -103,7 +103,7 @@ export default function RegisterPage() {
               required
               minLength={8}
               className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
-              placeholder="At least 8 characters, letters and numbers"
+              placeholder="8+ letters and numbers"
             />
           </label>
 

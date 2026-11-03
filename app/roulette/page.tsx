@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import RouletteWheel from '../../components/roulette/RouletteWheel';
 import SpinResultBanner from '../../components/roulette/SpinResultBanner';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
-import { spinOutcome } from '../../lib/roulette/result';
+import { spinButtonLabel, spinOutcome } from '../../lib/roulette/result';
 import {
   CHIP_VALUES,
   MAX_TOTAL_BET,
@@ -416,7 +416,7 @@ export default function RoulettePage() {
                   onClick={() => spin(true)}
                   disabled={spinning || pending.length === 0}
                   title="Spin, then keep the same bets on the table until you clear them"
-                  className="rounded-lg border-2 border-emerald-400 bg-emerald-600/80 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 disabled:opacity-40"
+                  className="rounded-lg border-2 border-emerald-400 bg-emerald-600/80 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:border-dashed disabled:border-emerald-400/70 disabled:bg-transparent disabled:text-emerald-200 disabled:shadow-none"
                 >
                   Let it ride
                 </button>
@@ -424,9 +424,16 @@ export default function RoulettePage() {
                   type="button"
                   onClick={() => spin(false)}
                   disabled={spinning || pending.length === 0}
-                  className="rounded-lg bg-gradient-to-b from-yellow-300 to-amber-500 px-8 py-2 text-base font-bold text-amber-950 shadow-lg shadow-amber-500/30 hover:brightness-110 disabled:opacity-40"
+                  // SRS-302.4: disabled with no bets, but it says why instead of only fading out.
+                  className={`min-w-[11rem] rounded-lg border-2 px-8 py-2 text-base font-black uppercase tracking-wide transition ${
+                    spinning
+                      ? 'cursor-wait border-amber-400 bg-amber-900/60 text-amber-200'
+                      : pending.length === 0
+                        ? 'cursor-not-allowed border-dashed border-amber-400/80 bg-slate-950/60 text-amber-200'
+                        : 'roulette-spin-ready border-yellow-200 bg-gradient-to-b from-yellow-300 to-amber-500 text-amber-950 shadow-lg shadow-amber-500/40 hover:brightness-110'
+                  }`}
                 >
-                  {spinning ? 'Spinning…' : 'Spin'}
+                  {spinButtonLabel(spinning, pending.length > 0)}
                 </button>
               </div>
             </div>

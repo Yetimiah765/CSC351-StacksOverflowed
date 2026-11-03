@@ -634,6 +634,16 @@ function Player({
     const halfW = (COLS / 2 - 1.3) * TILE_M;
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = FRONT_WALL_Z - 0.4;
+    // Walking towards it in the foyer, up against the front wall, it slides
+    // along the wall to one side, keeping at least FRONT_ROOM metres off,
+    // rather than ending up right overhead.
+    const FRONT_ROOM = 2;
+    const roomBehind = front - wz;
+    if (position.z > front && roomBehind < FRONT_ROOM) {
+      const side = position.x >= wx ? 1 : -1;
+      const slide = Math.sqrt(FRONT_ROOM ** 2 - Math.max(0, roomBehind) ** 2);
+      position.x = wx + side * Math.max(Math.abs(position.x - wx), slide);
+    }
     position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
     position.z = THREE.MathUtils.clamp(position.z, back, front);
     position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);

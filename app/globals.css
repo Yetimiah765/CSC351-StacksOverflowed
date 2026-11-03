@@ -138,33 +138,10 @@ body {
 }
 
 /* Game moments in the sign-up box's header (components/auth/CasinoMoments.tsx),
-   zooming into each other. Each move inside a scene starts --at seconds in
+   zooming into each other (the camera is moved from script). Each move inside a scene starts --at seconds in
    (plus --moment-delay) and rests at its end state, so with animations off a
    scene shows finished. --pace (set on the header) stretches every move's
    start and length, to slow the scenes down or speed them up in one place. */
-/* The camera pushes into a scene's exit until it fills the frame
-   (moment-zoom-in), and the next scene pulls back out of its entry
-   (moment-zoom-out), fading in while both frames show the same thing. The
-   scale steps by equal ratios (--k1..--k), so the push feels steady, and the
-   focus drifts to the middle (--tx, --ty) as it goes. */
-@keyframes moment-zoom-in {
-  0% { transform: none; }
-  21.25% { transform: translate(calc(var(--tx) * 0.25), calc(var(--ty) * 0.25)) scale(var(--k1)); }
-  42.5% { transform: translate(calc(var(--tx) * 0.5), calc(var(--ty) * 0.5)) scale(var(--k2)); }
-  63.75% { transform: translate(calc(var(--tx) * 0.75), calc(var(--ty) * 0.75)) scale(var(--k3)); }
-  /* Full depth: it holds there while the next scene fades in over it. */
-  85% { transform: translate(var(--tx), var(--ty)) scale(var(--k)); }
-  /* By now the next scene covers it, so it stops being drawn. */
-  100% { transform: translate(var(--tx), var(--ty)) scale(var(--k)); visibility: hidden; }
-}
-@keyframes moment-zoom-out {
-  0% { opacity: 0; transform: translate(var(--tx), var(--ty)) scale(var(--k)); }
-  6% { opacity: 1; transform: translate(var(--tx), var(--ty)) scale(var(--k)); }
-  32.5% { transform: translate(calc(var(--tx) * 0.75), calc(var(--ty) * 0.75)) scale(var(--k3)); }
-  55% { transform: translate(calc(var(--tx) * 0.5), calc(var(--ty) * 0.5)) scale(var(--k2)); }
-  77.5% { transform: translate(calc(var(--tx) * 0.25), calc(var(--ty) * 0.25)) scale(var(--k1)); }
-  100% { opacity: 1; transform: none; }
-}
 @keyframes moment-in {
   from { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)) rotate(var(--dr, 0deg)) scale(var(--ds, 1)); }
   to { opacity: 1; transform: none; }
@@ -210,8 +187,6 @@ body {
   15% { opacity: 1; }
   100% { opacity: 1; transform: translate(var(--cx), var(--cy)) rotate(var(--cr, 0deg)); }
 }
-.moment-exit { animation: moment-zoom-in var(--exit-ms) linear var(--exit-at) both; }
-.moment-enter { animation: moment-zoom-out var(--enter-ms) linear var(--enter-at) both; }
 .moment-in { animation: moment-in calc(var(--dur, 0.45s) * var(--pace, 1)) cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-pop { animation: moment-pop calc(var(--dur, 0.5s) * var(--pace, 1)) cubic-bezier(0.3, 0.8, 0.3, 1.2) calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-out { opacity: 0; animation: moment-out calc(0.25s * var(--pace, 1)) ease-in calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
@@ -312,7 +287,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .moment-enter, .moment-exit, .moment-in, .moment-pop, .moment-out, .moment-blink, .moment-reel, .moment-drop,
+  .moment-in, .moment-pop, .moment-out, .moment-blink, .moment-reel, .moment-drop,
   .moment-kick, .moment-dive, .moment-lever, .moment-flip-away, .moment-flip-show, .moment-away, .moment-sparkle,
   .moment-sparkle-burst, .moment-chase-a, .moment-chase-b, .moment-ticker, .moment-bar, .moment-grow, .moment-spin,
   .moment-turn, .moment-fly-x, .moment-fly-y, .moment-bulge, .moment-coin { animation: none !important; }

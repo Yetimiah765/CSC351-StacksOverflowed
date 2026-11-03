@@ -49,11 +49,13 @@ const PIECES: Piece[] = [
   { kind: 'card', face: 'J♦', left: 38, depth: 2, fall: 26, delay: 2, sway: 38, turn: -190 },
 ];
 
-// How each depth looks: size (card width / chip diameter), how clearly it shows, blur.
+// How each depth looks: size (card width / chip diameter) and how clearly it
+// shows. No blur or CSS shadow: filters on moving pieces are redone every
+// frame and cost the page its smoothness, so the pieces draw flat shadows.
 const DEPTH = [
-  { card: 40, chip: 30, opacity: 0.3, blur: 1.5 },
-  { card: 56, chip: 42, opacity: 0.5, blur: 0 },
-  { card: 72, chip: 54, opacity: 0.7, blur: 0 },
+  { card: 40, chip: 30, opacity: 0.28 },
+  { card: 56, chip: 42, opacity: 0.5 },
+  { card: 72, chip: 54, opacity: 0.7 },
 ] as const;
 
 export default function CardsAndChipsBackground() {
@@ -74,7 +76,6 @@ function FallingPiece({ piece }: { piece: Piece }) {
   const vars = {
     left: `${piece.left}%`,
     opacity: look.opacity,
-    filter: look.blur ? `blur(${look.blur}px)` : undefined,
     '--fall': `${piece.fall}s`,
     // A negative delay starts the piece partway down, so the page opens full.
     '--delay': `-${piece.delay}s`,
@@ -90,20 +91,20 @@ function FallingPiece({ piece }: { piece: Piece }) {
       <div className="drift-sway">
         {piece.kind === 'chip' ? (
           <div className="drift-tilt">
-            <Chip color={piece.color ?? 'blue'} size={width} />
+            <Chip flat color={piece.color ?? 'blue'} size={width} />
           </div>
         ) : piece.flip ? (
           <div className="drift-flip relative" style={{ width, height: width * 1.4 }}>
             <div className="drift-face absolute inset-0">
-              <CardFace face={piece.face ?? 'A♠'} width={width} />
+              <CardFace flat face={piece.face ?? 'A♠'} width={width} />
             </div>
             <div className="drift-face drift-face-back absolute inset-0">
-              <CardBack width={width} color={piece.back} />
+              <CardBack flat width={width} color={piece.back} />
             </div>
           </div>
         ) : (
           <div className="drift-tilt">
-            {piece.face ? <CardFace face={piece.face} width={width} /> : <CardBack width={width} color={piece.back} />}
+            {piece.face ? <CardFace flat face={piece.face} width={width} /> : <CardBack flat width={width} color={piece.back} />}
           </div>
         )}
       </div>

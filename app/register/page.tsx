@@ -41,12 +41,13 @@ export default function RegisterPage() {
   // SRS-101.12: a wide form with the fields side by side (names and birthday,
   // then username and password); they stack on a phone. The website's name is
   // in the nav bar (SRS-107.5), so the page doesn't repeat it. SRS-101.13:
-  // cards and chips fall behind it, showing faintly through the frosted form,
-  // and game moments zoom into each other in a header across its top.
+  // cards and chips fall behind it, showing faintly through the form (no
+  // backdrop blur: re-blurring moving pieces every frame halved the frame
+  // rate), and game moments zoom into each other in a header across its top.
   return (
     <main className="relative min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-10">
       <CardsAndChipsBackground />
-      <section className="relative w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/80 p-8 shadow-2xl shadow-black/40 backdrop-blur-md sm:p-12">
+      <section className="relative w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/40 sm:p-12">
         <div className="-mx-8 -mt-8 mb-9 overflow-hidden rounded-t-[23px] border-b border-white/10 sm:-mx-12 sm:-mt-12">
           <CasinoMoments />
         </div>

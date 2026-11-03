@@ -1,7 +1,7 @@
 'use client';
 
 import { Oswald } from 'next/font/google';
-import { useEffect, useId, useState, type CSSProperties, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ComponentType, type ReactNode } from 'react';
 import { CardBack, CardFace, Chip, chipColors, type ChipColor } from './CasinoPieces';
 
 const display = Oswald({ weight: ['700'], subsets: ['latin'], display: 'swap' });
@@ -15,28 +15,32 @@ const display = Oswald({ weight: ['700'], subsets: ['latin'], display: 'swap' })
 // sportsbook's live-score panel, the payout coin becomes a coin in the slot
 // tray, and the slot reel becomes the poker table's 10♠. Each pair is drawn
 // the same (or is the same plain colour where the camera stops), so the
-// frame never cuts. Every scene is one SVG drawn on an 880 x 300 canvas that
-// scales to the banner. The falling cards and chips behind the page use none
-// of these cards or chips. The `moment-*` keyframes are in app/globals.css;
-// each scene is keyed by its step so its animations play from the start, and
-// every move rests at its end state, so with reduced motion (animations off,
-// no cycling) the first scene shows finished and still.
+// frame never cuts. Every scene is one SVG drawn on an 880 x 300 canvas. The
+// camera is the SVG's viewBox, moved every frame (see cameraAt), so it stays
+// sharp at any depth and only what's in view is drawn; nothing in a scene
+// uses an SVG or CSS filter, which would have to be redone on every frame.
+// The falling cards and chips behind the page use none of these cards or
+// chips. A scene's own moves are the `moment-*` keyframes in app/globals.css;
+// each scene is keyed by its step so they play from the start, and every
+// move rests at its end state, so with reduced motion (animations off, no
+// cycling, no camera) the first scene shows finished and still.
 
 const W = 880;
 const H = 300;
 
-// A scene takes over every STEP_MS. The camera pushes into its exit over
-// EXIT_MS, reaching full depth 85% of the way and holding there; the next
-// scene fades in during that hold at ENTER_AT_MS (both frames filled by the
-// same thing at the same depth, and fully in before the old scene stops
-// being drawn) and pulls back over ENTER_MS. Its own action then starts, at
-// PACE (1 = as the `at` times say; higher is slower).
+// The camera's timeline, per scene, from when it mounts. It pulls back out of
+// its entry over PULL_MS, after fading in over FADE_MS while held at full
+// depth (the last scene, held at the same depth, is underneath). STEP_MS in,
+// the next scene mounts and the camera pushes into this one's exit over
+// PUSH_MS; the next one fades in over it, and then this one stops drawing.
+// The scene's own moves start at ACTION_AT and play at PACE (1 = as the `at`
+// times say; higher is slower).
+const PUSH_MS = 1800;
+const FADE_MS = 300;
+const PULL_MS = 2000;
 const PACE = 1.4;
-const STEP_MS = 10900;
-const EXIT_MS = 1900;
-const ENTER_AT_MS = 1630;
-const ENTER_MS = 2000;
-const ACTION_AT = (ENTER_AT_MS + ENTER_MS * 0.85) / 1000;
+const ACTION_AT = (PUSH_MS + FADE_MS + PULL_MS * 0.8) / 1000;
+const STEP_MS = Math.round((ACTION_AT + 4.6 * PACE + 1.2) * 1000);
 
 // Where the camera pushes in or pulls out from, on the canvas, and how far.
 type Focus = { x: number; y: number; k: number };
@@ -95,20 +99,38 @@ function at(seconds: number, vars: Record<string, string> = {}): CSSProperties {
   return { '--at': `${seconds}s`, ...vars } as CSSProperties;
 }
 
-// The camera move for a focus: the point stays put while the frame scales
-// around it and drifts until it's centred; --k1..--k step the scale evenly.
-function zoomVars({ x, y, k }: Focus): CSSProperties {
-  const fx = (x / W) * 100;
-  const fy = (y / H) * 100;
-  return {
-    transformOrigin: `${fx}% ${fy}%`,
-    '--tx': `${50 - fx}%`,
-    '--ty': `${50 - fy}%`,
-    '--k1': `${k ** 0.25}`,
-    '--k2': `${k ** 0.5}`,
-    '--k3': `${k ** 0.75}`,
-    '--k': `${k}`,
-  } as CSSProperties;
+// Slow in, slow out.
+function ease(u: number) {
+  const v = Math.min(1, Math.max(0, u));
+  return v < 0.5 ? 4 * v * v * v : 1 - (-2 * v + 2) ** 3 / 2;
+}
+
+type Camera = { viewBox: string; opacity: number; visible: boolean };
+
+const FULL_VIEW = `0 0 ${W} ${H}`;
+
+// What the camera shows `t` ms after a scene mounted. Depth goes up by equal
+// ratios along one eased curve (k to the power of the progress), so the push
+// feels steady, and the focus drifts from where it is to the middle of the
+// frame as the camera goes in.
+function viewAt({ x, y, k }: Focus, progress: number) {
+  const s = k ** progress;
+  const qx = x + progress * (W / 2 - x);
+  const qy = y + progress * (H / 2 - y);
+  return `${x - qx / s} ${y - qy / s} ${W / s} ${H / s}`;
+}
+
+function cameraAt(scene: Scene, t: number, first: boolean): Camera {
+  if (t >= STEP_MS) {
+    // Pushing into the exit, then holding there until the next scene is in.
+    const progress = ease((t - STEP_MS) / PUSH_MS);
+    return { viewBox: viewAt(scene.exit, progress), opacity: 1, visible: t < STEP_MS + PUSH_MS + FADE_MS };
+  }
+  if (first) return { viewBox: FULL_VIEW, opacity: 1, visible: true };
+  if (t < PUSH_MS) return { viewBox: viewAt(scene.enter, 1), opacity: 0, visible: true };
+  const fade = Math.min(1, (t - PUSH_MS) / FADE_MS);
+  const progress = 1 - ease((t - PUSH_MS - FADE_MS) / PULL_MS);
+  return { viewBox: progress > 0 ? viewAt(scene.enter, progress) : FULL_VIEW, opacity: fade, visible: true };
 }
 
 export default function CasinoMoments() {
@@ -144,27 +166,38 @@ export default function CasinoMoments() {
   );
 }
 
-// One scene: it pulls back out of its entry (inner layer) and, STEP_MS after
-// it took over, the camera pushes into its exit (outer layer).
+// One scene, with its own camera: every frame it sets the SVG's viewBox and
+// the layer's opacity from cameraAt.
 function SceneLayer({ step }: { step: number }) {
   const scene = SCENES[step % SCENES.length];
   const first = step === 0;
-  const outer = { ...zoomVars(scene.exit), '--exit-at': `${STEP_MS}ms`, '--exit-ms': `${EXIT_MS}ms` } as CSSProperties;
-  const inner = {
-    ...zoomVars(scene.enter),
-    // The first scene is already in place when the page opens.
-    '--enter-at': first ? `-${ENTER_MS}ms` : `${ENTER_AT_MS}ms`,
-    '--enter-ms': `${ENTER_MS}ms`,
-    '--moment-delay': first ? '0.3s' : `${ACTION_AT}s`,
-  } as CSSProperties;
+  const layer = useRef<HTMLDivElement>(null);
+  const svg = useRef<SVGSVGElement>(null);
+
+  useLayoutEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const born = performance.now();
+    let frame = 0;
+    let shown = { viewBox: FULL_VIEW, opacity: 1, visible: true };
+    const tick = (now: number) => {
+      const camera = cameraAt(scene, now - born, first);
+      // Only touch the page when the camera actually moved.
+      if (camera.viewBox !== shown.viewBox) svg.current?.setAttribute('viewBox', camera.viewBox);
+      if (layer.current && camera.opacity !== shown.opacity) layer.current.style.opacity = String(camera.opacity);
+      if (layer.current && camera.visible !== shown.visible) layer.current.style.display = camera.visible ? '' : 'none';
+      shown = camera;
+      if (camera.visible) frame = requestAnimationFrame(tick);
+    };
+    tick(born);
+    return () => cancelAnimationFrame(frame);
+  }, [scene, first]);
+
   const { Draw } = scene;
   return (
-    <div className="moment-exit absolute inset-0" style={outer}>
-      <div className="moment-enter absolute inset-0" style={inner}>
-        <svg viewBox={`0 0 ${W} ${H}`} className="moment-scene absolute inset-0 h-full w-full">
-          <Draw />
-        </svg>
-      </div>
+    <div ref={layer} className="moment-layer absolute inset-0" style={{ '--moment-delay': first ? '0.3s' : `${ACTION_AT}s` } as CSSProperties}>
+      <svg ref={svg} viewBox={FULL_VIEW} className="moment-scene absolute inset-0 h-full w-full">
+        <Draw />
+      </svg>
     </div>
   );
 }
@@ -196,10 +229,10 @@ function TurnOver({ x, y, w, face, t }: { x: number; y: number; w: number; face:
   return (
     <Place x={x} y={y}>
       <g className="moment-flip-away" style={at(t)}>
-        <CardBack width={w} />
+        <CardBack flat width={w} />
       </g>
       <g className="moment-flip-show" style={at(t)}>
-        <CardFace face={face} width={w} />
+        <CardFace flat face={face} width={w} />
       </g>
     </Place>
   );
@@ -213,18 +246,11 @@ function SceneDefs({ id }: { id: string }) {
         <stop offset="0.45" stopColor="#fcd34d" />
         <stop offset="1" stopColor="#d97706" />
       </linearGradient>
-      <filter id={`${id}-glow`} x="-30%" y="-80%" width="160%" height="260%">
-        <feGaussianBlur in="SourceAlpha" stdDeviation="5" result="b" />
-        <feFlood floodColor="#fbbf24" floodOpacity="0.7" />
-        <feComposite in2="b" operator="in" result="g" />
-        <feMerge>
-          <feMergeNode in="g" />
-          <feMergeNode in="SourceGraphic" />
-        </feMerge>
-      </filter>
-      <filter id={`${id}-blur`} x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur stdDeviation="16" />
-      </filter>
+      {/* A soft light that fades to nothing (floodlights, bokeh), instead of a blur filter. */}
+      <radialGradient id={`${id}-light`}>
+        <stop offset="0" stopColor="#ffffff" stopOpacity="0.55" />
+        <stop offset="1" stopColor="#ffffff" stopOpacity="0" />
+      </radialGradient>
     </defs>
   );
 }
@@ -234,6 +260,21 @@ function SceneDefs({ id }: { id: string }) {
 function Headline({ id, x, y, size, t, ds, until, children }: { id: string; x: number; y: number; size: number; t: number; ds?: number; until?: number; children: ReactNode }) {
   const lettering = (
     <g className="moment-pop" style={at(t, ds ? { '--ds': String(ds) } : {})}>
+      {/* The glow: a wide, faint stroke behind the letters (no filter). */}
+      <text
+        textAnchor="middle"
+        fontSize={size}
+        fontWeight={700}
+        letterSpacing={size * 0.04}
+        fill="none"
+        stroke="#fbbf24"
+        strokeOpacity="0.3"
+        strokeWidth={size * 0.3}
+        strokeLinejoin="round"
+        style={{ fontFamily: 'inherit' }}
+      >
+        {children}
+      </text>
       <text
         textAnchor="middle"
         fontSize={size}
@@ -243,7 +284,6 @@ function Headline({ id, x, y, size, t, ds, until, children }: { id: string; x: n
         stroke="#78350f"
         strokeWidth={size * 0.07}
         paintOrder="stroke"
-        filter={`url(#${id}-glow)`}
         style={{ fontFamily: 'inherit' }}
       >
         {children}
@@ -413,7 +453,7 @@ function BlackjackScene() {
       {/* Dealer: the hole card, the up card, and later the hole card turned over. */}
       <TurnOver x={398} y={54} w={38} face="Q♦" t={2.35} />
       <SlideIn x={440} y={54} from={shoe} t={0.48}>
-        <CardFace face="7♣" width={38} />
+        <CardFace flat face="7♣" width={38} />
       </SlideIn>
       <Bubble x={508} y={82} text="7" t={0.75} out={2.35} />
       <Bubble x={508} y={82} text="17" t={2.7} />
@@ -436,29 +476,29 @@ function BlackjackScene() {
               <ChipStack x={s.x} y={s.y + 8} colors={s.bet} />
             )}
             <SlideIn x={s.x - 30} y={s.y - 94} r={tilt - 6} from={shoe} t={[0, 0.12, 0.24, 0.36][i]}>
-              <CardFace face={s.cards[0]} width={38} />
+              <CardFace flat face={s.cards[0]} width={38} />
             </SlideIn>
             <SlideIn x={s.x - 10} y={s.y - 98} r={tilt + 6} from={shoe} t={[0.6, 0.72, 0.96, 1.08][i]}>
-              <CardFace face={s.cards[1]} width={38} />
+              <CardFace flat face={s.cards[1]} width={38} />
             </SlideIn>
             <Bubble x={s.x} y={s.y - 108} text={s.total} t={1.35} out={s.cards[0] === '5♣' ? 1.95 : undefined} />
           </g>
         );
       })}
       <SlideIn x={612} y={150} r={16} from={shoe} t={1.7}>
-        <CardFace face="7♠" width={38} />
+        <CardFace flat face="7♠" width={38} />
       </SlideIn>
       <Bubble x={600} y={145} text="21" t={2.0} fill="#065f46" />
 
       {/* You: A♠ already in front of you, K♥ dealt, your bet a red chip. */}
       <Place x={BJ_ACE.x} y={BJ_ACE.y}>
-        <CardFace face="A♠" width={40} />
+        <CardFace flat face="A♠" width={40} />
       </Place>
       <SlideIn x={430} y={172} r={8} from={shoe} t={0.84}>
-        <CardFace face="K♥" width={40} />
+        <CardFace flat face="K♥" width={40} />
       </SlideIn>
       <Place x={BJ_CHIP.x - 22} y={BJ_CHIP.y - 22}>
-        <Chip color="red" size={44} />
+        <Chip flat color="red" size={44} />
       </Place>
       <Bubble x={440} y={160} text="21" t={1.35} fill="#065f46" />
       <g className="moment-pop" style={at(2.9)}>
@@ -615,14 +655,14 @@ function RouletteScene() {
 
       {/* Bets: the red chip on 17, black on red, green on the third dozen. */}
       <Place x={RL_CHIP.x - 22} y={RL_CHIP.y - 22}>
-        <Chip color="red" size={44} />
+        <Chip flat color="red" size={44} />
       </Place>
       <Place x={561} y={218}>
-        <Chip color="black" size={30} />
+        <Chip flat color="black" size={30} />
       </Place>
       <g className="moment-away" style={at(4.0, { '--dx': '70px', '--dy': '80px' })}>
         <Place x={751} y={186}>
-          <Chip color="green" size={30} />
+          <Chip flat color="green" size={30} />
         </Place>
       </g>
 
@@ -747,7 +787,7 @@ function GoalScene() {
       <rect width={W} height={H} fill={`url(#${id}-sky)`} />
       {[70, 810].map((x) => (
         <g key={x}>
-          <circle cx={x} cy={16} r={60} fill="#ffffff" opacity="0.35" filter={`url(#${id}-blur)`} />
+          <circle cx={x} cy={16} r={80} fill={`url(#${id}-light)`} />
           <rect x={x - 2} y={14} width={4} height={56} fill="#64748b" />
           <rect x={x - 30} y={4} width={60} height={18} rx={2} fill="#f1f5f9" />
           {[10, 20, 30, 40, 50].map((dx) => (
@@ -851,7 +891,13 @@ function BetSlipScene() {
       </defs>
       <rect width={W} height={H} fill={`url(#${id}-bg)`} />
       {bokeh.map(([x, y, r, c], i) => (
-        <circle key={i} cx={x} cy={y} r={r} fill={c} opacity="0.35" filter={`url(#${id}-blur)`} />
+        <g key={i}>
+          <radialGradient id={`${id}-bokeh${i}`}>
+            <stop offset="0" stopColor={c} stopOpacity="0.5" />
+            <stop offset="1" stopColor={c} stopOpacity="0" />
+          </radialGradient>
+          <circle cx={x} cy={y} r={r * 1.6} fill={`url(#${id}-bokeh${i})`} />
+        </g>
       ))}
 
       {/* Final score and match stats. */}
@@ -1147,9 +1193,9 @@ function PokerScene() {
       <ellipse cx={440} cy={168} rx={300} ry={68} fill="none" stroke="#fde68a" strokeOpacity="0.2" strokeDasharray="6 5" />
 
       {/* Board: the flop is out (10♠ J♠ 4♦); the turn and river are dealt and turned over. */}
-      <Place x={boardX[0]} y={98}><CardFace face="10♠" width={50} /></Place>
-      <Place x={boardX[1]} y={98}><CardFace face="J♠" width={50} /></Place>
-      <Place x={boardX[2]} y={98}><CardFace face="4♦" width={50} /></Place>
+      <Place x={boardX[0]} y={98}><CardFace flat face="10♠" width={50} /></Place>
+      <Place x={boardX[1]} y={98}><CardFace flat face="J♠" width={50} /></Place>
+      <Place x={boardX[2]} y={98}><CardFace flat face="4♦" width={50} /></Place>
       <SlideIn x={boardX[3]} y={98} from={dealer} t={0.3} spin={0}>
         <TurnOver x={0} y={0} w={50} face="2♣" t={0.6} />
       </SlideIn>
@@ -1169,15 +1215,15 @@ function PokerScene() {
       {FOLDED.map((s) => (
         <Seat key={s.name} x={s.x} y={s.y} name={s.name} color={s.color} stack="" dim />
       ))}
-      <Place x={640} y={58} r={-6}><CardFace face="4♣" width={38} /></Place>
-      <Place x={680} y={54} r={6}><CardFace face="4♥" width={38} /></Place>
+      <Place x={640} y={58} r={-6}><CardFace flat face="4♣" width={38} /></Place>
+      <Place x={680} y={54} r={6}><CardFace flat face="4♥" width={38} /></Place>
       <Seat x={700} y={36} name="RIVER_RAT" color="#ef4444" stack="ALL IN" />
       <circle cx={612} cy={236} r={10} fill="#f8fafc" stroke="#94a3b8" />
       <text x={612} y={240} textAnchor="middle" fontSize={11} fontWeight={900} fill="#0f172a" fontFamily={SANS}>D</text>
 
       {/* You: A♠ K♠. */}
-      <Place x={PK_ACE.x} y={PK_ACE.y}><CardFace face="A♠" width={40} /></Place>
-      <Place x={440} y={206} r={6}><CardFace face="K♠" width={40} /></Place>
+      <Place x={PK_ACE.x} y={PK_ACE.y}><CardFace flat face="A♠" width={40} /></Place>
+      <Place x={440} y={206} r={6}><CardFace flat face="K♠" width={40} /></Place>
       <Seat x={440} y={284} name="YOU" color="#10b981" stack="ALL IN" />
 
       {/* TV graphic: each player's chance of winning, street by street. */}

@@ -5,7 +5,9 @@ import { useId } from 'react';
 // Playing cards and poker chips drawn in SVG, shared by the sign-up page's
 // falling pieces (CardsAndChipsBackground) and its game moments (CasinoMoments).
 // Every chip colour has its own value and every card back its own colour, so
-// the page can show each one at most once at a time.
+// the page can show each one at most once at a time. `flat` draws the shadow
+// as a shape instead of a CSS drop-shadow, which is far cheaper to repaint
+// inside an animated SVG (the sign-up header).
 
 export type ChipColor = 'white' | 'red' | 'blue' | 'green' | 'orange' | 'black' | 'teal' | 'purple' | 'gold' | 'pink';
 
@@ -38,12 +40,15 @@ const BACK_COLORS: Record<BackColor, { body: string; lines: string; center: stri
   teal: { body: '#115e59', lines: '#5eead4', center: '#134e4a' },
 };
 
-export function CardFace({ face, width }: { face: string; width: number }) {
+const CARD_SHADOW = <rect x="2" y="3" width="49" height="69" rx="5" fill="#000" opacity="0.3" />;
+
+export function CardFace({ face, width, flat }: { face: string; width: number; flat?: boolean }) {
   const suit = face.slice(-1);
   const rank = face.slice(0, -1);
   const color = suit === '♥' || suit === '♦' ? '#dc2626' : '#0f172a';
   return (
-    <svg viewBox="0 0 50 70" width={width} height={width * 1.4} className="block drop-shadow-lg">
+    <svg viewBox="0 0 50 70" width={width} height={width * 1.4} overflow="visible" className={flat ? 'block' : 'block drop-shadow-lg'}>
+      {flat ? CARD_SHADOW : null}
       <rect x="0.5" y="0.5" width="49" height="69" rx="5" fill="#f8fafc" stroke="#cbd5e1" />
       <g fill={color} fontFamily="Georgia, 'Times New Roman', serif" fontWeight="700">
         <text x="5" y="13" fontSize="11">{rank}</text>
@@ -58,11 +63,12 @@ export function CardFace({ face, width }: { face: string; width: number }) {
   );
 }
 
-export function CardBack({ width, color = 'red' }: { width: number; color?: BackColor }) {
+export function CardBack({ width, color = 'red', flat }: { width: number; color?: BackColor; flat?: boolean }) {
   const id = useId().replace(/:/g, '');
   const c = BACK_COLORS[color];
   return (
-    <svg viewBox="0 0 50 70" width={width} height={width * 1.4} className="block drop-shadow-lg">
+    <svg viewBox="0 0 50 70" width={width} height={width * 1.4} overflow="visible" className={flat ? 'block' : 'block drop-shadow-lg'}>
+      {flat ? CARD_SHADOW : null}
       <defs>
         <pattern id={`lattice-${id}`} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <path d="M0 0H6M0 0V6" stroke={c.lines} strokeOpacity="0.35" strokeWidth="1" />
@@ -76,10 +82,11 @@ export function CardBack({ width, color = 'red' }: { width: number; color?: Back
   );
 }
 
-export function Chip({ color, size }: { color: ChipColor; size: number }) {
+export function Chip({ color, size, flat }: { color: ChipColor; size: number; flat?: boolean }) {
   const c = CHIP_COLORS[color];
   return (
-    <svg viewBox="0 0 60 60" width={size} height={size} className="block drop-shadow-lg">
+    <svg viewBox="0 0 60 60" width={size} height={size} overflow="visible" className={flat ? 'block' : 'block drop-shadow-lg'}>
+      {flat ? <circle cx="31.5" cy="32.5" r="29" fill="#000" opacity="0.3" /> : null}
       <circle cx="30" cy="30" r="29" fill={c.body} />
       {Array.from({ length: 8 }, (_, i) => (
         <rect key={i} x="26.5" y="1" width="7" height="9" rx="1.5" fill={c.spots} transform={`rotate(${i * 45} 30 30)`} />

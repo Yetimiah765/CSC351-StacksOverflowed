@@ -107,18 +107,29 @@ export const DOOR = { x: 12, y: 14, w: 2 };
 
 // ---------- walking in after logging in (SRS-103.12) ----------
 // Logging in leaves this flag in sessionStorage; the floor then starts with
-// the player out in the lobby, walking in through the door, and clears it
-// once they're in.
+// the player outside the building, walking in through its front door and
+// lobby, then through the casino's doors onto the floor, and clears it once
+// they're in.
 export const ENTRANCE_KEY = 'casino-floor-entrance';
 
-/** The walk in, in tiles: from the lobby a few metres outside the door,
- * straight through the middle of the doorway, to where the player starts. */
+/** The lobby in front of the casino, in tiles: it runs from the casino's
+ * door (DOOR.y) out to the building's front door, `depth` tiles away, and is
+ * `width` tiles wide, centred on the door. It's only there for the walk in. */
+export const LOBBY = { depth: 12.5, width: 15 };
+
+/** The walk in, in tiles, all down the middle of the door: from outside the
+ * building, through its front door and the lobby, through the casino's door,
+ * to a couple of steps onto the floor: far enough for the camera behind to end
+ * up past the doors, and short of the shop counter's reach, so no game's
+ * prompt pops up the moment the player takes over. */
 export function entranceWalk(): Point[] {
   const doorMiddle = DOOR.x + DOOR.w / 2;
+  const front = DOOR.y + LOBBY.depth;
   return [
-    { x: doorMiddle, y: DOOR.y + 4.2 },
-    { x: doorMiddle, y: DOOR.y - 0.1 },
-    { x: START.x + 0.5, y: START.y + 0.5 },
+    { x: doorMiddle, y: front + 2.25 },
+    { x: doorMiddle, y: front },
+    { x: doorMiddle, y: DOOR.y },
+    { x: doorMiddle, y: DOOR.y - 2.1 },
   ];
 }
 

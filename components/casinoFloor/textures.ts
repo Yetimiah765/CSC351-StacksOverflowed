@@ -78,6 +78,121 @@ export function wallTexture(repeat: [number, number]) {
   return texture(element, repeat);
 }
 
+/** The lobby's floor (SRS-103.12): polished cream marble tiles with grey veins and a gold inlay. Repeats. */
+export function marbleTexture(repeat: [number, number]) {
+  const { element, ctx } = canvas(512, 512);
+  // Seeded, so the floor looks the same every visit.
+  let seed = 7;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (const [x, y, tone] of [[0, 0, '#efe6d6'], [256, 0, '#e6dccb'], [0, 256, '#e6dccb'], [256, 256, '#efe6d6']] as const) {
+    ctx.fillStyle = tone;
+    ctx.fillRect(x, y, 256, 256);
+    // Veins: soft wandering lines.
+    for (let v = 0; v < 5; v++) {
+      ctx.strokeStyle = `rgba(110, 100, 92, ${0.12 + random() * 0.18})`;
+      ctx.lineWidth = 0.6 + random() * 1.8;
+      ctx.beginPath();
+      let px = x + random() * 256;
+      let py = y;
+      ctx.moveTo(px, py);
+      while (py < y + 256) {
+        px += (random() - 0.5) * 40;
+        py += 12 + random() * 22;
+        ctx.lineTo(Math.min(x + 256, Math.max(x, px)), Math.min(y + 256, py));
+      }
+      ctx.stroke();
+    }
+  }
+  // Grout and a gold inlay between tiles, and a diamond where four meet.
+  ctx.strokeStyle = '#b8902e';
+  ctx.lineWidth = 3;
+  for (const at of [0, 256, 512]) {
+    ctx.beginPath();
+    ctx.moveTo(at, 0);
+    ctx.lineTo(at, 512);
+    ctx.moveTo(0, at);
+    ctx.lineTo(512, at);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#c9a227';
+  ctx.beginPath();
+  ctx.moveTo(256, 236);
+  ctx.lineTo(276, 256);
+  ctx.lineTo(256, 276);
+  ctx.lineTo(236, 256);
+  ctx.closePath();
+  ctx.fill();
+  return texture(element, repeat);
+}
+
+/** The lobby's walls: warm cream panelling framed in gold, with a dado rail. Repeats along the wall. */
+export function lobbyWallTexture(repeat: [number, number]) {
+  const { element, ctx } = canvas(256, 512);
+  const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+  gradient.addColorStop(0, '#d8c7a6');
+  gradient.addColorStop(1, '#c4b08a');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 512);
+  // A tall panel above the rail, a short one below.
+  ctx.strokeStyle = '#b8902e';
+  ctx.lineWidth = 5;
+  ctx.strokeRect(28, 30, 200, 330);
+  ctx.strokeStyle = 'rgba(90, 64, 20, 0.35)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(38, 40, 180, 310);
+  ctx.fillStyle = '#5b3a1e';
+  ctx.fillRect(0, 384, 256, 128);
+  ctx.strokeStyle = '#b8902e';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(28, 404, 200, 88);
+  ctx.fillStyle = '#c9a227';
+  ctx.fillRect(0, 376, 256, 10);
+  return texture(element, repeat);
+}
+
+/** The city at night, seen through the lobby's windows: a dusky sky, stars, and towers with lit windows. */
+export function cityTexture() {
+  const { element, ctx } = canvas(2048, 1024);
+  let seed = 11;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const sky = ctx.createLinearGradient(0, 0, 0, 1024);
+  sky.addColorStop(0, '#060b24');
+  sky.addColorStop(0.55, '#1f1b4d');
+  sky.addColorStop(0.8, '#5b2a5e');
+  sky.addColorStop(1, '#a8495a');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, 2048, 1024);
+  for (let i = 0; i < 260; i++) {
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.3 + random() * 0.7})`;
+    ctx.fillRect(random() * 2048, random() * 520, 1.5, 1.5);
+  }
+  // The moon.
+  ctx.fillStyle = '#fef3c7';
+  ctx.beginPath();
+  ctx.arc(1560, 210, 46, 0, Math.PI * 2);
+  ctx.fill();
+  // Two rows of towers, the far ones dimmer.
+  for (const [base, tall, shade, lit] of [[860, 420, '#1a1636', 0.35], [1024, 560, '#0b0a1a', 0.75]] as const) {
+    let x = -20;
+    while (x < 2048) {
+      const w = 60 + random() * 120;
+      const h = 120 + random() * tall;
+      ctx.fillStyle = shade;
+      ctx.fillRect(x, base - h, w, h + 200);
+      for (let wy = base - h + 14; wy < base - 10; wy += 22) {
+        for (let wx = x + 10; wx < x + w - 10; wx += 18) {
+          if (random() < lit * 0.5) {
+            ctx.fillStyle = random() < 0.8 ? '#fde68a' : '#93c5fd';
+            ctx.fillRect(wx, wy, 8, 11);
+          }
+        }
+      }
+      x += w + random() * 18;
+    }
+  }
+  return texture(element);
+}
+
 /** A neon sign: glowing text on black, for an emissive map. The text shrinks to fit the width. */
 export function neonTexture(text: string, color: string, width = 1024, height = 160) {
   const { element, ctx } = canvas(width, height);

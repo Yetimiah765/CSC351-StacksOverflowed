@@ -3,6 +3,7 @@ import {
   COLS,
   DOOR,
   FLOOR_OBJECTS,
+  LOBBY,
   INTERACTIVE_OBJECTS,
   ROWS,
   START,
@@ -199,25 +200,39 @@ describe('getting up after a game (SRS-108.6)', () => {
 
 describe('walking in after logging in (SRS-103.12)', () => {
   const walk = entranceWalk();
-  const [lobby, doorway] = walk;
+  const [outside, frontDoor, casinoDoor] = walk;
   const inside = walk[walk.length - 1]!;
-  // The doorway's opening, kept clear of its posts by the player's width.
+  // The casino doorway's opening, kept clear of its frame by the player's width.
   const inDoorway = (x: number) => x - PLAYER_RADIUS >= DOOR.x && x + PLAYER_RADIUS <= DOOR.x + DOOR.w;
 
-  it('starts out in the lobby, beyond the front of the room, in line with the door', () => {
-    expect(lobby!.y).toBeGreaterThan(ROWS);
-    expect(inDoorway(lobby!.x)).toBe(true);
+  it('starts outside the building, beyond the front of the lobby', () => {
+    expect(outside!.y).toBeGreaterThan(DOOR.y + LOBBY.depth);
   });
 
-  it('crosses the front of the room through the doorway, not the rail beside it', () => {
-    expect(doorway!.y).toBeLessThan(DOOR.y);
-    expect(inDoorway(doorway!.x)).toBe(true);
-    // Straight in from the lobby to the doorway, so it never crosses the rail elsewhere.
-    expect(doorway!.x).toBe(lobby!.x);
+  it('comes in through the front door, crosses the lobby, and goes through the casino doorway', () => {
+    expect(frontDoor!.y).toBe(DOOR.y + LOBBY.depth);
+    expect(casinoDoor!.y).toBe(DOOR.y);
+    // All in a straight line down the middle of the door, so it never meets the rail.
+    for (const point of walk) expect(inDoorway(point.x), JSON.stringify(point)).toBe(true);
+    expect(new Set(walk.map((point) => point.x)).size).toBe(1);
+    for (let i = 1; i < walk.length; i++) expect(walk[i]!.y).toBeLessThan(walk[i - 1]!.y);
   });
 
-  it('ends where the player normally starts, on a tile they can stand on', () => {
-    expect(inside).toEqual({ x: START.x + 0.5, y: START.y + 0.5 });
-    expect(isBlocked(START.x, START.y)).toBe(false);
+  it('ends a couple of steps onto the floor, where the player can stand and walk off', () => {
+    expect(inside.y).toBeLessThanOrEqual(DOOR.y - 2);
+    // Every tile the player's circle touches there is open.
+    for (const dx of [-PLAYER_RADIUS, PLAYER_RADIUS]) {
+      for (const dy of [-PLAYER_RADIUS, PLAYER_RADIUS]) {
+        expect(isBlocked(Math.floor(inside.x + dx), Math.floor(inside.y + dy))).toBe(false);
+      }
+    }
+  });
+
+  it("ends out of every game's reach, so no prompt pops up the moment the player takes over", () => {
+    expect(nearbyObjectAt(inside)).toBeNull();
+  });
+
+  it('keeps the lobby centred on the door and wider than it', () => {
+    expect(LOBBY.width).toBeGreaterThan(DOOR.w);
   });
 });

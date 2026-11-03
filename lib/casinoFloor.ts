@@ -112,22 +112,28 @@ export const DOOR = { x: 12, y: 14, w: 2 };
 // they're in.
 export const ENTRANCE_KEY = 'casino-floor-entrance';
 
+/** The casino's front wall, with its big doors in line with DOOR, in tiles:
+ * past the floor's front rail (DOOR.y, where the gate is), leaving a foyer
+ * the camera following the player can stand in without going through it. */
+export const FRONT_WALL_Y = DOOR.y + 4.25;
+
 /** The lobby in front of the casino, in tiles: it runs from the casino's
- * door (DOOR.y) out to the building's front door, `depth` tiles away, and is
+ * front wall out to the building's front door, `depth` tiles away, and is
  * `width` tiles wide, centred on the door. It's only there for the walk in. */
 export const LOBBY = { depth: 12.5, width: 15 };
 
 /** The walk in, in tiles, all down the middle of the door: from outside the
- * building, through its front door and the lobby, through the casino's door,
- * to a couple of steps onto the floor: far enough for the camera behind to end
- * up past the doors, and short of the shop counter's reach, so no game's
- * prompt pops up the moment the player takes over. */
+ * building, through its front door and the lobby, through the casino's doors
+ * and the foyer, through the gate in the rail, to a couple of steps onto the
+ * floor, short of the shop counter's reach, so no game's prompt pops up the
+ * moment the player takes over. */
 export function entranceWalk(): Point[] {
   const doorMiddle = DOOR.x + DOOR.w / 2;
-  const front = DOOR.y + LOBBY.depth;
+  const front = FRONT_WALL_Y + LOBBY.depth;
   return [
     { x: doorMiddle, y: front + 2.25 },
     { x: doorMiddle, y: front },
+    { x: doorMiddle, y: FRONT_WALL_Y },
     { x: doorMiddle, y: DOOR.y },
     { x: doorMiddle, y: DOOR.y - 2.1 },
   ];

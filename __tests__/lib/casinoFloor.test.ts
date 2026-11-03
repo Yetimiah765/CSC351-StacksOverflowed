@@ -3,6 +3,7 @@ import {
   COLS,
   DOOR,
   FLOOR_OBJECTS,
+  FRONT_WALL_Y,
   LOBBY,
   INTERACTIVE_OBJECTS,
   ROWS,
@@ -200,18 +201,19 @@ describe('getting up after a game (SRS-108.6)', () => {
 
 describe('walking in after logging in (SRS-103.12)', () => {
   const walk = entranceWalk();
-  const [outside, frontDoor, casinoDoor] = walk;
+  const [outside, frontDoor, casinoDoors, gate] = walk;
   const inside = walk[walk.length - 1]!;
   // The casino doorway's opening, kept clear of its frame by the player's width.
   const inDoorway = (x: number) => x - PLAYER_RADIUS >= DOOR.x && x + PLAYER_RADIUS <= DOOR.x + DOOR.w;
 
   it('starts outside the building, beyond the front of the lobby', () => {
-    expect(outside!.y).toBeGreaterThan(DOOR.y + LOBBY.depth);
+    expect(outside!.y).toBeGreaterThan(FRONT_WALL_Y + LOBBY.depth);
   });
 
-  it('comes in through the front door, crosses the lobby, and goes through the casino doorway', () => {
-    expect(frontDoor!.y).toBe(DOOR.y + LOBBY.depth);
-    expect(casinoDoor!.y).toBe(DOOR.y);
+  it('comes in through the front door, crosses the lobby, the casino doors and the foyer, then the gate', () => {
+    expect(frontDoor!.y).toBe(FRONT_WALL_Y + LOBBY.depth);
+    expect(casinoDoors!.y).toBe(FRONT_WALL_Y);
+    expect(gate!.y).toBe(DOOR.y);
     // All in a straight line down the middle of the door, so it never meets the rail.
     for (const point of walk) expect(inDoorway(point.x), JSON.stringify(point)).toBe(true);
     expect(new Set(walk.map((point) => point.x)).size).toBe(1);
@@ -234,5 +236,11 @@ describe('walking in after logging in (SRS-103.12)', () => {
 
   it('keeps the lobby centred on the door and wider than it', () => {
     expect(LOBBY.width).toBeGreaterThan(DOOR.w);
+  });
+
+  it('puts the front wall past the rail, with a foyer between that nobody walks in', () => {
+    expect(FRONT_WALL_Y).toBeGreaterThan(DOOR.y + 3);
+    // The floor ends at the rail: the foyer's tiles are all wall.
+    for (let y = DOOR.y; y < FRONT_WALL_Y; y++) expect(isBlocked(DOOR.x, y)).toBe(true);
   });
 });

@@ -193,6 +193,350 @@ export function cityTexture() {
   return texture(element);
 }
 
+/** The text's font size that fits `room` pixels wide, at most `size`. */
+function fitText(ctx: CanvasRenderingContext2D, text: string, weight: string, size: number, room: number, family: string) {
+  ctx.font = `${weight} ${size}px ${family}`;
+  return Math.min(size, (size * room) / ctx.measureText(text).width);
+}
+
+/** A playing card on a poster, tilted about its bottom middle. */
+function posterCard(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, rank: string, suit: string) {
+  const w = 120;
+  const h = 170;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = '#fbf7ee';
+  ctx.beginPath();
+  ctx.roundRect(-w / 2, -h, w, h, 12);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = suit === '♥' || suit === '♦' ? '#c81e1e' : '#111827';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = 'bold 34px Georgia';
+  ctx.fillText(rank, -w / 2 + 24, -h + 28);
+  ctx.font = '28px Georgia';
+  ctx.fillText(suit, -w / 2 + 24, -h + 60);
+  ctx.font = '72px Georgia';
+  ctx.fillText(suit, 6, -h / 2 + 8);
+  ctx.restore();
+}
+
+/** What each of the lobby's posters shows, painted around (cx, cy). */
+const POSTER_MOTIFS = {
+  blackjack: (ctx: CanvasRenderingContext2D, cx: number, cy: number) => {
+    posterCard(ctx, cx - 40, cy + 110, -0.2, 'A', '♠');
+    posterCard(ctx, cx + 40, cy + 110, 0.2, 'K', '♣');
+    ctx.fillStyle = '#f5d76e';
+    ctx.font = '900 46px "Arial Black", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('21', cx, cy + 165);
+  },
+  roulette: (ctx: CanvasRenderingContext2D, cx: number, cy: number) => {
+    const pockets = 37;
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 150, 0, Math.PI * 2);
+    ctx.fill();
+    for (let i = 0; i < pockets; i++) {
+      const a0 = (i / pockets) * Math.PI * 2 - Math.PI / 2;
+      const a1 = ((i + 1) / pockets) * Math.PI * 2 - Math.PI / 2;
+      ctx.fillStyle = i === 0 ? '#15803d' : i % 2 ? '#b91c1c' : '#111111';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, 138, a0, a1);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#5b3416';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 92, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    ctx.fillStyle = '#d4af37';
+    for (let i = 0; i < 4; i++) {
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate((i * Math.PI) / 2 + Math.PI / 4);
+      ctx.fillRect(-5, -78, 10, 156);
+      ctx.restore();
+    }
+    ctx.beginPath();
+    ctx.arc(cx, cy, 20, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(cx + 84, cy - 98, 11, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  slots: (ctx: CanvasRenderingContext2D, cx: number, cy: number) => {
+    ctx.fillStyle = '#d4af37';
+    ctx.beginPath();
+    ctx.roundRect(cx - 170, cy - 90, 300, 180, 18);
+    ctx.fill();
+    for (let i = 0; i < 3; i++) {
+      const x = cx - 156 + i * 94;
+      ctx.fillStyle = '#fbf7ee';
+      ctx.fillRect(x, cy - 72, 84, 144);
+      ctx.fillStyle = '#c81e1e';
+      ctx.font = '900 96px "Arial Black", Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('7', x + 42, cy + 4);
+    }
+    ctx.strokeStyle = '#c81e1e';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(cx - 160, cy);
+    ctx.lineTo(cx + 120, cy);
+    ctx.stroke();
+    // The lever, with its red ball.
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.moveTo(cx + 132, cy + 30);
+    ctx.lineTo(cx + 168, cy + 30);
+    ctx.lineTo(cx + 168, cy - 110);
+    ctx.stroke();
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.arc(cx + 168, cy - 124, 22, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  poker: (ctx: CanvasRenderingContext2D, cx: number, cy: number) => {
+    ['10', 'J', 'Q', 'K', 'A'].forEach((rank, i) => {
+      posterCard(ctx, cx + (i - 2) * 46, cy + 120, (i - 2) * 0.2, rank, '♦');
+    });
+  },
+  sports: (ctx: CanvasRenderingContext2D, cx: number, cy: number) => {
+    // A football, with speed lines behind it.
+    ctx.strokeStyle = 'rgba(245, 215, 110, 0.7)';
+    ctx.lineWidth = 8;
+    for (const dy of [-60, 0, 60]) {
+      ctx.beginPath();
+      ctx.moveTo(cx - 200, cy + dy);
+      ctx.lineTo(cx - 140 + Math.abs(dy) / 2, cy + dy);
+      ctx.stroke();
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx + 20, cy, 120, 0, Math.PI * 2);
+    ctx.fillStyle = '#fbf7ee';
+    ctx.fill();
+    ctx.clip();
+    ctx.fillStyle = '#111827';
+    const patch = (x: number, y: number, r: number) => {
+      ctx.beginPath();
+      for (let i = 0; i < 5; i++) {
+        const a = -Math.PI / 2 + (i * Math.PI * 2) / 5;
+        ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r);
+      }
+      ctx.closePath();
+      ctx.fill();
+    };
+    patch(cx + 20, cy, 40);
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i * Math.PI * 2) / 5 + Math.PI / 5;
+      patch(cx + 20 + Math.cos(a) * 112, cy + Math.sin(a) * 112, 36);
+    }
+    ctx.restore();
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx + 20, cy, 120, 0, Math.PI * 2);
+    ctx.stroke();
+  },
+};
+
+export type PosterGame = keyof typeof POSTER_MOTIFS;
+
+/** An art deco poster for one of the casino's games, framed on the lobby's walls. */
+export function posterTexture(game: PosterGame) {
+  const w = 512;
+  const h = 720;
+  const { element, ctx } = canvas(w, h);
+  const look = {
+    blackjack: { title: 'BLACKJACK', top: '#14633f', bottom: '#052e1c' },
+    roulette: { title: 'ROULETTE', top: '#8f1d1d', bottom: '#2a0a0a' },
+    slots: { title: 'SLOTS', top: '#5b21b6', bottom: '#1e0b3d' },
+    poker: { title: 'POKER', top: '#1e40af', bottom: '#0b1533' },
+    sports: { title: 'SPORTS BETTING', top: '#0f766e', bottom: '#04262a' },
+  }[game];
+  const background = ctx.createLinearGradient(0, 0, 0, h);
+  background.addColorStop(0, look.top);
+  background.addColorStop(1, look.bottom);
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, w, h);
+  const cx = w / 2;
+  const cy = 390;
+  // Sunburst rays from behind the picture.
+  ctx.fillStyle = 'rgba(255, 214, 120, 0.09)';
+  for (let i = 0; i < 24; i += 2) {
+    const a0 = (i / 24) * Math.PI * 2;
+    const a1 = ((i + 1) / 24) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a0) * 800, cy + Math.sin(a0) * 800);
+    ctx.lineTo(cx + Math.cos(a1) * 800, cy + Math.sin(a1) * 800);
+    ctx.closePath();
+    ctx.fill();
+  }
+  // A gold double border with fans in the corners.
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(18, 18, w - 36, h - 36);
+  ctx.lineWidth = 3;
+  ctx.strokeRect(34, 34, w - 68, h - 68);
+  for (const [x, y, turn] of [[34, 34, 0], [w - 34, 34, 1], [w - 34, h - 34, 2], [34, h - 34, 3]] as const) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate((turn * Math.PI) / 2);
+    for (let r = 16; r <= 48; r += 16) {
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI / 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  const family = '"Arial Black", Arial, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#f5d76e';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+  ctx.shadowBlur = 8;
+  ctx.font = `900 ${Math.round(fitText(ctx, look.title, '900', 80, w - 130, family))}px ${family}`;
+  ctx.fillText(look.title, cx, 118);
+  ctx.shadowBlur = 0;
+  ctx.fillRect(cx - 130, 168, 260, 4);
+  ctx.beginPath();
+  ctx.moveTo(cx, 158);
+  ctx.lineTo(cx + 12, 170);
+  ctx.lineTo(cx, 182);
+  ctx.lineTo(cx - 12, 170);
+  ctx.fill();
+  POSTER_MOTIFS[game](ctx, cx, cy);
+  ctx.fillStyle = '#f5d76e';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font = `900 ${Math.round(fitText(ctx, 'STACKS OVERFLOWED', '900', 30, w - 150, family))}px ${family}`;
+  ctx.fillText('STACKS OVERFLOWED', cx, h - 104);
+  ctx.font = '700 22px Arial, sans-serif';
+  ctx.fillText('PLAY TONIGHT', cx, h - 70);
+  return texture(element);
+}
+
+/** The lobby's progressive jackpot board, repainted as the jackpot climbs (paintJackpotBoard()). */
+export function jackpotBoard() {
+  const { element, ctx } = canvas(1024, 320);
+  return { texture: texture(element), ctx };
+}
+
+export function paintJackpotBoard(ctx: CanvasRenderingContext2D, amount: number) {
+  const w = 1024;
+  const h = 320;
+  ctx.fillStyle = '#07040c';
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = '#d4af37';
+  ctx.lineWidth = 8;
+  ctx.strokeRect(10, 10, w - 20, h - 20);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fbbf24';
+  ctx.font = '900 54px "Arial Black", Arial, sans-serif';
+  ctx.fillText('PROGRESSIVE JACKPOT', w / 2, 74);
+  // LED digits: a faint grid of unlit segments behind the lit amount.
+  const text = amount.toLocaleString('en-US');
+  ctx.font = '900 140px "Courier New", monospace';
+  ctx.fillStyle = 'rgba(255, 60, 40, 0.12)';
+  ctx.fillText(text.replace(/\d/g, '8'), w / 2, 200);
+  ctx.shadowColor = '#ff3b1f';
+  ctx.shadowBlur = 28;
+  ctx.fillStyle = '#ff5a36';
+  ctx.fillText(text, w / 2, 200);
+  ctx.shadowBlur = 0;
+  ctx.font = '700 30px Arial, sans-serif';
+  ctx.fillStyle = '#fde68a';
+  ctx.fillText('COINS  ·  ANY GAME CAN WIN IT', w / 2, 280);
+}
+
+/** The inlay in the middle of the lobby's floor: a giant poker chip in marble and gold, with a compass star. */
+export function medallionTexture() {
+  const size = 1024;
+  const { element, ctx } = canvas(size, size);
+  const c = size / 2;
+  const ring = (r: number, color: string) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  ring(512, '#c9a227');
+  ring(492, '#7a1020');
+  // The chip's edge spots.
+  ctx.fillStyle = '#efe6d6';
+  for (let i = 0; i < 8; i++) {
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate((i * Math.PI) / 4);
+    ctx.fillRect(-46, -490, 92, 104);
+    ctx.restore();
+  }
+  ring(384, '#c9a227');
+  ring(370, '#efe6d6');
+  ring(300, '#1f3d36');
+  ring(288, '#e6dccb');
+  // An eight-pointed star, the long points north, south, east and west.
+  for (const [long, turn, color] of [[270, 0, '#c9a227'], [190, Math.PI / 4, '#b8902e']] as const) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = turn + (i * Math.PI) / 4;
+      const r = i % 2 ? long * 0.28 : long;
+      ctx.lineTo(c + Math.cos(a) * r, c + Math.sin(a) * r);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+  ring(54, '#7a1020');
+  ring(30, '#c9a227');
+  return texture(element);
+}
+
+/** One face of a red die: `pips` white spots. */
+export function dieFaceTexture(pips: number) {
+  const size = 128;
+  const { element, ctx } = canvas(size, size);
+  ctx.fillStyle = '#b4141f';
+  ctx.fillRect(0, 0, size, size);
+  ctx.strokeStyle = '#7f0d16';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, size - 6, size - 6);
+  const at = { l: 32, m: 64, r: 96 };
+  const spots: Record<number, [number, number][]> = {
+    1: [[at.m, at.m]],
+    2: [[at.l, at.l], [at.r, at.r]],
+    3: [[at.l, at.l], [at.m, at.m], [at.r, at.r]],
+    4: [[at.l, at.l], [at.r, at.l], [at.l, at.r], [at.r, at.r]],
+    5: [[at.l, at.l], [at.r, at.l], [at.m, at.m], [at.l, at.r], [at.r, at.r]],
+    6: [[at.l, at.l], [at.r, at.l], [at.l, at.m], [at.r, at.m], [at.l, at.r], [at.r, at.r]],
+  };
+  ctx.fillStyle = '#fbf7ee';
+  for (const [x, y] of spots[pips] ?? []) {
+    ctx.beginPath();
+    ctx.arc(x, y, 12, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return texture(element);
+}
+
 /** A neon sign: glowing text on black, for an emissive map. The text shrinks to fit the width. */
 export function neonTexture(text: string, color: string, width = 1024, height = 160) {
   const { element, ctx } = canvas(width, height);

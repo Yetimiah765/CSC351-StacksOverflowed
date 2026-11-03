@@ -913,3 +913,55 @@ body {
     display: none;
   }
 }
+
+/* Slot machine cabinet (app/slots/page.tsx, components/slots/SlotReels.tsx,
+   SRS-307.6). The marquee's bulbs chase round it (faster while spinning and
+   after a win), its neon title flickers, each reel is blurred while it
+   scrolls, the lever pulls down on Spin, and coins drop into the tray on a
+   win. */
+@keyframes slots-bulb {
+  0%, 100% { opacity: 0.35; box-shadow: none; }
+  50% { opacity: 1; box-shadow: 0 0 10px 3px rgba(253, 224, 71, 0.85); }
+}
+@keyframes slots-neon {
+  0%, 18%, 22%, 62%, 64%, 100% {
+    text-shadow: 0 0 6px #fff, 0 0 14px #fb7185, 0 0 28px #e11d48, 0 0 46px #e11d48;
+    opacity: 1;
+  }
+  20%, 63% { text-shadow: none; opacity: 0.75; }
+}
+@keyframes slots-reel-blur {
+  0%, 55% { filter: blur(2.5px); }
+  100% { filter: blur(0); }
+}
+@keyframes slots-lever-pull {
+  0% { transform: rotateX(0deg); }
+  30% { transform: rotateX(62deg); }
+  100% { transform: rotateX(0deg); }
+}
+@keyframes slots-coin-drop {
+  0% { transform: translateY(-140px) rotate(0deg); opacity: 0; }
+  15% { opacity: 1; }
+  70% { transform: translateY(0) rotate(300deg); }
+  82% { transform: translateY(-10px) rotate(330deg); }
+  100% { transform: translateY(0) rotate(360deg); opacity: 1; }
+}
+@keyframes slots-win-flash {
+  0%, 100% { box-shadow: 0 0 40px rgba(251, 191, 36, 0.35); }
+  50% { box-shadow: 0 0 70px 10px rgba(251, 191, 36, 0.8); }
+}
+.slots-bulb { animation: slots-bulb var(--bulb-speed, 1.6s) ease-in-out infinite; }
+.slots-neon { animation: slots-neon 6s linear infinite; }
+.slots-lever-pull { animation: slots-lever-pull 700ms ease-in-out; }
+.slots-coin { animation: slots-coin-drop 900ms cubic-bezier(0.3, 0.1, 0.4, 1) both; }
+.slots-win { animation: slots-win-flash 600ms ease-in-out 4; }
+@media (prefers-reduced-motion: reduce) {
+  .slots-bulb,
+  .slots-neon,
+  .slots-lever-pull,
+  .slots-coin,
+  .slots-win {
+    animation: none;
+  }
+  .slots-bulb { opacity: 0.9; }
+}

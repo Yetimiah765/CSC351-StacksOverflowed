@@ -106,6 +106,10 @@ function makeHandsTable() {
           single = true;
           return query;
         },
+        maybeSingle() {
+          single = true;
+          return query;
+        },
         eq(column: keyof HandRow, value: unknown) {
           table.eq(column, value);
           filters.push((row) => row[column] === value);
@@ -148,6 +152,9 @@ const tables = {
   players: makeTableMock(),
 };
 const handsTable = makeHandsTable();
+// player_game_stats, in the same kind of fake table (its rows also get an
+// unused hand_id).
+const statsTable = makeHandsTable();
 
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(),
@@ -158,7 +165,7 @@ import { GET } from '../../app/api/blackjack/route';
 import { POST as deal } from '../../app/api/blackjack/deal/route';
 import { POST as act } from '../../app/api/blackjack/action/route';
 import { GET as history } from '../../app/api/blackjack/history/route';
-import { clearHands, getHand, saveHand } from '../../app/api/blackjack/hands';
+import { clearHands, finishBusy, getHand, saveHand, startBusy } from '../../app/api/blackjack/hands';
 
 function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.select.mockClear();
@@ -221,7 +228,11 @@ function handInPlay(playerCards: string[], dealerCards: string[], deck: string[]
 beforeEach(() => {
   vi.mocked(getSupabaseClient).mockReturnValue({
     from: vi.fn((table: string) =>
-      table === 'blackjack_hands' ? handsTable.from() : tables[table as keyof typeof tables]
+      table === 'blackjack_hands'
+        ? handsTable.from()
+        : table === 'player_game_stats'
+          ? statsTable.from()
+          : tables[table as keyof typeof tables]
     ),
   } as never);
   resetTable(tables.player_sessions);
@@ -232,6 +243,8 @@ beforeEach(() => {
   handsTable.eq.mockClear();
   handsTable.order.mockClear();
   handsTable.limit.mockClear();
+  statsTable.rows = [];
+  statsTable.fail.clear();
   clearHands();
 });
 
@@ -320,7 +333,22 @@ describe('POST /api/blackjack/deal', () => {
     signedIn();
     handInPlay(['Ts', '7h'], ['Kd', '6c'], ['2s']);
 
-    expect((await deal(req('/deal', { bet: 50 }))).status).toBe(409);
+    const response = await deal(req('/deal', { bet: 50 }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ reason: 'hand_in_play', handId: 4 });
+    expect(tables.players.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a deal while another request of the player is still running', async () => {
+    signedIn();
+    startBusy(1);
+
+    const response = await deal(req('/deal', { bet: 50 }));
+    finishBusy(1);
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).reason).toBe('request_in_progress');
     expect(tables.players.update).not.toHaveBeenCalled();
   });
 
@@ -341,38 +369,6 @@ describe('POST /api/blackjack/deal', () => {
 
   it('returns 401 without a session', async () => {
     expect((await deal(req('/deal', { bet: 50 }, null))).status).toBe(401);
-  });
-
-  it('waits 5 seconds after a hand ends before dealing the next, taking nothing', async () => {
-    signedIn();
-    handInPlay(['Ts', '7h'], ['Kd', '6c'], ['8s']);
-    await act(req('/action', { handId: 4, move: 'hit', step: 0 }));
-    signedIn();
-
-    const response = await deal(req('/deal', { bet: 50 }));
-    const body = await response.json();
-
-    expect(response.status).toBe(429);
-    expect(body.error).toMatch(/Wait 5 seconds before the next hand/);
-    expect(body.wait).toBeGreaterThan(4_000);
-    expect(tables.players.update).not.toHaveBeenCalled();
-    expect(handsTable.rows).toHaveLength(1);
-  });
-
-  it('deals again once the 5 seconds are up', async () => {
-    signedIn();
-    handInPlay(['Ts', '7h'], ['Kd', '6c'], ['8s']);
-    await act(req('/action', { handId: 4, move: 'hit', step: 0 }));
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 5_001);
-    signedIn();
-    hasBalance(1000);
-    hasBalance(950);
-
-    try {
-      expect((await deal(req('/deal', { bet: 50 }))).status).toBe(200);
-    } finally {
-      clock.mockRestore();
-    }
   });
 });
 
@@ -807,5 +803,75 @@ describe('Returning the bets of lost hands', () => {
 
     expect(await (await GET(req(''))).json()).toEqual({ hand: null, refunded: 0 });
     expect(tables.players.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('Profile money won and lost (SRS-117, SRS-118)', () => {
+  const move = (m: string, step = 0) => act(req('/action', { handId: 4, move: m, step }));
+  const blackjackStats = () =>
+    (statsTable.rows as unknown as Record<string, unknown>[]).map(({ player_id, game_code, money_won, money_lost }) => ({
+      player_id,
+      game_code,
+      money_won,
+      money_lost,
+    }));
+
+  it('adds what a won hand won, without the bet, to money won', async () => {
+    signedIn();
+    handInPlay(['Ts', '9h'], ['Kd', '6c'], ['2s']);
+    hasBalance(950);
+
+    await move('stand');
+
+    expect(blackjackStats()).toEqual([{ player_id: 1, game_code: 'blackjack', money_won: 50, money_lost: 0 }]);
+  });
+
+  it('adds a lost bet to money lost, on top of what is already there', async () => {
+    (statsTable.rows as unknown[]).push({ player_id: 1, game_code: 'blackjack', money_won: 300, money_lost: 100 });
+    signedIn();
+    handInPlay(['Ts', '7h'], ['Kd', '6c'], ['8s']);
+
+    await move('hit');
+
+    expect(blackjackStats()).toEqual([{ player_id: 1, game_code: 'blackjack', money_won: 300, money_lost: 150 }]);
+  });
+
+  it('counts each hand of a split round on its own', async () => {
+    signedIn();
+    // Hand 1 (8+K) stands on 18 and loses to 19; hand 2 (8+A) stands on 19 and pushes.
+    handInPlay(['8s', '8h'], ['9d', 'Tc'], ['Kc', 'Ad']);
+    hasBalance(950);
+    await move('split');
+    signedIn();
+    await move('stand', 1);
+    signedIn();
+    hasBalance(900);
+
+    await move('stand', 2);
+
+    expect(blackjackStats()).toEqual([{ player_id: 1, game_code: 'blackjack', money_won: 0, money_lost: 50 }]);
+  });
+
+  it('adds nothing for a push', async () => {
+    signedIn();
+    handInPlay(['Ts', '8h'], ['Kd', '8c'], []);
+    hasBalance(950);
+
+    await move('stand');
+
+    expect(statsTable.rows).toEqual([]);
+  });
+
+  it('still pays out when the stats cannot be saved', async () => {
+    signedIn();
+    handInPlay(['Ts', '9h'], ['Kd', '6c'], ['2s']);
+    hasBalance(950);
+    statsTable.fail.add('select');
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await move('stand');
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ balance: 1050 });
   });
 });

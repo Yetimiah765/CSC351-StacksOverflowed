@@ -39,7 +39,7 @@ export const GAMES: Game[] = [
     href: '/blackjack',
     tag: 'Classic',
     statsCode: 'blackjack',
-    recordsResults: false,
+    recordsResults: true,
   },
   {
     id: 'roulette',

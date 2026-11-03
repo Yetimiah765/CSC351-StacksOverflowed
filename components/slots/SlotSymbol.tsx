@@ -1,7 +1,9 @@
 // One symbol on a slot reel. Cherry, Lemon, Orange and Bell are emoji; Bar
 // and Seven are drawn as lettering, the way a real machine shows them.
 
-export type SlotSymbolName = 'Cherry' | 'Lemon' | 'Orange' | 'Bell' | 'Bar' | 'Seven';
+import type { SlotSymbolName } from '../../lib/slots';
+
+export type { SlotSymbolName };
 
 const EMOJI: Partial<Record<SlotSymbolName, string>> = {
   Cherry: '🍒',

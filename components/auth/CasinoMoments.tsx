@@ -4,10 +4,10 @@ import { useEffect, useId, useState, type CSSProperties, type ComponentType } fr
 import { CardBack, CardFace, Chip } from './CasinoPieces';
 
 // SRS-101.13: game moments flashing behind the sign-up form, one at a time
-// (laptop and desktop only). Each moment flashes in at one of six spots
-// around the form, tilted like a photo, plays a short scene from one of the
-// site's games, and holds; the next starts, somewhere else, as it fades, so
-// two only ever overlap for a moment. Neighbouring moments share no card,
+// (laptop and desktop only). Each moment flashes in, tilted like a photo,
+// plays a short scene from one of the site's games while it glides slowly
+// along one of eight paths around the form, and fades as the next comes in
+// somewhere else, so two only ever overlap for a moment. Neighbouring moments share no card,
 // chip or label (blackjack and poker, which both use A♠ and red and black
 // chips, and the two sports moments are never back to back), and the falling
 // cards and chips use none of them either, so nothing shows twice at once.
@@ -32,17 +32,21 @@ const SCENES: Scene[] = [
   { label: 'Sports', Draw: BetSlipMoment },
 ];
 
-type Spot = { position: CSSProperties; rotate: number };
+// Where a moment glides while it shows: it starts at `anchor` tilted `from`
+// degrees and moves `x`, `y` px, ending tilted `to` degrees. The paths take
+// turns around the form (left, right, top, left, right, bottom, ...), and
+// with eight paths for six moments each moment comes back on a different one.
+type Path = { anchor: CSSProperties; x: number; y: number; from: number; to: number };
 
-// Around the form, alternating sides. Each round of six the moments move on
-// one spot, so a scene doesn't always come back in the same place.
-const SPOTS: Spot[] = [
-  { position: { left: '2%', top: '7%' }, rotate: -5 },
-  { position: { right: '1.5%', top: '38%' }, rotate: -4 },
-  { position: { left: '1.5%', top: '68%' }, rotate: -2 },
-  { position: { right: '2.5%', top: '6%' }, rotate: 4 },
-  { position: { left: '3%', top: '38%' }, rotate: 4 },
-  { position: { right: '2.5%', top: '68%' }, rotate: 3 },
+const PATHS: Path[] = [
+  { anchor: { left: '1.5%', top: '3%' }, x: 24, y: 200, from: -6, to: -1 }, // down the left
+  { anchor: { right: '1.5%', top: '60%' }, x: -20, y: -200, from: 5, to: 0 }, // up the right
+  { anchor: { left: '22%', top: '1%' }, x: 220, y: 8, from: -3, to: 2 }, // across the top
+  { anchor: { left: '2%', top: '64%' }, x: 16, y: -200, from: 3, to: -3 }, // up the left
+  { anchor: { right: '2%', top: '2%' }, x: -22, y: 200, from: -4, to: 2 }, // down the right
+  { anchor: { right: '22%', bottom: '1%' }, x: -220, y: -6, from: 2, to: -3 }, // back along the bottom
+  { anchor: { left: '-1%', top: '30%' }, x: 60, y: 150, from: 7, to: 0 }, // in from the left
+  { anchor: { right: '-1%', top: '40%' }, x: -60, y: -150, from: -7, to: 0 }, // in from the right
 ];
 
 // Inline style for one move: when it starts (seconds into the moment) plus
@@ -73,13 +77,20 @@ export default function CasinoMoments() {
 
 function Moment({ step }: { step: number }) {
   const { label, Draw } = SCENES[step % SCENES.length];
-  const spot = SPOTS[(step + Math.floor(step / SCENES.length)) % SPOTS.length];
+  const path = PATHS[step % PATHS.length];
+  const glide = {
+    ...path.anchor,
+    // The resting place for reduced motion, where the glide starts.
+    transform: `rotate(${path.from}deg) scale(1.15)`,
+    '--moment-period': `${LIFE_MS}ms`,
+    '--tx': `${path.x}px`,
+    '--ty': `${path.y}px`,
+    '--r0': `${path.from}deg`,
+    '--r1': `${path.to}deg`,
+  } as CSSProperties;
   return (
-    <div className="absolute" style={{ ...spot.position, transform: `rotate(${spot.rotate}deg) scale(1.15)`, transformOrigin: 'center' }}>
-      <div
-        className="moment-life relative h-40 w-64 overflow-hidden rounded-2xl border border-white/15 shadow-2xl shadow-black/60"
-        style={{ '--moment-period': `${LIFE_MS}ms` } as CSSProperties}
-      >
+    <div className="moment-drift absolute" style={glide}>
+      <div className="moment-life relative h-40 w-64 overflow-hidden rounded-2xl border border-white/15 shadow-2xl shadow-black/60">
         <Draw />
         <div className="absolute inset-0 bg-[radial-gradient(transparent_55%,rgba(0,0,0,0.5))]" />
         <div className="moment-flashbulb absolute inset-0 bg-white" />

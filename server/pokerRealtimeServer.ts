@@ -85,6 +85,13 @@ interface TableEntry {
   startTimer: ReturnType<typeof setTimeout> | null;
   /** Fires when the next busted player runs out of time (SRS-12.10); null when nobody is busted. */
   bustedTimer: ReturnType<typeof setTimeout> | null;
+  /**
+   * This table's actions, handled one at a time in the order they arrive:
+   * several await the database, and two interleaving at those awaits (a
+   * buy-back and a move, say) could each act on a table the other had
+   * changed underneath it.
+   */
+  queue: Promise<void>;
 }
 
 type AckResult = { ok: boolean; error?: string; seatNumber?: number; pending?: boolean };
@@ -155,6 +162,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     channel: supabase.channel(pokerTableChannelName(config.id), CHANNEL_CONFIG),
     startTimer: null,
     bustedTimer: null,
+    queue: Promise.resolve(),
   }));
 
   // Players with a join being processed right now. A join awaits several
@@ -412,16 +420,19 @@ function startServer(supabase: SupabaseClient, secret: string) {
     // the hand ends (SRS-21.2/21.3); anyone else is removed and refunded now.
     const result = entry.table.leave(String(playerId));
     if (result.ok) {
-      if (result.chipStack) {
-        await refundBalance(supabase, playerId, result.chipStack);
-      }
-      // Folding a leaver whose turn it was can end the hand.
-      await settleRemovals(entry);
-      // Leaving can cancel a countdown, or end a hand and start a new
-      // countdown right away.
+      // Leaving can cancel a countdown, or (folding a leaver whose turn it
+      // was) end a hand and start the next countdown. Both happen before
+      // the state goes out, and before any await: a hand that has just
+      // ended is briefly "waiting" until refreshCountdown(), and a state
+      // broadcast in between made pages switch the last result from one
+      // view to another and play it again.
       refreshCountdown(entry);
       broadcastTable(entry);
       broadcastLobby();
+      if (result.chipStack) {
+        await refundBalance(supabase, playerId, result.chipStack);
+      }
+      await settleRemovals(entry);
     }
     return result;
   }
@@ -459,12 +470,13 @@ function startServer(supabase: SupabaseClient, secret: string) {
 
     const result = entry.table.act(String(playerId), move, amount);
     if (result.ok) {
-      await settleRemovals(entry);
-      // The hand may have just ended: start the next countdown if there
-      // are still enough players.
+      // The hand may have just ended: start the next countdown (if there
+      // are still enough players) before the state goes out and before
+      // awaiting the refunds — see handleLeave.
       refreshCountdown(entry);
       broadcastTable(entry);
       broadcastLobby();
+      await settleRemovals(entry);
     }
     return result;
   }
@@ -490,20 +502,33 @@ function startServer(supabase: SupabaseClient, secret: string) {
       const action = verifyRelayedAction(payload, secret, entry.config.id, now);
       if (!action || isReplay(action, now)) return;
 
-      let result: AckResult;
-      if (action.action === 'join') result = await handleJoin(entry, action);
-      else if (action.action === 'leave') result = await handleLeave(entry, action);
-      else if (action.action === 'rebuy') result = await handleRebuy(entry, action);
-      else if (action.action === 'post-blinds') result = handlePostBlinds(entry, action, true);
-      else if (action.action === 'wait-for-big-blind') result = handlePostBlinds(entry, action, false);
-      else if (action.action === 'emote') result = handleEmote(entry, action);
-      else result = await handleAct(entry, action);
+      // One action at a time per table (see TableEntry.queue).
+      entry.queue = entry.queue
+        .then(async () => {
+          let result: AckResult;
+          if (action.action === 'join') result = await handleJoin(entry, action);
+          else if (action.action === 'leave') result = await handleLeave(entry, action);
+          else if (action.action === 'rebuy') result = await handleRebuy(entry, action);
+          else if (action.action === 'post-blinds') result = handlePostBlinds(entry, action, true);
+          else if (action.action === 'wait-for-big-blind') result = handlePostBlinds(entry, action, false);
+          else if (action.action === 'emote') result = handleEmote(entry, action);
+          else result = await handleAct(entry, action);
 
-      entry.channel.send({
-        type: 'broadcast',
-        event: POKER_EVENT_ACK,
-        payload: { requestId: action.requestId, ...result },
-      });
+          entry.channel.send({
+            type: 'broadcast',
+            event: POKER_EVENT_ACK,
+            payload: { requestId: action.requestId, ...result },
+          });
+        })
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error(`${entry.config.name}: ${action.action} failed`, error);
+          entry.channel.send({
+            type: 'broadcast',
+            event: POKER_EVENT_ACK,
+            payload: { requestId: action.requestId, ok: false, error: 'Something went wrong. Try again.' },
+          });
+        });
     });
   }
 

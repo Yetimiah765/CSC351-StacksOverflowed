@@ -113,25 +113,41 @@ export function usePokerChannel<State>(
     const nextChannel = supabase.channel(channelName, {
       config: { broadcast: { self: false } },
     });
+    // Ask the server for the table as it is now.
+    const requestSync = () => {
+      const sync: PokerSyncPayload = { requestId: generateId(), action: 'sync' };
+      nextChannel.send({ type: 'broadcast', event: POKER_EVENT_ACTION, payload: sync });
+    };
 
     nextChannel.on('broadcast', { event: POKER_EVENT_STATE }, ({ payload }) => onStateRef.current(payload as State));
     nextChannel.on('broadcast', { event: POKER_EVENT_EMOTE }, ({ payload }) =>
       onEmoteRef.current?.(payload as PokerEmotePayload)
     );
     nextChannel.on('broadcast', { event: POKER_EVENT_ACK }, ({ payload }: { payload: PokerAckPayload }) => {
-      pendingRef.current.get(payload.requestId)?.(payload);
+      const mine = pendingRef.current.get(payload.requestId);
+      mine?.(payload);
       pendingRef.current.delete(payload.requestId);
+      // Refused: this page may have been showing an out-of-date table (a
+      // missed broadcast, a restarted server, a tab that slept) — which is
+      // how a player could be offered a seat they already have, or a
+      // buy-back at a table they'd been removed from. Catch up.
+      if (mine && !payload.ok) requestSync();
     });
 
     nextChannel.subscribe((status) => {
       setConnected(status === 'SUBSCRIBED');
-      if (status === 'SUBSCRIBED') {
-        const sync: PokerSyncPayload = { requestId: generateId(), action: 'sync' };
-        nextChannel.send({ type: 'broadcast', event: POKER_EVENT_ACTION, payload: sync });
-      }
+      if (status === 'SUBSCRIBED') requestSync();
     });
 
+    // Coming back to the tab: broadcasts may have been missed while it was
+    // in the background.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') requestSync();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
+      document.removeEventListener('visibilitychange', onVisible);
       setConnected(false);
       supabase.removeChannel(nextChannel);
     };

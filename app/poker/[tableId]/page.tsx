@@ -369,6 +369,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // to buy back in or leave.
   const amBusted = Boolean(mySeat && isBustedSeat(mySeat));
 
+  // An error is about what the player just tried; once they've sat down,
+  // left, gone bust or bought back in, it no longer applies.
+  const seatStatus = mySeat ? (amBusted ? 'busted' : 'seated') : 'standing';
+  useEffect(() => {
+    setJoinError('');
+  }, [seatStatus]);
+
   useEffect(() => {
     const msRemaining = mySeat?.bustedMsRemaining ?? null;
     setBustedEndsAt(msRemaining === null ? null : Date.now() + msRemaining);
@@ -887,41 +894,12 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     <p className="text-[11px] text-emerald-100/50 sm:text-xs">Current bet {tableState.currentBet}</p>
                   ) : null}
                 </>
-              ) : tableState?.phase === 'countdown' && countdownSeconds !== null ? (
-                <>
-                  {lastResult ? (
-                    <LastHandSummary
-                      result={lastResult}
-                      winnerStart={showdown?.winnerStart ?? 0}
-                      renderBoardCard={(card, index) => {
-                        const slam = showdown?.runout(index);
-                        return slam ? (
-                          <SlamCard
-                            key={card}
-                            card={card}
-                            slam={slam}
-                            from={geometry.boardFromDeck(index)}
-                            size={boardCardSize}
-                          />
-                        ) : (
-                          <PlayingCard key={card} card={card} size={boardCardSize} />
-                        );
-                      }}
-                    />
-                  ) : null}
-                  <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
-                    {lastResult ? 'Next hand in' : 'Hand starts in'}
-                  </p>
-                  <p
-                    key={countdownSeconds}
-                    className={`animate-countdown-tick font-bold tabular-nums text-amber-200 drop-shadow-[0_0_18px_rgba(252,211,77,0.35)] ${
-                      lastResult ? 'text-3xl' : 'text-5xl sm:text-6xl'
-                    }`}
-                  >
-                    {countdownSeconds}
-                  </p>
-                </>
               ) : (
+                // Between hands. The last hand's result stays in this one
+                // place whether the table is counting down or waiting for
+                // players, so a change between the two (a player busting,
+                // buying back in, leaving or joining) doesn't rebuild it and
+                // replay its reveals and payout.
                 <>
                   {lastResult ? (
                     <LastHandSummary
@@ -942,7 +920,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         );
                       }}
                     />
-                  ) : (
+                  ) : tableState?.phase === 'countdown' && countdownSeconds !== null ? null : (
                     <>
                       <StakesChip stakes={config.stakes} size="h-8 w-8" />
                       <p className="text-[10px] uppercase tracking-[0.4em] text-emerald-200/30 sm:text-xs">
@@ -950,7 +928,21 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       </p>
                     </>
                   )}
-                  {tableState ? (
+                  {tableState?.phase === 'countdown' && countdownSeconds !== null ? (
+                    <>
+                      <p className="text-[10px] uppercase tracking-[0.35em] text-emerald-200/60 sm:text-xs">
+                        {lastResult ? 'Next hand in' : 'Hand starts in'}
+                      </p>
+                      <p
+                        key={countdownSeconds}
+                        className={`animate-countdown-tick font-bold tabular-nums text-amber-200 drop-shadow-[0_0_18px_rgba(252,211,77,0.35)] ${
+                          lastResult ? 'text-3xl' : 'text-5xl sm:text-6xl'
+                        }`}
+                      >
+                        {countdownSeconds}
+                      </p>
+                    </>
+                  ) : tableState ? (
                     // SRS-20.5: waiting-for-players indicator.
                     <p className="text-xs text-emerald-100/60 sm:text-sm">
                       Waiting for players ·{' '}

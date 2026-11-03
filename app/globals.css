@@ -137,6 +137,90 @@ body {
   .drift-fall, .drift-sway, .drift-tilt, .drift-flip, .drift-glow { animation-play-state: paused !important; }
 }
 
+/* Game moments flashing behind the sign-up form, one at a time
+   (components/auth/CasinoMoments.tsx). A moment lives for --moment-period:
+   it flashes in, holds, and fades while the next one comes in. Each move
+   inside starts --at seconds in (plus --moment-delay, if set) and rests at
+   its end state, so with animations off a moment shows finished. */
+@keyframes moment-life {
+  0% { opacity: 0; transform: scale(0.9); }
+  8%, 86% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: scale(1.03); }
+}
+@keyframes moment-flashbulb {
+  from { opacity: 0.7; }
+  to { opacity: 0; }
+}
+@keyframes moment-in {
+  from { opacity: 0; transform: translate(var(--dx, 0px), var(--dy, 0px)) rotate(var(--dr, 0deg)) scale(var(--ds, 1)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes moment-pop {
+  0% { opacity: 0; transform: scale(var(--ds, 0.3)); }
+  60% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes moment-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes moment-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes moment-reel {
+  from { transform: translateY(var(--from)); }
+  to { transform: none; }
+}
+@keyframes moment-turn {
+  from { transform: rotate(var(--turns)); }
+  to { transform: none; }
+}
+@keyframes moment-fly-x {
+  from { transform: translateX(var(--dx)); }
+  to { transform: none; }
+}
+/* Up, then down: the height of a ball's arc. */
+@keyframes moment-fly-y {
+  0% { transform: translateY(var(--dy)); animation-timing-function: ease-out; }
+  50% { transform: translateY(var(--peak)); animation-timing-function: ease-in; }
+  100% { transform: none; }
+}
+@keyframes moment-bulge {
+  0%, 100% { transform: none; }
+  40% { transform: scale(1.14, 0.92); }
+  70% { transform: scale(0.96, 1.04); }
+}
+@keyframes moment-coin {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.4); }
+  15% { opacity: 1; }
+  100% { opacity: 1; transform: translate(var(--cx), var(--cy)) rotate(var(--cr, 0deg)); }
+}
+.moment-life { animation: moment-life var(--moment-period) ease-out var(--moment-delay, 0s) both; }
+.moment-flashbulb { opacity: 0; animation: moment-flashbulb 0.5s ease-out var(--moment-delay, 0s) both; }
+.moment-in { animation: moment-in var(--dur, 0.45s) cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-pop { animation: moment-pop var(--dur, 0.5s) cubic-bezier(0.3, 0.8, 0.3, 1.2) calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-out { opacity: 0; animation: moment-out 0.25s ease-in calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-blink { animation: moment-blink 0.6s ease-in-out calc(var(--moment-delay, 0s) + var(--at, 0s)) infinite; }
+.moment-reel { animation: moment-reel var(--dur) cubic-bezier(0.2, 0.7, 0.3, 1) calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-turn { animation: moment-turn var(--dur) cubic-bezier(0.15, 0.6, 0.25, 1) calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-fly-x { animation: moment-fly-x var(--dur) linear calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-fly-y { animation: moment-fly-y var(--dur) calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-bulge { animation: moment-bulge 0.6s ease-out calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+.moment-coin { animation: moment-coin var(--dur, 0.9s) cubic-bezier(0.2, 0.7, 0.4, 1) calc(var(--moment-delay, 0s) + var(--at, 0s)) both; }
+/* Gold headline lettering: BLACKJACK!, GOAL!, JACKPOT. */
+.moment-title {
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  color: #fde68a;
+  text-shadow: 0 2px 0 #92400e, 0 0 12px rgba(251, 191, 36, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moment-life, .moment-flashbulb, .moment-in, .moment-pop, .moment-out, .moment-blink, .moment-reel,
+  .moment-turn, .moment-fly-x, .moment-fly-y, .moment-bulge, .moment-coin { animation: none !important; }
+}
+
 /* Poker table (app/poker/[tableId]/page.tsx). Each animated element is
    re-keyed when the thing it shows changes, so the animation plays again.
    Directions come from CSS variables the page sets per seat, in pixels

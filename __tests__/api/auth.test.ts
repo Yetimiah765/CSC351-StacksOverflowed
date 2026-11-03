@@ -406,22 +406,24 @@ describe('Auth API routes', () => {
       );
     });
 
-    it('rejects an unknown username with a generic message (SRS-104.2/104.4)', async () => {
+    it('says no account was found for an unknown username, so the page can offer sign-up (SRS-104.4/104.7)', async () => {
       tables.usernames.maybeSingleResult = { data: null, error: null };
 
       const response = await loginPost(loginRequest({ username: 'ghostuser', password }));
 
-      expect(response.status).toBe(401);
-      expect(await response.json()).toEqual({ error: 'Invalid username or password.' });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toEqual({ error: 'No account was found with that username.', accountNotFound: true });
+      expect(tables.player_sessions.upsert).not.toHaveBeenCalled();
     });
 
-    it('rejects an incorrect password with the same generic message (SRS-104.2/104.4)', async () => {
+    it('says the password is incorrect when the account exists (SRS-104.4/104.7)', async () => {
       await seedPlayer();
 
       const response = await loginPost(loginRequest({ username: 'gooduser1', password: 'wrongpass1' }));
 
       expect(response.status).toBe(401);
-      expect(await response.json()).toEqual({ error: 'Invalid username or password.' });
+      expect(await response.json()).toEqual({ error: 'Incorrect password.' });
+      expect(tables.player_sessions.upsert).not.toHaveBeenCalled();
     });
 
     it('finds the account whatever capitals the username is typed in (SRS-101.7)', async () => {

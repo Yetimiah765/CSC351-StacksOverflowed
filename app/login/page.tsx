@@ -11,12 +11,14 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [accountNotFound, setAccountNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage('');
+    setAccountNotFound(false);
 
     const response = await fetch('/api/auth/login', {
       method: 'POST',
@@ -32,6 +34,7 @@ export default function LoginPage() {
       router.push('/');
     } else {
       setMessage(data.error || 'Login failed.');
+      setAccountNotFound(Boolean(data?.accountNotFound));
     }
   }
 
@@ -85,7 +88,21 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {message ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">{message}</p> : null}
+        {message ? (
+          <p role="alert" className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">
+            {message}
+            {/* SRS-104.7: no such account, so offer to make one. */}
+            {accountNotFound ? (
+              <>
+                {' '}
+                <Link href="/register" className="font-semibold text-emerald-300 hover:underline">
+                  Sign up
+                </Link>{' '}
+                to create an account.
+              </>
+            ) : null}
+          </p>
+        ) : null}
 
         <div className="mt-12 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
           <p>

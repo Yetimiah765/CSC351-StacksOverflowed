@@ -934,6 +934,10 @@ flowchart LR
 
 *Traces to: UR-104*
 
+**SRS-104.7, JO, Account not found.** When no account has the submitted username, the system shall deny the login with a message saying that no account was found, together with a link to the sign-up page. When the account exists but the password does not verify, the message shall say that the password is incorrect.
+
+*Traces to: UR-104*
+
 ### UR-105, JO – Log Out
 
 *User story: As a logged-in player, I want to manually log out of my account and have my login session end when I close the website tab, so that my account is not automatically accessible when I reopen the website.*

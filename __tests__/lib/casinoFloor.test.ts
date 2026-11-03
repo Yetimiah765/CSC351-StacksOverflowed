@@ -3,11 +3,16 @@ import {
   COLS,
   DOOR,
   FLOOR_OBJECTS,
+  FOYER_PLANTS,
   FRONT_WALL_Y,
+  GATE_HALF_WIDTH,
+  GATE_SHUT,
+  GATE_SWING_SECONDS,
   LOBBY,
   INTERACTIVE_OBJECTS,
   ROWS,
   START,
+  TILE_METRES,
   entranceWalk,
   findPath,
   isBlocked,
@@ -21,6 +26,9 @@ import {
   PLAYER_RADIUS,
   pieceLayout,
   standingSpots,
+  stepGate,
+  type GateState,
+  type Point,
 } from '../../lib/casinoFloor';
 import { GAMES } from '../../lib/games';
 
@@ -53,7 +61,7 @@ describe('the casino floor', () => {
   it('blocks the walls and anything standing on the floor', () => {
     expect(isBlocked(0, 5)).toBe(true); // left wall
     expect(isBlocked(5, 1)).toBe(true); // back wall
-    expect(isBlocked(5, ROWS - 1)).toBe(true); // front wall
+    expect(isBlocked(5, Math.floor(FRONT_WALL_Y))).toBe(true); // front wall
     const poker = byId('poker');
     expect(isBlocked(poker.x + 1, poker.y + 1)).toBe(true);
     expect(isBlocked(poker.x - 1, poker.y + 1)).toBe(false);
@@ -238,9 +246,92 @@ describe('walking in after logging in (SRS-103.12)', () => {
     expect(LOBBY.width).toBeGreaterThan(DOOR.w);
   });
 
-  it('puts the front wall past the rail, with a foyer between that nobody walks in', () => {
+  it('puts the front wall past the rail, with a foyer between', () => {
     expect(FRONT_WALL_Y).toBeGreaterThan(DOOR.y + 3);
-    // The floor ends at the rail: the foyer's tiles are all wall.
-    for (let y = DOOR.y; y < FRONT_WALL_Y; y++) expect(isBlocked(DOOR.x, y)).toBe(true);
   });
 });
+
+describe('the gate in the rail at the front of the floor (SRS-105.4)', () => {
+  const middle = DOOR.x + DOOR.w / 2;
+  // Walks from `from` by `step` a frame, `frames` times, swinging the gate as it goes.
+  const walk = (from: Point, step: Point, frames: number, gate: GateState = GATE_SHUT) => {
+    let at = from;
+    let now = gate;
+    const seen: GateState[] = [];
+    for (let i = 0; i < frames; i++) {
+      at = moveWithCollisions(at, step);
+      now = stepGate(now, at, step, 1 / 60);
+      seen.push(now);
+    }
+    return { at, gate: now, seen };
+  };
+  const pace = 0.04; // tiles a frame, about walking pace
+
+  it('lets the player through the gate both ways, but not through the rail beside it', () => {
+    expect(walk({ x: middle, y: DOOR.y - 1 }, { x: 0, y: pace }, 60).at.y).toBeGreaterThan(DOOR.y + 1);
+    expect(walk({ x: middle, y: DOOR.y + 1.5 }, { x: 0, y: -pace }, 60).at.y).toBeLessThan(DOOR.y - 0.5);
+    for (const x of [3.5, middle - GATE_HALF_WIDTH - 1, middle + GATE_HALF_WIDTH + 1, COLS - 3.5]) {
+      expect(walk({ x, y: DOOR.y - 1 }, { x: 0, y: pace }, 60).at.y, `at x ${x}`).toBeLessThan(DOOR.y - PLAYER_RADIUS + 0.01);
+    }
+  });
+
+  it('makes the foyer floor, up to the front wall, with its plants in the way', () => {
+    expect(isBlocked(5, DOOR.y + 1)).toBe(false);
+    expect(isBlocked(5, Math.floor(FRONT_WALL_Y) - 1)).toBe(false);
+    for (const plant of FOYER_PLANTS) expect(isBlocked(Math.floor(plant.x), Math.floor(plant.y))).toBe(true);
+  });
+
+  it('walks a click through the gate, never through the rail', () => {
+    const path = findPath(START, [{ x: 3, y: DOOR.y + 1 }])!;
+    expect(path).not.toBeNull();
+    let previous: Point = START;
+    for (const step of path) {
+      if (Math.min(previous.y, step.y) === DOOR.y - 1 && Math.max(previous.y, step.y) === DOOR.y) {
+        expect(Math.abs(step.x + 0.5 - middle)).toBeLessThan(GATE_HALF_WIDTH);
+      }
+      previous = step;
+    }
+  });
+
+  it('stays shut for a player standing beside it or walking along the rail elsewhere', () => {
+    expect(walk({ x: middle, y: DOOR.y - 1 }, { x: 0, y: 0 }, 30).gate).toEqual(GATE_SHUT);
+    expect(walk({ x: 4.5, y: DOOR.y - 1.5 }, { x: 0, y: pace }, 60).gate).toEqual(GATE_SHUT);
+  });
+
+  it('swings away from the player, out into the foyer from the floor and in onto the floor from the foyer, open before they reach it', () => {
+    const jog = 3.1 / 60 / TILE_METRES; // tiles a frame at jogging pace
+    for (const [start, dir, way] of [[DOOR.y - 2.5, 1, -1], [DOOR.y + 2.5, -1, 1]] as const) {
+      let at = { x: middle, y: start };
+      let gate = GATE_SHUT;
+      while (Math.abs(at.y - DOOR.y) > PLAYER_RADIUS) {
+        at = moveWithCollisions(at, { x: 0, y: dir * jog });
+        gate = stepGate(gate, at, { x: 0, y: dir * jog }, 1 / 60);
+      }
+      expect(gate).toEqual({ open: 1, way });
+    }
+  });
+
+  it('stays open while the player is in its swing, then shuts behind them and can swing the other way next time', () => {
+    const through = walk({ x: middle, y: DOOR.y - 2 }, { x: 0, y: pace }, 60);
+    // Standing in the gateway, it stays open.
+    const standing = walk({ x: middle, y: DOOR.y + 0.3 }, { x: 0, y: 0 }, 30, through.gate);
+    expect(standing.gate.open).toBe(1);
+    // Clear of its leaves, it swings shut, and forgets which way it went.
+    const away = walk(through.at, { x: 0, y: pace }, 100, through.gate);
+    expect(away.at.y).toBeGreaterThan(DOOR.y + GATE_HALF_WIDTH + PLAYER_RADIUS);
+    expect(away.gate).toEqual(GATE_SHUT);
+    // Never shut on them: open all the while they're within reach of its leaves.
+    let at = through.at;
+    let gate = through.gate;
+    for (let i = 0; i < 100; i++) {
+      at = { x: at.x, y: at.y + pace };
+      gate = stepGate(gate, at, { x: 0, y: pace }, 1 / 60);
+      const reach = Math.min(Math.hypot(at.x - (middle - GATE_HALF_WIDTH), at.y - DOOR.y), Math.hypot(at.x - (middle + GATE_HALF_WIDTH), at.y - DOOR.y));
+      if (reach < GATE_HALF_WIDTH + PLAYER_RADIUS) expect(gate.open).toBe(1);
+    }
+    // Coming back, it swings the other way.
+    expect(walk(away.at, { x: 0, y: -pace }, 60, away.gate).gate.way).toBe(1);
+    expect(GATE_SWING_SECONDS).toBeLessThan(0.5);
+  });
+});
+

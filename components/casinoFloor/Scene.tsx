@@ -21,7 +21,10 @@ import {
   objectAt,
   pieceLayout,
   standingSpots,
+  stepGate,
+  GATE_SHUT,
   type FloorObject,
+  type GateState,
   type Point,
   type TakenSeat,
 } from '../../lib/casinoFloor';
@@ -646,6 +649,19 @@ function Player({
     view.lookAt(lookAt.current);
   }
 
+  // The gate in the rail (SRS-105.4) swings away from the player as they
+  // walk through it, whichever way; the walk in swings it itself.
+  const gate = useRef<GateState>(GATE_SHUT);
+  const lastAt = useRef<Point | null>(null);
+  useFrame((_, rawDelta) => {
+    const at = position.current;
+    const before = lastAt.current ?? at;
+    lastAt.current = at;
+    if (walkIn.current) return;
+    gate.current = stepGate(gate.current, at, { x: at.x - before.x, y: at.y - before.y }, Math.min(rawDelta, 0.25));
+    lobby.current.gate = gate.current.way * smooth(gate.current.open);
+  });
+
   return (
     <group ref={body}>
       <Person who="player" motion={motion} seat={seat} />
@@ -899,8 +915,9 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
       <Room lobbyState={lobby} />
       {entrance ? <Lobby state={lobby} /> : null}
       <group onClick={handleFloorClick}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} visible={false}>
-          <planeGeometry args={[COLS * TILE_M, ROWS * TILE_M]} />
+        {/* What a click lands on: the floor, and the foyer out to the front wall. */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (FRONT_WALL_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
+          <planeGeometry args={[COLS * TILE_M, FRONT_WALL_Z + (ROWS / 2) * TILE_M]} />
         </mesh>
         {FLOOR_OBJECTS.filter((object) => object.interactive).map((object) => {
           const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);

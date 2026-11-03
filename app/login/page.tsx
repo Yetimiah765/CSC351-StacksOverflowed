@@ -28,7 +28,8 @@ export default function LoginPage() {
     setLoading(false);
     if (response.ok) {
       if (data?.token) localStorage.setItem('player_token', data.token);
-      router.push('/profile');
+      // SRS-103.11: straight to the casino floor, where play starts.
+      router.push('/');
     } else {
       setMessage(data.error || 'Login failed.');
     }

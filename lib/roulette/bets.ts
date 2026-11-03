@@ -112,6 +112,34 @@ export function spotWins(spot: BetSpot, n: number): boolean {
   }
 }
 
+/** A pending bet on the table; `riding` of its `amount` stays after each spin (SRS-305.4). */
+export interface TableBet {
+  spot: BetSpot;
+  amount: number;
+  riding: number;
+}
+
+/**
+ * The pending bets on the table once a spin's result is shown. Let it ride
+ * makes every bet in the spin riding, so all of it stays (SRS-305.4). After
+ * Spin only the riding part of each bet stays, and the rest leaves the table
+ * (SRS-305.3).
+ */
+export function betsAfterSpin(bets: Record<string, TableBet>, letItRide: boolean): Record<string, TableBet> {
+  const kept: Record<string, TableBet> = {};
+  for (const [key, bet] of Object.entries(bets)) {
+    const amount = letItRide ? bet.amount : bet.riding;
+    if (amount > 0) kept[key] = { ...bet, amount, riding: amount };
+  }
+  return kept;
+}
+
+/** Takes `chip` coins off a bet (Undo); a riding bet can't ride more than is left on it. */
+export function removeChip(bet: TableBet, chip: number): TableBet | null {
+  const amount = bet.amount - chip;
+  return amount > 0 ? { ...bet, amount, riding: Math.min(bet.riding, amount) } : null;
+}
+
 /** Coins a bet returns: its stake plus x times its stake on a win, else 0 (SRS-304.1). */
 export function betReturn(spot: BetSpot, amount: number, n: number): number {
   return spotWins(spot, n) ? amount * (payoutMultiplier(spot) + 1) : 0;

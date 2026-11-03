@@ -7,6 +7,8 @@ import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import {
   CHIP_VALUES,
   MAX_TOTAL_BET,
+  betsAfterSpin,
+  removeChip,
   pocketColor,
   spotKey,
   spotLabel,
@@ -14,14 +16,14 @@ import {
   type BetSpot,
   type OutsideBetType,
   type PocketColor,
+  type TableBet,
 } from '../../lib/roulette/bets';
 
-interface PendingBet {
+type PendingBet = TableBet;
+
+interface SettledBet {
   spot: BetSpot;
   amount: number;
-}
-
-interface SettledBet extends PendingBet {
   returned: number;
 }
 
@@ -103,6 +105,8 @@ export default function RoulettePage() {
   const [message, setMessage] = useState<string | null>(null);
   // The committed result, held back until the wheel stops (SRS-304.2).
   const committed = useRef<SpinResponse | null>(null);
+  // Whether the spin in progress was started with Let it ride (SRS-305.4).
+  const rideRef = useRef(false);
 
   // SRS-301.10 / SRS-108.3: only signed-in players can play; guests log in first.
   useEffect(() => {
@@ -142,7 +146,10 @@ export default function RoulettePage() {
     }
     const key = spotKey(spot);
     setMessage(null);
-    setBets((prev) => ({ ...prev, [key]: { spot, amount: (prev[key]?.amount ?? 0) + selectedChip } }));
+    setBets((prev) => ({
+      ...prev,
+      [key]: { spot, amount: (prev[key]?.amount ?? 0) + selectedChip, riding: prev[key]?.riding ?? 0 },
+    }));
     setPlacements((prev) => [...prev, { key, amount: selectedChip }]);
   }
 
@@ -152,8 +159,8 @@ export default function RoulettePage() {
     setPlacements((prev) => prev.slice(0, -1));
     setBets((prev) => {
       const next = { ...prev };
-      const amount = next[last.key].amount - last.amount;
-      if (amount > 0) next[last.key] = { ...next[last.key], amount };
+      const left = removeChip(next[last.key], last.amount);
+      if (left) next[last.key] = left;
       else delete next[last.key];
       return next;
     });
@@ -168,8 +175,9 @@ export default function RoulettePage() {
     setMessage(null);
   }
 
-  async function spin() {
+  async function spin(letItRide: boolean) {
     if (spinning || pending.length === 0 || !token) return; // SRS-302.4, SRS-302.5
+    rideRef.current = letItRide;
     setSpinning(true);
     setMessage(null);
 
@@ -218,9 +226,16 @@ export default function RoulettePage() {
     setBalance(result.balance);
     notifyBalanceChanged();
     setHistory((prev) => [result.number, ...prev].slice(0, 12));
-    // SRS-305.3: settled bets leave the table.
-    setBets({});
-    setPlacements([]);
+    // SRS-305.3 / SRS-305.4: settled bets leave the table, except riding
+    // ones, which stay until the player clears them.
+    const kept = betsAfterSpin(bets, rideRef.current);
+    setBets(kept);
+    // Each kept bet comes off in one Undo.
+    setPlacements(Object.entries(kept).map(([key, bet]) => ({ key, amount: bet.amount })));
+    const keptTotal = Object.values(kept).reduce((sum, bet) => sum + bet.amount, 0);
+    if (keptTotal > result.balance) {
+      setMessage('Your riding bets are now more than your balance. Remove some or clear them to spin again.'); // SRS-301.7
+    }
     setSpinning(false);
   }
 
@@ -228,6 +243,7 @@ export default function RoulettePage() {
     return {
       spot,
       amount: bets[spotKey(spot)]?.amount ?? 0,
+      riding: bets[spotKey(spot)]?.riding ?? 0,
       won: !spinning && lastSpin !== null && spotWins(spot, lastSpin.number),
       disabled: spinning,
       onPlace: placeChip,
@@ -375,9 +391,19 @@ export default function RoulettePage() {
                 >
                   Clear Bets
                 </button>
+                {/* SRS-305.4: spin and keep these bets on the table afterwards. */}
                 <button
                   type="button"
-                  onClick={spin}
+                  onClick={() => spin(true)}
+                  disabled={spinning || pending.length === 0}
+                  title="Spin, then keep the same bets on the table until you clear them"
+                  className="rounded-lg border-2 border-emerald-400 bg-emerald-600/80 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-emerald-500/20 hover:bg-emerald-500 disabled:opacity-40"
+                >
+                  Let it ride
+                </button>
+                <button
+                  type="button"
+                  onClick={() => spin(false)}
                   disabled={spinning || pending.length === 0}
                   className="rounded-lg bg-gradient-to-b from-yellow-300 to-amber-500 px-8 py-2 text-base font-bold text-amber-950 shadow-lg shadow-amber-500/30 hover:brightness-110 disabled:opacity-40"
                 >
@@ -421,6 +447,7 @@ export default function RoulettePage() {
 function Spot({
   spot,
   amount,
+  riding,
   won,
   disabled,
   onPlace,
@@ -430,6 +457,7 @@ function Spot({
 }: {
   spot: BetSpot;
   amount: number;
+  riding: number;
   won: boolean;
   disabled: boolean;
   onPlace: (spot: BetSpot) => void;
@@ -443,7 +471,7 @@ function Spot({
       onClick={() => onPlace(spot)}
       disabled={disabled}
       style={style}
-      aria-label={`${spotLabel(spot)}${amount ? `, ${amount} coins bet` : ''}`}
+      aria-label={`${spotLabel(spot)}${amount ? `, ${amount} coins bet` : ''}${riding ? `, ${riding} riding` : ''}`}
       className={`relative flex items-center justify-center border border-white/50 font-semibold text-white transition hover:brightness-125 disabled:cursor-not-allowed ${className} ${
         won ? 'z-10 ring-4 ring-inset ring-yellow-300' : ''
       }`}
@@ -456,6 +484,16 @@ function Spot({
           )}`}
         >
           {amount}
+          {/* SRS-305.4: riding bets are marked, since they stay after the spin. */}
+          {riding > 0 && (
+            <span
+              aria-hidden
+              title={`${riding} riding`}
+              className="absolute -right-2 -top-2 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-emerald-500 text-[0.6rem] font-black leading-none text-white"
+            >
+              ↻
+            </span>
+          )}
         </span>
       )}
     </button>

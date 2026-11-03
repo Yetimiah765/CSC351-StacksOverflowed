@@ -842,6 +842,10 @@ flowchart LR
 
 *Traces to: UR-101*
 
+**SRS-101.15, JO, Log in after sign-up.** After the system creates an account, it shall take the player straight to the login page, tell the player that the account was created, and fill in the new username.
+
+*Traces to: UR-101*
+
 ### UR-102, JO – Age Requirement
 
 *User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*

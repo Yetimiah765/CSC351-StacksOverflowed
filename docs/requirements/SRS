@@ -962,6 +962,10 @@ flowchart LR
 
 *Traces to: UR-105*
 
+**SRS-105.4, JO, Gate to the casino's doors.** The rail at the front of the home page's casino floor shall have a gate in front of the casino's doors that the player can walk through in either direction. The gate shall swing open away from the player as they come up to it, and swing shut behind them once they are through.
+
+*Traces to: UR-105*
+
 ### UR-106, JO – Delete Account
 
 *User story: As a player, I want to permanently delete my account after confirming my decision and entering my current password, so that I can permanently remove my information from the platform.*

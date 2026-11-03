@@ -1,10 +1,20 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import BackToHome from '../../components/BackToHome';
-import SlotSymbol, { type SlotSymbolName } from '../../components/slots/SlotSymbol';
-import { initialSlotBet } from '../../lib/slots';
+import SlotReels from '../../components/slots/SlotReels';
+import { notifyBalanceChanged } from '../../lib/balanceEvents';
+import { initialSlotBet, type SlotSymbolName } from '../../lib/slots';
+
+// What POST /api/slots/spin returns once the spin is committed.
+interface SpinResponse {
+  reels: SlotSymbolName[];
+  bet: number;
+  multiplier: number;
+  payout: number;
+  balance: number;
+}
 
 // What the reels show before the first spin.
 const IDLE_REELS: SlotSymbolName[] = ['Seven', 'Seven', 'Seven'];
@@ -23,6 +33,15 @@ export default function SlotsPage() {
   const [betAmounts, setBetAmounts] = useState<number[]>([]);
   const [bet, setBet] = useState<number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [reels, setReels] = useState<SlotSymbolName[]>(IDLE_REELS);
+  const [reelsFrom, setReelsFrom] = useState<SlotSymbolName[]>(IDLE_REELS);
+  const [spinId, setSpinId] = useState(0);
+  const [spinning, setSpinning] = useState(false);
+  const [outcome, setOutcome] = useState<SpinResponse | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  // The committed result, held back until the last reel stops (SRS-309.5).
+  const committed = useRef<SpinResponse | null>(null);
 
   // SRS-306.5 / SRS-108.3: only signed-in players can play; guests log in first.
   useEffect(() => {
@@ -31,6 +50,7 @@ export default function SlotsPage() {
       router.replace('/login');
       return;
     }
+    setToken(playerToken);
 
     fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${playerToken}` } })
       .then(async (res) => {
@@ -57,6 +77,52 @@ export default function SlotsPage() {
       })
       .catch(() => setLoadError("Couldn't load the bet amounts. Please refresh the page."));
   }, [router]);
+
+  // SRS-306.3: the selected bet must fit in the balance.
+  const tooLittle = bet !== null && balance !== null && bet > balance;
+
+  async function spin() {
+    if (spinning || bet === null || tooLittle || !token) return; // SRS-307.4
+    setSpinning(true);
+    setMessage(null);
+    setOutcome(null);
+
+    try {
+      // SRS-306.4: the bet sent here is the one this spin is settled with.
+      const res = await fetch('/api/slots/spin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ bet }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        localStorage.removeItem('player_token');
+        router.replace('/login');
+        return;
+      }
+      if (typeof data?.balance === 'number' && !res.ok) setBalance(data.balance);
+      if (!res.ok || !Array.isArray(data?.reels)) throw new Error(data?.error);
+      committed.current = data as SpinResponse;
+      setReelsFrom(reels);
+      setReels(data.reels);
+      setSpinId((id) => id + 1);
+    } catch (err) {
+      // SRS-307.5: nothing was taken, so only the message changes.
+      setMessage(err instanceof Error && err.message ? err.message : 'The spin failed. Please try again.');
+      setSpinning(false);
+    }
+  }
+
+  // SRS-309.5: the balance and the outcome change when the last reel stops.
+  function handleStopped() {
+    const result = committed.current;
+    if (!result) return;
+    committed.current = null;
+    setBalance(result.balance);
+    notifyBalanceChanged();
+    setOutcome(result);
+    setSpinning(false);
+  }
 
   return (
     <main className="min-h-page bg-[radial-gradient(ellipse_at_top,#4c0519_0%,#1c0510_55%,#0a0206_100%)] px-4 py-8 text-white">
@@ -88,16 +154,19 @@ export default function SlotsPage() {
               />
             ))}
           </div>
-          <div className="relative grid grid-cols-3 gap-3 rounded-2xl border-4 border-amber-300 bg-slate-950 p-3">
-            {IDLE_REELS.map((symbol, i) => (
-              <div
-                key={i}
-                className="flex h-32 items-center justify-center rounded-xl bg-gradient-to-b from-slate-300 via-white to-slate-300 shadow-inner sm:h-40"
-              >
-                <SlotSymbol name={symbol} />
-              </div>
-            ))}
-            <div aria-hidden className="pointer-events-none absolute inset-x-1 top-1/2 h-0.5 -translate-y-1/2 bg-red-500/70" />
+          <SlotReels from={reelsFrom} reels={reels} spinId={spinId} onStopped={handleStopped} />
+          <div aria-live="polite" className="mt-4 min-h-[2rem] text-center text-xl font-black">
+            {spinning ? (
+              <span className="text-amber-200">Spinning…</span>
+            ) : outcome ? (
+              outcome.payout > 0 ? (
+                <span className="text-emerald-300">
+                  You won {outcome.payout.toLocaleString()} coins! ({outcome.multiplier}× your bet)
+                </span>
+              ) : (
+                <span className="text-rose-100/80">No win this time.</span>
+              )
+            ) : null}
           </div>
         </section>
 
@@ -121,9 +190,10 @@ export default function SlotsPage() {
                     role="radio"
                     aria-checked={selected}
                     onClick={() => setBet(amount)}
+                    disabled={spinning}
                     className={`flex h-16 w-16 items-center justify-center rounded-full border-4 border-dashed border-white/80 text-lg font-black shadow-lg transition ${
                       CHIP_STYLE[amount] ?? 'bg-slate-600'
-                    } ${selected ? 'scale-110 ring-4 ring-amber-300 ring-offset-2 ring-offset-black' : 'opacity-80 hover:opacity-100'}`}
+                    } ${selected ? 'scale-110 ring-4 ring-amber-300 ring-offset-2 ring-offset-black' : 'opacity-80 hover:opacity-100'} disabled:cursor-not-allowed`}
                   >
                     {amount}
                   </button>
@@ -139,6 +209,26 @@ export default function SlotsPage() {
                 </>
               )}
             </p>
+          )}
+          {!loadError && (
+            <div className="mt-4 flex flex-col items-center gap-2">
+              <button
+                type="button"
+                onClick={spin}
+                disabled={spinning || bet === null || tooLittle}
+                className="w-full max-w-xs rounded-full border-b-4 border-red-900 bg-gradient-to-b from-red-500 to-red-700 px-8 py-3 text-2xl font-black uppercase tracking-widest text-white shadow-lg shadow-red-900/50 transition hover:brightness-110 active:translate-y-0.5 active:border-b-2 disabled:cursor-not-allowed disabled:border-slate-700 disabled:from-slate-500 disabled:to-slate-600 disabled:text-slate-200"
+              >
+                {spinning ? 'Spinning…' : 'Spin'}
+              </button>
+              {tooLittle && !spinning && (
+                <p className="text-sm text-red-300">You need at least {bet} coins to spin this bet. Choose a smaller bet.</p>
+              )}
+              {message && (
+                <p role="alert" className="rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+                  {message}
+                </p>
+              )}
+            </div>
           )}
         </section>
       </div>

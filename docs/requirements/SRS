@@ -1022,6 +1022,10 @@ flowchart LR
 
 *Traces to: UR-108*
 
+**SRS-108.6, JO, Getting up from a game.** When a player returns to the home page from a game they opened by taking a seat on the casino floor, the home page shall show the player's character getting up from that seat, the reverse of sitting down, before the player can walk again.
+
+*Traces to: UR-108*
+
 ### UR-109, JO – View Balance
 
 *User story: As a player, I want to see my current virtual-currency balance, so that I know how much I have available for gameplay, sports betting, and cosmetic purchases.*

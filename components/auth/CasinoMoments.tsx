@@ -611,12 +611,15 @@ function RouletteScene() {
           );
         })}
         <circle cx={cx} cy={cy} r={17} fill={`url(#${id}-gilt)`} stroke="#78350f" />
-      </g>
-      {/* The ball circles the other way, drops and bounces into 17. */}
-      <g className="moment-turn" style={at(0, { '--turns': '1440deg', '--dur': '3.6s' })}>
-        <circle cx={cx} cy={cy} r={142} fill="transparent" />
-        <g className="moment-drop" style={at(2.7, { '--dy': `${RL_BALL.y - (cy - 124)}px` })}>
-          <circle cx={cx} cy={cy - 124} r={6} fill={`url(#${id}-ball)`} />
+        {/* The ball rides on the head: its own spin (against the wheel's) slows
+            to nothing just after it drops into 17, so from then on the wheel
+            carries it, as a real one does, instead of it sliding through the
+            pockets. */}
+        <g className="moment-turn" style={at(0, { '--turns': '2520deg', '--dur': '3s' })}>
+          <circle cx={cx} cy={cy} r={142} fill="transparent" />
+          <g className="moment-drop" style={at(2.3, { '--dy': `${RL_BALL.y - (cy - 124)}px` })}>
+            <circle cx={cx} cy={cy - 124} r={6} fill={`url(#${id}-ball)`} />
+          </g>
         </g>
       </g>
 
@@ -667,7 +670,8 @@ function RouletteScene() {
       </g>
 
       {/* The result. */}
-      <g className="moment-pop" style={at(3.75)}>
+      {/* Faded in where they are (growing them as a group would pull both toward their shared middle). */}
+      <g className="moment-in" style={at(3.75)}>
         <g className="moment-blink" style={at(4.0)}>
           <rect x={cell(17).x} y={cell(17).y} width={38} height={50} fill="none" stroke="#fbbf24" strokeWidth="3" />
           <rect x={538} y={216} width={76} height={34} fill="none" stroke="#fbbf24" strokeWidth="3" />
@@ -984,6 +988,9 @@ function BetSlipScene() {
 // pour into the tray. Neighbouring machines glow either side.
 
 const REEL_STRIP = ['★', '7', 'BAR', 'cherry', 'bell', '♦', '7', '★'];
+// The slot lever's hub, and how far the ball sits above it.
+const LEVER = { x: 598, y: 172 };
+const LEVER_ARM = 104;
 const SYMBOL_H = 46;
 
 function ReelSymbol({ symbol, y }: { symbol: string; y: number }) {
@@ -1050,6 +1057,20 @@ function SlotsScene() {
           <stop offset="0.85" stopColor="#f8fafc" />
           <stop offset="1" stopColor="#cbd5e1" />
         </linearGradient>
+        <linearGradient id={`${id}-chrome`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="#64748b" />
+          <stop offset="0.45" stopColor="#f1f5f9" />
+          <stop offset="1" stopColor="#64748b" />
+        </linearGradient>
+        <radialGradient id={`${id}-hub`} cx="0.35" cy="0.35" r="0.75">
+          <stop offset="0" stopColor="#f8fafc" />
+          <stop offset="1" stopColor="#64748b" />
+        </radialGradient>
+        <radialGradient id={`${id}-knob`} cx="0.35" cy="0.3" r="0.75">
+          <stop offset="0" stopColor="#fca5a5" />
+          <stop offset="0.45" stopColor="#dc2626" />
+          <stop offset="1" stopColor="#7f1d1d" />
+        </radialGradient>
         <pattern id={`${id}-carpet`} width="28" height="14" patternUnits="userSpaceOnUse">
           <path d="M0 7 L7 0 L14 7 L7 14 Z M14 7 L21 0 L28 7 L21 14 Z" fill="#7c2d12" opacity="0.5" />
         </pattern>
@@ -1124,11 +1145,22 @@ function SlotsScene() {
         </g>
       ))}
 
-      {/* The lever, pulled at the start. */}
-      <circle cx={592} cy={172} r={10} fill="#cbd5e1" stroke="#64748b" />
-      <g className="moment-lever" style={{ ...at(0), transformBox: 'view-box', transformOrigin: '592px 172px' } as CSSProperties}>
-        <line x1={592} y1={172} x2={592} y2={74} stroke="#e2e8f0" strokeWidth="6" strokeLinecap="round" />
-        <circle cx={592} cy={66} r={12} fill="#dc2626" stroke="#7f1d1d" strokeWidth="2" />
+      {/* The lever: a chrome bracket bolted to the cabinet's side, a hub the
+          arm turns on, and the arm with its red ball. It's pulled toward you
+          and down: seen from the front, the arm foreshortens and dips just
+          past the hub while the ball (kept on the arm's tip) comes down,
+          biggest as it passes closest to you, then both spring back. */}
+      <rect x={574} y={146} width={32} height={52} rx={9} fill={`url(#${id}-chrome)`} stroke="#475569" strokeWidth="1.5" />
+      <circle cx={580} cy={154} r={2} fill="#475569" />
+      <circle cx={580} cy={190} r={2} fill="#475569" />
+      <circle cx={LEVER.x} cy={LEVER.y} r={13} fill={`url(#${id}-hub)`} stroke="#475569" strokeWidth="1.5" />
+      <g className="moment-lever-rod" style={{ ...at(0), transformBox: 'view-box', transformOrigin: `${LEVER.x}px ${LEVER.y}px` } as CSSProperties}>
+        <line x1={LEVER.x} y1={LEVER.y} x2={LEVER.x} y2={LEVER.y - 96} stroke="#64748b" strokeWidth="9" strokeLinecap="round" />
+        <line x1={LEVER.x - 1} y1={LEVER.y} x2={LEVER.x - 1} y2={LEVER.y - 96} stroke="#f1f5f9" strokeWidth="4" strokeLinecap="round" />
+      </g>
+      <circle cx={LEVER.x} cy={LEVER.y} r={5} fill="#334155" />
+      <g className="moment-lever-ball" style={at(0, { '--drop': `${LEVER_ARM}px` })}>
+        <circle cx={LEVER.x} cy={LEVER.y - LEVER_ARM} r={13} fill={`url(#${id}-knob)`} stroke="#7f1d1d" strokeWidth="2" />
       </g>
       <Headline id={id} x={440} y={64} size={46} t={2.1}>JACKPOT!</Headline>
     </g>
@@ -1257,7 +1289,7 @@ function PokerScene() {
       </Place>
 
       {/* Royal flush: the five cards light up, and the pot comes to you. */}
-      <g className="moment-pop" style={at(2.8)}>
+      <g className="moment-in" style={at(2.8)}>
         {royal.map((c) => (
           <rect key={`${c.x}-${c.y}`} className="moment-blink" style={at(3.1)} x={c.x - 3} y={c.y - 3} width={c.w + 6} height={c.w * 1.4 + 6} rx={6} fill="none" stroke="#fbbf24" strokeWidth="3" />
         ))}

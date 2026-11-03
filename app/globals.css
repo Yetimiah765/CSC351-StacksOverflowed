@@ -218,9 +218,20 @@ body {
   55% { transform: translate(-30px, -46px) rotate(-72deg); }
   100% { transform: translate(-36px, -16px) rotate(-92deg); }
 }
-@keyframes moment-lever {
+/* A slot lever pulled toward the viewer and down: the arm foreshortens and
+   dips just past its hub, and the ball (--drop above the hub) stays on the
+   arm's tip, biggest as it passes closest to the viewer, then both spring
+   back. The ball's moves are the arm's tip: drop x (1 - the arm's scale). */
+@keyframes moment-lever-rod {
   0% { transform: none; }
-  35% { transform: rotate(78deg) scaleY(0.92); }
+  40% { transform: scaleY(0.05); }
+  58% { transform: scaleY(-0.3); }
+  100% { transform: none; }
+}
+@keyframes moment-lever-ball {
+  0% { transform: none; }
+  40% { transform: translateY(calc(var(--drop) * 0.95)) scale(1.3); }
+  58% { transform: translateY(calc(var(--drop) * 1.3)) scale(1.15); }
   100% { transform: none; }
 }
 @keyframes moment-flip-away {
@@ -266,7 +277,8 @@ body {
 .moment-drop { transform: translateY(var(--dy)); animation: moment-drop calc(0.9s * var(--pace, 1)) ease-in calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-kick { animation: moment-kick calc(0.55s * var(--pace, 1)) ease-in-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-dive { transform: translate(-36px, -16px) rotate(-92deg); animation: moment-dive calc(0.7s * var(--pace, 1)) ease-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
-.moment-lever { animation: moment-lever calc(0.9s * var(--pace, 1)) ease-in-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
+.moment-lever-rod { animation: moment-lever-rod calc(1.1s * var(--pace, 1)) ease-in-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
+.moment-lever-ball { animation: moment-lever-ball calc(1.1s * var(--pace, 1)) ease-in-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-flip-away { transform: scaleX(0); animation: moment-flip-away calc(0.18s * var(--pace, 1)) ease-in calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
 .moment-flip-show { animation: moment-flip-show calc(0.18s * var(--pace, 1)) ease-out calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1) + 0.18s * var(--pace, 1)) both; }
 .moment-away { opacity: 0; animation: moment-away calc(0.6s * var(--pace, 1)) ease-in calc(var(--moment-delay, 0s) + var(--at, 0s) * var(--pace, 1)) both; }
@@ -281,14 +293,14 @@ body {
 /* Parts of a scene turn, flip and grow about their own middle unless they
    say otherwise. */
 .moment-scene :is(.moment-in, .moment-pop, .moment-out, .moment-blink, .moment-turn, .moment-bulge, .moment-coin, .moment-away,
-  .moment-flip-away, .moment-flip-show, .moment-sparkle, .moment-dive, .moment-bar, .moment-grow, .moment-spin) {
+  .moment-flip-away, .moment-flip-show, .moment-sparkle, .moment-dive, .moment-bar, .moment-grow, .moment-spin, .moment-lever-ball) {
   transform-box: fill-box;
   transform-origin: center;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .moment-in, .moment-pop, .moment-out, .moment-blink, .moment-reel, .moment-drop,
-  .moment-kick, .moment-dive, .moment-lever, .moment-flip-away, .moment-flip-show, .moment-away, .moment-sparkle,
+  .moment-kick, .moment-dive, .moment-lever-rod, .moment-lever-ball, .moment-flip-away, .moment-flip-show, .moment-away, .moment-sparkle,
   .moment-sparkle-burst, .moment-chase-a, .moment-chase-b, .moment-ticker, .moment-bar, .moment-grow, .moment-spin,
   .moment-turn, .moment-fly-x, .moment-fly-y, .moment-bulge, .moment-coin { animation: none !important; }
 }

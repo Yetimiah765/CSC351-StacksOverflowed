@@ -1050,11 +1050,15 @@ flowchart LR
 
 *Traces to: UR-108*
 
-**SRS-108.5, JO, Return to the home page.** The main page of each game, and the Cosmetic Shop, shall provide a back button that returns the player to the home page.
+**SRS-108.5, JO, Return to the home page.** The main page of each game, and the Cosmetic Shop, shall provide a back button that works as SRS-108.7 describes.
 
 *Traces to: UR-108*
 
 **SRS-108.6, JO, Getting up from a game.** When a player returns to the home page from a game they opened by taking a seat on the casino floor, the home page shall show the player's character getting up from that seat, the reverse of sitting down, before the player can walk again.
+
+*Traces to: UR-108*
+
+**SRS-108.7, JO, Back to the previous page.** The back button on each game's main page, the Cosmetic Shop and the player's profile page shall return the player to the page of the website they were on before it, or to the home page when there is no such page.
 
 *Traces to: UR-108*
 
@@ -1120,7 +1124,7 @@ flowchart LR
 
 *Traces to: UR-111*
 
-**SRS-111.4, JO, Return to the home page.** The player's profile page shall provide a back button that returns the player to the home page, the same as each game's main page and the Cosmetic Shop (SRS-108.5).
+**SRS-111.4, JO, Return to the home page.** The player's profile page shall provide a back button, the same as each game's main page and the Cosmetic Shop (SRS-108.5), that works as SRS-108.7 describes.
 
 *Traces to: UR-111*
 

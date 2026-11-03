@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import CardsAndChipsBackground from '../../components/auth/CardsAndChipsBackground';
 
 export default function RegisterPage() {
   const [firstName, setFirstName] = useState('');
@@ -38,10 +39,12 @@ export default function RegisterPage() {
 
   // SRS-101.12: a wide form with the fields side by side (names and birthday,
   // then username and password); they stack on a phone. The website's name is
-  // in the nav bar (SRS-107.5), so the page doesn't repeat it.
+  // in the nav bar (SRS-107.5), so the page doesn't repeat it. SRS-101.13:
+  // cards and chips fall behind it, showing faintly through the frosted form.
   return (
-    <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
-      <section className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/30 sm:p-10">
+    <main className="relative min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
+      <CardsAndChipsBackground />
+      <section className="relative w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/80 p-8 shadow-2xl shadow-black/40 backdrop-blur-md sm:p-10">
         <h1 className="text-4xl font-semibold">Create your account</h1>
 
         <form onSubmit={handleSubmit} className="mt-8 grid items-start gap-5 sm:grid-cols-6">

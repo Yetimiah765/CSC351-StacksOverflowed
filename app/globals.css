@@ -97,6 +97,46 @@ body {
   }
 }
 
+/* Cards and chips falling behind the sign-up form
+   (components/auth/CardsAndChipsBackground.tsx). Each piece nests three
+   moves so their timings don't mix: the fall (straight down at a steady
+   speed, turning as it goes), a side-to-side sway, and a tilt or, for some
+   cards, turning over. Every piece sets its own times in CSS variables. */
+@keyframes drift-fall {
+  from { transform: translate3d(0, -30vh, 0) rotate(0deg); }
+  to { transform: translate3d(0, 115vh, 0) rotate(var(--turn)); }
+}
+@keyframes drift-sway {
+  from { transform: translateX(calc(var(--sway) * -1)); }
+  to { transform: translateX(var(--sway)); }
+}
+@keyframes drift-tilt {
+  from { transform: rotateX(16deg) rotateY(-30deg); }
+  to { transform: rotateX(-12deg) rotateY(30deg); }
+}
+/* Rests face up, turns over, rests face down, turns back. */
+@keyframes drift-flip {
+  0%, 35% { transform: rotateY(0deg); }
+  50%, 85% { transform: rotateY(180deg); }
+  100% { transform: rotateY(360deg); }
+}
+@keyframes drift-glow {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(6vw, -5vh, 0) scale(1.15); }
+}
+.drift-fall { animation: drift-fall var(--fall) linear var(--delay) infinite; will-change: transform; }
+.drift-sway { animation: drift-sway var(--sway-time) ease-in-out var(--delay) infinite alternate; perspective: 600px; }
+.drift-tilt { animation: drift-tilt var(--tilt-time) ease-in-out var(--delay) infinite alternate; }
+.drift-flip { animation: drift-flip var(--flip-time) ease-in-out var(--delay) infinite; transform-style: preserve-3d; }
+.drift-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.drift-face-back { transform: rotateY(180deg); }
+.drift-glow { animation: drift-glow 26s ease-in-out infinite alternate; }
+
+/* With reduced motion every piece holds still where it is. */
+@media (prefers-reduced-motion: reduce) {
+  .drift-fall, .drift-sway, .drift-tilt, .drift-flip, .drift-glow { animation-play-state: paused !important; }
+}
+
 /* Poker table (app/poker/[tableId]/page.tsx). Each animated element is
    re-keyed when the thing it shows changes, so the animation plays again.
    Directions come from CSS variables the page sets per seat, in pixels

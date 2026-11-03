@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
+import CardsAndChipsBackground from '../../components/auth/CardsAndChipsBackground';
+import CasinoMoments from '../../components/auth/CasinoMoments';
 
 export default function RegisterPage() {
   const [firstName, setFirstName] = useState('');
@@ -38,13 +40,20 @@ export default function RegisterPage() {
 
   // SRS-101.12: a wide form with the fields side by side (names and birthday,
   // then username and password); they stack on a phone. The website's name is
-  // in the nav bar (SRS-107.5), so the page doesn't repeat it.
+  // in the nav bar (SRS-107.5), so the page doesn't repeat it. SRS-101.13:
+  // cards and chips fall behind it, showing faintly through the form (no
+  // backdrop blur: re-blurring moving pieces every frame halved the frame
+  // rate), and game moments zoom into each other in a header across its top.
   return (
-    <main className="min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-12">
-      <section className="w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/30 sm:p-10">
-        <h1 className="text-4xl font-semibold">Create your account</h1>
+    <main className="relative min-h-page bg-slate-950 text-slate-100 flex items-center justify-center px-6 py-10">
+      <CardsAndChipsBackground />
+      <section className="relative w-full max-w-4xl rounded-3xl border border-slate-800 bg-slate-900/90 p-8 shadow-2xl shadow-black/40 sm:p-12 sm:pb-16">
+        <div className="-mx-8 -mt-8 mb-10 overflow-hidden rounded-t-[23px] border-b border-white/10 sm:-mx-12 sm:-mt-12">
+          <CasinoMoments />
+        </div>
+        <h1 className="text-4xl font-semibold sm:text-5xl">Create your account</h1>
 
-        <form onSubmit={handleSubmit} className="mt-8 grid items-start gap-5 sm:grid-cols-6">
+        <form onSubmit={handleSubmit} className="mt-12 grid items-start gap-x-6 gap-y-10 sm:grid-cols-6">
           <label className="block text-base text-slate-200 sm:col-span-3 lg:col-span-2">
             First name
             <input
@@ -52,7 +61,7 @@ export default function RegisterPage() {
               value={firstName}
               onChange={(event) => setFirstName(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
               placeholder="Jamie"
             />
           </label>
@@ -63,7 +72,7 @@ export default function RegisterPage() {
               value={lastName}
               onChange={(event) => setLastName(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
               placeholder="Rivera"
             />
           </label>
@@ -75,9 +84,9 @@ export default function RegisterPage() {
               value={birthday}
               onChange={(event) => setBirthday(event.target.value)}
               required
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
             />
-            <span className="mt-1 block text-sm text-slate-500">You must be at least 21 years old.</span>
+            <span className="mt-2 block text-sm text-slate-500">You must be at least 21 years old.</span>
           </label>
 
           <label className="block text-base text-slate-200 sm:col-span-3">
@@ -89,7 +98,7 @@ export default function RegisterPage() {
               required
               minLength={6}
               maxLength={10}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
               placeholder="6-10 letters/numbers"
             />
           </label>
@@ -102,7 +111,7 @@ export default function RegisterPage() {
               onChange={(event) => setPassword(event.target.value)}
               required
               minLength={8}
-              className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-5 text-lg text-slate-100 outline-none transition focus:border-emerald-400"
               placeholder="8+ letters and numbers"
             />
           </label>
@@ -110,7 +119,7 @@ export default function RegisterPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-xl bg-emerald-400 px-4 py-3 text-lg font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70 sm:col-span-6"
+            className="mt-4 w-full rounded-xl bg-emerald-400 px-4 py-5 text-lg font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70 sm:col-span-6"
           >
             {loading ? 'Creating account…' : 'Register'}
           </button>
@@ -118,7 +127,7 @@ export default function RegisterPage() {
 
         {message ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">{message}</p> : null}
 
-        <div className="mt-6 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
+        <div className="mt-12 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
           <p>
             Already have an account? <Link href="/login" className="text-emerald-300 hover:underline">Sign in</Link>
           </p>

@@ -834,6 +834,10 @@ flowchart LR
 
 *Traces to: UR-101*
 
+**SRS-101.13, JO, Sign-up page animation.** The sign-up page shall show playing cards and poker chips moving slowly behind the sign-up form, and a header across the top of the form that plays short animated scenes from the site's games (blackjack, poker, roulette, slots and sports betting) one after another, each zooming into the next. No card or chip shall appear on the screen more than once at the same time, apart from a scene's own stacks of chips or piles of coins, and all of it shall hold still when the player's device is set to reduce motion.
+
+*Traces to: UR-101*
+
 ### UR-102, JO – Age Requirement
 
 *User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*

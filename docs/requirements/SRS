@@ -986,6 +986,12 @@ flowchart LR
 
 *Traces to: UR-105*
 
+**SRS-105.6, JO, Walking out after logging out on the profile.** After a player logs out with the profile page's Log out button (SRS-105.1), the home page shall show their character leaving from where they last were (getting up from the seat they took to open a game, stepping back from a screen, or from where they last stood on the casino floor) and walking out through the casino's doors into the lobby, the doors shutting behind them, where they continue as a guest. Getting up shall play as SRS-108.6 describes; the player shall be able to skip the walk after it with any key or a click, and the walk shall not play when the player's device is set to reduce motion.
+
+*Note: when account deletion (UR-106) is built, deleting an account shall end the same way.*
+
+*Traces to: UR-105*
+
 ### UR-106, JO – Delete Account
 
 *User story: As a player, I want to permanently delete my account after confirming my decision and entering my current password, so that I can permanently remove my information from the platform.*

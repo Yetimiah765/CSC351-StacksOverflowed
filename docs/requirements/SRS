@@ -930,6 +930,10 @@ flowchart LR
 
 *Traces to: UR-101, UR-103*
 
+**SRS-103.17, JO, Casino doors for logged-in players.** When a logged-in player walks up to the casino's doors from the lobby, the doors shall swing open so they can walk through onto the casino floor, and shall shut behind them once they are through, or once they walk away. From the casino floor, the doors shall open only to let a player out as SRS-105.5 describes.
+
+*Traces to: UR-103, UR-107*
+
 ### UR-104, JO – Account Validation
 
 *User story: As a player, I want the website to validate my registration and login information, so that invalid information is rejected and my account can be securely accessed.*

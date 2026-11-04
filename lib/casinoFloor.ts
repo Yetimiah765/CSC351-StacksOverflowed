@@ -803,3 +803,12 @@ export function kioskStandingSpots(kiosk: number): Point[] {
   return spots;
 }
 
+
+// ---------- into the casino after checking in (SRS-103.14) ----------
+
+/** The walk from the front desk onto the casino floor once a guest has logged in at a check-in tablet, from where they stand: a step back from the desk to in front of its middle (clear of the roped aisle's end), across to the middle of the lobby, then on the way the walk in goes, through the casino's doors and the gate. */
+export function checkInWalk(from: Point): Point[] {
+  const offDesk = { x: doorMiddle + (FRONT_DESK.x + FRONT_DESK.radius + 1) / TILE_METRES, y: FRONT_WALL_Y + FRONT_DESK.z / TILE_METRES };
+  const points = [from, offDesk, LOBBY_MIDDLE, ...entranceWalk().slice(2)];
+  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}

@@ -238,14 +238,16 @@ export default function CasinoFloor() {
     if (!object.interactive?.href || playing) return;
     setPlaying(object);
   };
+  // Logging out at the casino's doors, or in at a check-in tablet, changes
+  // who they are without changing page: null until then, as the session
+  // check found.
+  const [signedInHere, setSignedInHere] = useState<boolean | null>(null);
+  const member = signedInHere ?? sessionOk === true;
+  const guest = signedInHere === null ? sessionOk === false : !signedInHere;
   // Leaving through the casino's doors (SRS-105.5): the session ends at once
   // (and the nav bar shows a guest once it has), while the scene walks the
   // player out into the lobby ('walk'), or puts them straight there when the
-  // device asks for reduced motion ('now'). From then on, without changing
-  // page, they're a guest.
-  const [loggedOutHere, setLoggedOutHere] = useState(false);
-  const member = sessionOk === true && !loggedOutHere;
-  const guest = sessionOk === false || loggedOutHere;
+  // device asks for reduced motion ('now'). From then on they're a guest.
   const canLeave = member;
   const [nearDoors, setNearDoors] = useState(false);
   const nearDoorsRef = useRef(false);
@@ -259,13 +261,15 @@ export default function CasinoFloor() {
   const left = useRef<() => void>(() => {});
   left.current = () => {
     setLeaving(null);
-    setLoggedOutHere(true);
+    setSignedInHere(false);
   };
 
   // Checking in at a front-desk tablet (SRS-103.13): the camera flies in
   // (straight there with reduced motion), then the tablet's up close, with
   // the scene paused behind it; stepping away flies back out. Once they've
-  // logged in, the page opens again with the walk in onto the casino floor.
+  // logged in there, the tablet closes the same way and the scene walks them
+  // from the desk onto the casino floor (SRS-103.14), or puts them straight
+  // there with reduced motion; the nav bar shows their balance.
   const [nearKiosk, setNearKiosk] = useState<number | null>(null);
   const nearKioskRef = useRef<number | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
@@ -276,12 +280,10 @@ export default function CasinoFloor() {
     setCheckingIn(true);
   };
   function checkedIn() {
-    try {
-      sessionStorage.setItem(ENTRANCE_KEY, '1');
-    } catch {
-      // Storage blocked: the floor just opens with the player inside.
-    }
-    window.location.assign('/');
+    setSignedInHere(true);
+    setTabletOpen(false);
+    setCheckingIn(false);
+    notifyBalanceChanged();
   }
 
   // Seated, the camera over the table: open the game — guests go to log in

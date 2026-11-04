@@ -6,6 +6,7 @@ import {
   FOYER_PLANTS,
   KIOSKS,
   atKiosk,
+  checkInWalk,
   kioskStandingSpots,
   parseSpot,
   serializeSpot,
@@ -498,3 +499,43 @@ describe('the check-in kiosk (SRS-103.13)', () => {
   });
 });
 
+describe('into the casino after checking in (SRS-103.14)', () => {
+  const middle = DOOR.x + DOOR.w / 2;
+  // Walking a straight line in small steps, the way the player's moved: nothing in the way stops them.
+  const unblocked = (from: Point, to: Point) => {
+    const steps = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 0.05);
+    const step = { x: (to.x - from.x) / steps, y: (to.y - from.y) / steps };
+    let at = from;
+    for (let i = 0; i < steps; i++) {
+      const next = moveWithCollisions(at, step);
+      if (Math.hypot(next.x - at.x - step.x, next.y - at.y - step.y) > 1e-9) return false;
+      at = next;
+    }
+    return true;
+  };
+
+  // Where a guest can stand at each tablet, and get to from the middle of the lobby.
+  const lobbyMiddle = { x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) };
+  const atTablets = KIOSKS.flatMap((_, kiosk) => kioskStandingSpots(kiosk).filter((spot) => findPath(lobbyMiddle, [spot]) !== null));
+
+  it('steps back from wherever the guest stood at a tablet and crosses to the middle of the lobby, clear of everything', () => {
+    expect(atTablets.length).toBeGreaterThan(1);
+    for (const spot of atTablets) {
+      const from = { x: spot.x + 0.5, y: spot.y + 0.5 };
+      const walk = checkInWalk(from);
+      expect(walk[0]).toEqual(from);
+      expect(walk[2]).toEqual(LOBBY_MIDDLE);
+      expect(atKiosk(walk[1]!)).toBeNull();
+      expect(unblocked(from, walk[1]!) && unblocked(walk[1]!, LOBBY_MIDDLE), JSON.stringify(from)).toBe(true);
+    }
+  });
+
+  it("then goes on as the walk in does, straight up the middle through the casino's doors and the gate onto the floor", () => {
+    const walk = checkInWalk({ x: atTablets[0]!.x + 0.5, y: atTablets[0]!.y + 0.5 });
+    expect(walk.slice(3)).toEqual(entranceWalk().slice(2));
+    for (const point of walk.slice(2)) expect(point.x).toBe(middle);
+    for (let i = 3; i < walk.length; i++) expect(walk[i]!.y).toBeLessThan(walk[i - 1]!.y);
+    // Up the roped aisle to just short of the doors, nothing's in the way.
+    expect(unblocked(LOBBY_MIDDLE, { x: middle, y: FRONT_WALL_Y + 1 })).toBe(true);
+  });
+});

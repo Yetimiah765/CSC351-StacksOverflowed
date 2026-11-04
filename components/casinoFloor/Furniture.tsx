@@ -1,17 +1,21 @@
 'use client';
 
 import { useFrame } from '@react-three/fiber';
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { SLOT_STOOL_OUT, type PieceLayout } from '../../lib/casinoFloor';
+import { kickoffLabel, showdownForTv, showdownTvGames, type TvGame } from '../../lib/barTvs';
+import { BAR, BAR_ALCOVE, BAR_STOOLS, SLOT_STOOL_OUT, TILE_METRES, barLength, type PieceLayout } from '../../lib/casinoFloor';
+import type { Showdown } from '../../lib/sports/showdown';
 import Highlight from './Highlight';
 import Person from './Person';
 import {
+  barTvScreen,
   blackjackFeltTexture,
   cardTexture,
   feltBumpTexture,
   neonTexture,
   pokerFeltTexture,
+  paintBarTv,
   paintSportsScreen,
   rouletteLayoutTexture,
   rouletteWheelTexture,
@@ -127,7 +131,7 @@ function Dealer({ layout, offset = 0 }: { layout: PieceLayout; offset?: number }
   const spot = layout.dealer;
   if (!spot) return null;
   return (
-    <group position={[spot.x, 0, spot.z]}>
+    <group position={[spot.x, 0, spot.z]} rotation={[0, spot.facing ?? 0, 0]}>
       <Person who="staff" idleOffset={offset} pose="dealer" hands={{ y: spot.handsY, z: spot.handsZ }} />
     </group>
   );
@@ -572,6 +576,394 @@ export function ShopCounter({ width, depth, layout }: PieceProps) {
         <planeGeometry args={[1.6, 0.5]} />
         <meshStandardMaterial map={sign} emissiveMap={sign} emissive="#ffffff" emissiveIntensity={2.2} transparent toneMapped={false} />
       </mesh>
+    </group>
+  );
+}
+
+// ---------- The bar ----------
+// Set into the left wall: the alcove's back wall is at -width / 2 (local -x),
+// the room's wall line BAR_ALCOVE.w tiles in front of it, and the bar runs
+// along z. The alcove itself (its walls, ceiling and the header over its
+// mouth) is part of the room, in Scene.tsx. Measurements are BAR's in
+// lib/casinoFloor.ts, so the stools and counter are where the player bumps
+// into them.
+
+const BAR_TV_COUNT = 3;
+/** How often the TVs are repainted: often enough to look live, without uploading three textures every frame. */
+const BAR_TV_FPS = 20;
+
+/**
+ * The Showdowns for the TVs — every one the Showdown page lists, in its
+ * order — refreshed every 30 seconds so the pools and scores keep up; empty
+ * until (or unless) they load.
+ */
+function useShowdownGames() {
+  const games = useRef<{ game: TvGame; kickoff: string }[]>([]);
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      fetch('/api/sports/showdown', { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { showdowns?: Showdown[] } | null) => {
+          if (!live || !data?.showdowns) return;
+          games.current = showdownTvGames(data.showdowns).map((game) => ({ game, kickoff: kickoffLabel(game.startTime) }));
+        })
+        .catch(() => {});
+    load();
+    const timer = setInterval(load, 30_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+  return games;
+}
+
+/** A wall-mounted TV facing the room (+x), showing one of the Showdowns (paging through them when there are more than TVs). */
+function BarTv({ z, y, index, games }: { z: number; y: number; index: number; games: ReturnType<typeof useShowdownGames> }) {
+  const screen = useMemo(() => barTvScreen(), []);
+  const painted = useRef(-Infinity);
+  useFrame((state) => {
+    const now = state.clock.elapsedTime;
+    if (now - painted.current < 1 / BAR_TV_FPS) return;
+    painted.current = now;
+    const shown = showdownForTv(games.current, index, BAR_TV_COUNT, Date.now());
+    paintBarTv(screen.ctx, now * 1000, index, shown?.game ?? null, shown?.kickoff ?? '');
+    screen.texture.needsUpdate = true;
+  });
+  return (
+    <group position={[0, y, z]} rotation={[0, Math.PI / 2, 0]}>
+      <mesh castShadow>
+        <boxGeometry args={[1.46, 0.86, 0.06]} />
+        <meshStandardMaterial color="#05070d" roughness={0.3} metalness={0.5} />
+      </mesh>
+      <mesh position={[0, 0, 0.031]}>
+        <planeGeometry args={[1.38, 0.78]} />
+        <meshStandardMaterial map={screen.texture} emissiveMap={screen.texture} emissive="#ffffff" emissiveIntensity={0.85} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
+const BOTTLE_COLORS = ['#b45309', '#92400e', '#166534', '#e2e8f0', '#3f1d0b', '#1e3a8a', '#7f1d1d', '#d97706', '#0f766e'];
+
+interface BottleSpot {
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  h: number;
+  neck: number;
+  color: THREE.Color;
+  label: THREE.Color;
+}
+
+/**
+ * The bottles on the back bar's shelves, drawn as a few instanced meshes
+ * (glass body, shoulder, neck, cap, label band), so a hundred-odd bottles
+ * cost five draw calls.
+ */
+function Bottles({ x, shelves, length }: { x: number; shelves: number[]; length: number }) {
+  const bottles = useMemo(() => {
+    // A fixed pseudo-random sequence, so the shelves look the same every visit.
+    let seed = 7;
+    const random = () => {
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
+    };
+    const list: BottleSpot[] = [];
+    for (const shelf of shelves) {
+      for (let z = -length / 2 + 0.12; z < length / 2 - 0.1; z += 0.115 + random() * 0.05) {
+        list.push({
+          x: x + (random() - 0.5) * 0.06,
+          y: shelf,
+          z,
+          r: 0.03 + random() * 0.014,
+          h: 0.15 + random() * 0.1,
+          neck: 0.06 + random() * 0.05,
+          color: new THREE.Color(BOTTLE_COLORS[Math.floor(random() * BOTTLE_COLORS.length)]!),
+          label: new THREE.Color(random() > 0.5 ? '#f5ecd7' : '#111111'),
+        });
+      }
+    }
+    return list;
+  }, [x, shelves, length]);
+
+  const body = useRef<THREE.InstancedMesh>(null);
+  const shoulder = useRef<THREE.InstancedMesh>(null);
+  const neck = useRef<THREE.InstancedMesh>(null);
+  const cap = useRef<THREE.InstancedMesh>(null);
+  const label = useRef<THREE.InstancedMesh>(null);
+  useEffect(() => {
+    const matrix = new THREE.Matrix4();
+    const place = (mesh: THREE.InstancedMesh | null, i: number, at: [number, number, number], sx: number, sy: number, color?: THREE.Color) => {
+      if (!mesh) return;
+      mesh.setMatrixAt(i, matrix.makeScale(sx, sy, sx).setPosition(...at));
+      if (color) mesh.setColorAt(i, color);
+    };
+    bottles.forEach((bottle, i) => {
+      const { x: bx, y, z, r, h, neck: n } = bottle;
+      place(body.current, i, [bx, y + h / 2, z], r, h, bottle.color);
+      place(shoulder.current, i, [bx, y + h + 0.02, z], r, 0.04, bottle.color);
+      place(neck.current, i, [bx, y + h + 0.04 + n / 2, z], r * 0.32, n, bottle.color);
+      place(cap.current, i, [bx, y + h + 0.05 + n, z], r * 0.36, 0.02);
+      place(label.current, i, [bx, y + h * 0.45, z], r * 1.04, h * 0.34, bottle.label);
+    });
+    for (const mesh of [body.current, shoulder.current, neck.current, cap.current, label.current]) {
+      if (!mesh) continue;
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      mesh.computeBoundingSphere();
+    }
+  }, [bottles]);
+
+  const count = bottles.length;
+  const glass = <meshPhysicalMaterial roughness={0.08} clearcoat={1} transparent opacity={0.86} emissive="#2a1606" />;
+  return (
+    <group>
+      <instancedMesh ref={body} args={[undefined, undefined, count]} castShadow>
+        <cylinderGeometry args={[1, 1, 1, 14]} />
+        {glass}
+      </instancedMesh>
+      <instancedMesh ref={shoulder} args={[undefined, undefined, count]}>
+        <cylinderGeometry args={[0.34, 1, 1, 14]} />
+        {glass}
+      </instancedMesh>
+      <instancedMesh ref={neck} args={[undefined, undefined, count]}>
+        <cylinderGeometry args={[1, 1, 1, 10]} />
+        {glass}
+      </instancedMesh>
+      <instancedMesh ref={cap} args={[undefined, undefined, count]}>
+        <cylinderGeometry args={[1, 1, 1, 10]} />
+        <Gold />
+      </instancedMesh>
+      <instancedMesh ref={label} args={[undefined, undefined, count]}>
+        <cylinderGeometry args={[1, 1, 1, 14, 1, true]} />
+        <meshStandardMaterial roughness={0.6} />
+      </instancedMesh>
+    </group>
+  );
+}
+
+/** Black marble, for the counter top and the back bar's top. */
+function Marble() {
+  return <meshPhysicalMaterial color="#0b0f19" roughness={0.22} clearcoat={1} clearcoatRoughness={0.08} />;
+}
+
+/** Oxblood leather, for the stools. */
+function Oxblood() {
+  return <meshPhysicalMaterial color="#3b0a14" roughness={0.45} clearcoat={0.5} clearcoatRoughness={0.4} />;
+}
+
+/** A bar stool facing -x (the counter): gold pedestal and footrest, a padded leather seat with a low back. */
+function BarStool({ x, z, highlighted }: { x: number; z: number; highlighted: boolean }) {
+  const top = BAR.stoolTop;
+  return (
+    <Highlight enabled={highlighted}>
+      <group position={[x, 0, z]}>
+        <mesh position={[0, 0.015, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.22, 0.24, 0.03, 24]} />
+          <Gold />
+        </mesh>
+        <mesh position={[0, top / 2, 0]} castShadow>
+          <cylinderGeometry args={[0.03, 0.04, top - 0.08, 12]} />
+          <Gold />
+        </mesh>
+        <mesh position={[0, 0.3, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.17, 0.012, 8, 28]} />
+          <Gold />
+        </mesh>
+        <mesh position={[0, top - 0.05, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.21, 0.2, 0.1, 24]} />
+          <Oxblood />
+        </mesh>
+        <mesh position={[0, top, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.205, 0.01, 6, 28]} />
+          <Gold />
+        </mesh>
+        {/* The low back, on the room side */}
+        <mesh position={[0.19, top + 0.13, 0]} rotation={[0, 0, -0.12]} castShadow>
+          <boxGeometry args={[0.05, 0.22, 0.34]} />
+          <Oxblood />
+        </mesh>
+      </group>
+    </Highlight>
+  );
+}
+
+/** A short glass with a drink in it, left on the counter. */
+function Drink({ position, color }: { position: [number, number, number]; color: string }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.035, 0]}>
+        <cylinderGeometry args={[0.032, 0.03, 0.07, 16]} />
+        <meshStandardMaterial color={color} roughness={0.15} emissive={color} emissiveIntensity={0.15} />
+      </mesh>
+      <mesh position={[0, 0.045, 0]}>
+        <cylinderGeometry args={[0.038, 0.034, 0.09, 16, 1, true]} />
+        <meshPhysicalMaterial color="#e2e8f0" roughness={0.05} transparent opacity={0.3} depthWrite={false} side={THREE.DoubleSide} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * The bar set into the left wall: the back bar with its shelves of bottles,
+ * the sportsbook's games on the TVs above, the bartender, the counter across
+ * the alcove's mouth, the sign on the header above it, and the stools
+ * (`highlight` outlines one, in pieceLayout()'s order).
+ */
+export function Bar({ width, depth, layout, highlight = null }: PieceProps) {
+  const wall = -width / 2;
+  const wallLine = wall + BAR_ALCOVE.w * TILE_METRES;
+  const length = barLength(depth);
+  const games = useShowdownGames();
+  const sign = useMemo(() => neonTexture('BAR', '#fbbf24', 512, 160), []);
+  const shelves = useMemo(() => [1.3, 1.6, 1.9], []);
+  const backX = wall + BAR.backDepth / 2;
+  const counterFront = BAR.counterX + BAR.counterDepth / 2;
+  const topLeft = BAR.counterX - BAR.counterDepth / 2 - 0.04;
+  const topRight = counterFront + BAR.topOverhang;
+  const bodyHeight = BAR.counterTop - 0.06;
+  const stools = BAR_STOOLS(length);
+  return (
+    <group>
+      <Dealer layout={layout} offset={2} />
+
+      {/* The back bar: a cabinet, a backlit panel, glass shelves lit from below, and the bottles */}
+      <mesh position={[backX, 0.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[BAR.backDepth, 1.0, length]} />
+        <Wood />
+      </mesh>
+      <mesh position={[backX + 0.02, 1.02, 0]} receiveShadow>
+        <boxGeometry args={[BAR.backDepth + 0.04, 0.04, length]} />
+        <Marble />
+      </mesh>
+      <mesh position={[wall + 0.012, 1.62, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[length - 0.1, 1.16]} />
+        <meshStandardMaterial color="#1a1206" emissive="#b7791f" emissiveIntensity={0.55} roughness={0.4} />
+      </mesh>
+      {shelves.map((y) => (
+        <group key={y}>
+          <mesh position={[wall + 0.15, y - 0.012, 0]}>
+            <boxGeometry args={[0.28, 0.02, length - 0.2]} />
+            <meshPhysicalMaterial color="#cbd5e1" roughness={0.05} transparent opacity={0.35} depthWrite={false} />
+          </mesh>
+          <mesh position={[wall + 0.28, y - 0.03, 0]}>
+            <boxGeometry args={[0.015, 0.012, length - 0.2]} />
+            <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={2.4} toneMapped={false} />
+          </mesh>
+        </group>
+      ))}
+      <Bottles x={wall + 0.15} shelves={shelves} length={length - 0.3} />
+      {/* A gold frame round the shelves */}
+      {[-1, 1].map((end) => (
+        <mesh key={end} position={[wall + 0.15, 1.65, end * (length / 2 - 0.07)]}>
+          <boxGeometry args={[0.3, 1.3, 0.05]} />
+          <Gold />
+        </mesh>
+      ))}
+      <mesh position={[wall + 0.15, 2.3, 0]}>
+        <boxGeometry args={[0.3, 0.05, length - 0.1]} />
+        <Gold />
+      </mesh>
+
+      {/* The TVs on the alcove's back wall, under its ceiling: the first on the
+          left as you face the bar (+z), so they read in the Showdown page's order */}
+      <group position={[wall + 0.05, 0, 0]}>
+        {Array.from({ length: BAR_TV_COUNT }, (_, i) => (
+          <BarTv key={i} index={i} y={2.84} z={((BAR_TV_COUNT - 1) / 2 - i) * (length / BAR_TV_COUNT)} games={games} />
+        ))}
+      </group>
+      {/* Downlights in the alcove's ceiling, over the bartender */}
+      {[-2, -1, 0, 1, 2].map((k) => (
+        <mesh key={k} position={[BAR.bartenderX, BAR.ceiling - 0.004, (k * length) / 5]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[0.06, 20]} />
+          <meshStandardMaterial color="#fff3d6" emissive="#ffd9a0" emissiveIntensity={2.2} toneMapped={false} />
+        </mesh>
+      ))}
+      {/* The sign, on the header over the alcove's mouth */}
+      <mesh position={[wallLine + 0.02, BAR.ceiling + 0.55, 0]} rotation={[0, Math.PI / 2, 0]}>
+        <planeGeometry args={[1.6, 0.5]} />
+        <meshStandardMaterial map={sign} emissiveMap={sign} emissive="#ffffff" emissiveIntensity={2.2} transparent toneMapped={false} />
+      </mesh>
+
+      {/* The counter: a wood body, a padded leather front with gold trim, a black marble top that overhangs the knees, and a foot rail */}
+      <mesh position={[BAR.counterX, bodyHeight / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[BAR.counterDepth, bodyHeight, length]} />
+        <Wood />
+      </mesh>
+      <mesh position={[counterFront + 0.025, 0.56, 0]} castShadow>
+        <boxGeometry args={[0.05, 0.78, length - 0.04]} />
+        <Leather />
+      </mesh>
+      {[0.16, 0.96].map((y) => (
+        <mesh key={y} position={[counterFront + 0.055, y, 0]}>
+          <boxGeometry args={[0.012, 0.025, length - 0.04]} />
+          <Gold />
+        </mesh>
+      ))}
+      <mesh position={[(topLeft + topRight) / 2, BAR.counterTop - 0.03, 0]} castShadow receiveShadow>
+        <boxGeometry args={[topRight - topLeft, 0.06, length + 0.06]} />
+        <Marble />
+      </mesh>
+      <mesh position={[topRight, BAR.counterTop - 0.03, 0]}>
+        <boxGeometry args={[0.02, 0.065, length + 0.07]} />
+        <Gold />
+      </mesh>
+      <mesh position={[counterFront + 0.16, 0.22, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.022, 0.022, length - 0.1, 12]} />
+        <Gold />
+      </mesh>
+      {[-0.4, 0, 0.4].map((k) => (
+        <mesh key={k} position={[counterFront + 0.1, 0.22, k * length]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.012, 0.012, 0.12, 8]} />
+          <Gold />
+        </mesh>
+      ))}
+
+      {/* On the counter: a beer tower and a few drinks */}
+      <group position={[BAR.counterX - 0.05, BAR.counterTop, -0.9]}>
+        <mesh position={[0, 0.2, 0]} castShadow>
+          <cylinderGeometry args={[0.04, 0.05, 0.4, 16]} />
+          <Gold />
+        </mesh>
+        <mesh position={[0, 0.34, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.02, 0.02, 0.24, 10]} />
+          <Gold />
+        </mesh>
+        {[-0.09, 0, 0.09].map((tz) => (
+          <mesh key={tz} position={[0.06, 0.34, tz]} castShadow>
+            <boxGeometry args={[0.05, 0.11, 0.025]} />
+            <meshStandardMaterial color={tz ? '#111827' : '#7f1d1d'} roughness={0.4} />
+          </mesh>
+        ))}
+      </group>
+      <Drink position={[counterFront + 0.08, BAR.counterTop, stools[1] ?? 0]} color="#b45309" />
+      <Drink position={[counterFront + 0.06, BAR.counterTop, (stools[3] ?? 0) + 0.08]} color="#be123c" />
+      <Drink position={[BAR.counterX - 0.1, BAR.counterTop, 1.6]} color="#f59e0b" />
+
+      {/* Pendant lamps over the counter, hung from the alcove's ceiling */}
+      {[-1, 0, 1].map((k) => (
+        <group key={k} position={[BAR.counterX + 0.05, 0, k * (length / 3)]}>
+          <mesh position={[0, (BAR.ceiling + 2.53) / 2, 0]}>
+            <cylinderGeometry args={[0.005, 0.005, BAR.ceiling - 2.53, 6]} />
+            <meshStandardMaterial color="#111827" />
+          </mesh>
+          <mesh position={[0, 2.45, 0]}>
+            <cylinderGeometry args={[0.06, 0.13, 0.16, 20, 1, true]} />
+            <meshStandardMaterial color={GOLD} metalness={0.9} roughness={0.3} side={THREE.DoubleSide} />
+          </mesh>
+          <mesh position={[0, 2.39, 0]}>
+            <sphereGeometry args={[0.05, 16, 12]} />
+            <meshStandardMaterial color="#fff3d6" emissive="#ffcf7a" emissiveIntensity={3} toneMapped={false} />
+          </mesh>
+        </group>
+      ))}
+
+      {stools.map((z, i) => (
+        <BarStool key={i} x={BAR.stoolX} z={z} highlighted={highlight === i} />
+      ))}
     </group>
   );
 }

@@ -109,12 +109,14 @@ export default function CasinoFloor() {
   const [opening, setOpening] = useState(false);
 
   // Playing a game: the scene sits the player down at it; further presses
-  // are ignored until its page opens.
+  // are ignored until its page opens. The bar is the same, except that the
+  // player stays on the stool until they walk off.
   const play = useRef<(object: FloorObject) => void>(() => {});
   play.current = (object) => {
-    if (!object.interactive?.href || playing) return;
+    if (!(object.interactive?.href || object.interactive?.lounge) || playing) return;
     setPlaying(object);
   };
+  const lounging = Boolean(playing?.interactive?.lounge);
   // Seated, the camera over the table: open the game — guests go to log in
   // (SRS-108.3). The scene stops drawing, holding that last frame while the
   // page (already prefetched) loads.
@@ -169,7 +171,7 @@ export default function CasinoFloor() {
       if (key) input.current[key] = false;
     };
     const release = () => {
-      input.current = { forward: false, back: false, left: false, right: false, slow: false };
+      input.current = { forward: false, back: false, left: false, right: false, slow: false, getUp: false };
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -182,7 +184,7 @@ export default function CasinoFloor() {
   }, []);
 
   const label = near?.interactive;
-  const ready = Boolean(label?.href);
+  const ready = Boolean(label?.href || label?.lounge);
 
   return (
     <div className={`${display.className} flex min-h-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-6`}>
@@ -227,7 +229,11 @@ export default function CasinoFloor() {
               playing={playing}
               onSeated={(object, spot) => seated.current(object, spot)}
               returning={returning}
-              onStood={forgetTakenSeat}
+              onStood={() => {
+                // Up from a game's seat (SRS-108.6), or off a bar stool.
+                forgetTakenSeat();
+                setPlaying(null);
+              }}
               paused={opening}
             />
           </div>
@@ -248,6 +254,10 @@ export default function CasinoFloor() {
             <span className="mt-2 block text-sm">
               {!ready ? (
                 <span className="text-slate-400">Coming soon</span>
+              ) : label.lounge ? (
+                <>
+                  Press <Key>Space</Key> to take a stool
+                </>
               ) : signedIn === false ? (
                 <>
                   Press <Key>Space</Key> to log in and play
@@ -259,6 +269,21 @@ export default function CasinoFloor() {
               )}
             </span>
           </button>
+        ) : null}
+
+        {lounging ? (
+          // On a bar stool: how to get up (and a button for touch screens).
+          <div className="absolute inset-x-0 bottom-5 flex justify-center">
+            <button
+              type="button"
+              onClick={() => {
+                input.current.getUp = true;
+              }}
+              className="rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.2em] text-white backdrop-blur-sm transition hover:text-amber-200"
+            >
+              Walk or tap here to get up
+            </button>
+          </div>
         ) : null}
 
         {opening && playing ? (
@@ -274,7 +299,7 @@ export default function CasinoFloor() {
       {/* The same games as a plain list, for anyone who'd rather not walk. */}
       <nav aria-label="Games" className="flex flex-wrap items-center justify-center gap-2 text-xs uppercase tracking-wider text-slate-400">
         <span>Or go straight to:</span>
-        {INTERACTIVE_OBJECTS.map((object) =>
+        {INTERACTIVE_OBJECTS.filter((object) => !object.interactive?.lounge).map((object) =>
           object.interactive?.href ? (
             <Link
               key={object.id}

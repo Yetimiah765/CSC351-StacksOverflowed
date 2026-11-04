@@ -3,6 +3,7 @@
 // are repainted every frame by paintSportsScreen().
 
 import * as THREE from 'three';
+import type { TvGame } from '../../lib/barTvs';
 
 function canvas(width: number, height: number) {
   const element = document.createElement('canvas');
@@ -23,10 +24,10 @@ function texture(element: HTMLCanvasElement, repeat?: [number, number]) {
   return result;
 }
 
-/** Casino carpet: deep red with a gold lattice and medallions. Repeats. */
+/** Casino carpet: midnight blue with a gold lattice and emerald medallions, like the site. Repeats. */
 export function carpetTexture(repeat: [number, number]) {
   const { element, ctx } = canvas(256, 256);
-  ctx.fillStyle = '#4a0e26';
+  ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, 256, 256);
   ctx.strokeStyle = '#b8861b';
   ctx.lineWidth = 5;
@@ -40,7 +41,7 @@ export function carpetTexture(repeat: [number, number]) {
   ctx.stroke();
   // Medallion in the middle, rosettes at the corners.
   for (const [x, y, r] of [[128, 128, 30], [0, 0, 18], [256, 0, 18], [0, 256, 18], [256, 256, 18]]) {
-    ctx.fillStyle = '#7a1a3e';
+    ctx.fillStyle = '#14532d';
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
@@ -57,24 +58,39 @@ export function carpetTexture(repeat: [number, number]) {
   return texture(element, repeat);
 }
 
-/** Dark wood wall panels with a gold rail. Repeats along the wall. */
+/**
+ * The walls, in the site's own colours: deep slate panels with a gold
+ * pinstripe frame and a gold chair rail above dark wainscoting. Repeats
+ * along the wall.
+ */
 export function wallTexture(repeat: [number, number]) {
   const { element, ctx } = canvas(256, 256);
   const gradient = ctx.createLinearGradient(0, 0, 0, 256);
-  gradient.addColorStop(0, '#1b0f2e');
-  gradient.addColorStop(1, '#2a1640');
+  gradient.addColorStop(0, '#0b1120');
+  gradient.addColorStop(0.8, '#111827');
+  gradient.addColorStop(1, '#0a0f1c');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, 256, 256);
-  ctx.strokeStyle = '#3d2460';
-  ctx.lineWidth = 6;
-  ctx.strokeRect(18, 30, 220, 170);
-  ctx.strokeStyle = '#120a20';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(26, 38, 204, 154);
+  // A raised panel: a lit top-left edge, a shaded bottom-right one.
+  ctx.fillStyle = '#131c2e';
+  ctx.fillRect(22, 26, 212, 168);
+  ctx.strokeStyle = '#1e293b';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(22, 26, 212, 168);
+  ctx.strokeStyle = 'rgba(201,162,39,0.55)';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(32, 36, 192, 148);
+  // Fine vertical grain, like dark lacquered wood.
+  for (let i = 0; i < 90; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.012 + Math.random() * 0.02})`;
+    ctx.fillRect(Math.random() * 256, 0, 1, 256);
+  }
   ctx.fillStyle = '#c9a227';
-  ctx.fillRect(0, 216, 256, 8);
+  ctx.fillRect(0, 210, 256, 6);
   ctx.fillStyle = '#7a5a10';
-  ctx.fillRect(0, 224, 256, 3);
+  ctx.fillRect(0, 216, 256, 2);
+  ctx.fillStyle = '#070b14';
+  ctx.fillRect(0, 218, 256, 38);
   return texture(element, repeat);
 }
 
@@ -394,4 +410,128 @@ export function paintSportsScreen(ctx: CanvasRenderingContext2D, time: number, v
   }
   ctx.fillStyle = '#ef4444';
   ctx.fillText('LIVE', w - 38, 16);
+}
+
+// ---------- the bar ----------
+/** One of the bar's TVs, repainted every frame by paintBarTv(). */
+export function barTvScreen() {
+  const { element, ctx } = canvas(480, 270);
+  return { texture: texture(element), canvas: element, ctx };
+}
+
+/**
+ * A bar TV: one of the sportsbook's Showdowns as a broadcast scoreboard — the
+ * league and "SHOWDOWN", then LIVE / FINAL / the start time across the top;
+ * each team in its colour with its score once the game's on, or before it the
+ * coins backing it and by how many players; and a gold ticker with the pool,
+ * sending people to the Showdown. With no Showdown (none is running, or the
+ * sportsbook couldn't be reached) it shows a match like the sports bar's
+ * screens.
+ */
+export function paintBarTv(
+  ctx: CanvasRenderingContext2D,
+  time: number,
+  variant: number,
+  game: TvGame | null,
+  kickoff: string
+) {
+  const w = 480;
+  const h = 270;
+  if (!game) {
+    ctx.save();
+    ctx.scale(w / 320, h / 180);
+    paintSportsScreen(ctx, time, variant % 2);
+    ctx.restore();
+    return;
+  }
+  // A dark pitch behind, slowly drifting, so the screen never looks frozen.
+  const field = ctx.createLinearGradient(0, 0, w, h);
+  field.addColorStop(0, '#04130c');
+  field.addColorStop(1, '#0b2617');
+  ctx.fillStyle = field;
+  ctx.fillRect(0, 0, w, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 2;
+  const drift = ((time / 60) % 60) - 60;
+  for (let x = drift; x < w; x += 60) {
+    ctx.beginPath();
+    ctx.moveTo(x, 40);
+    ctx.lineTo(x + 40, h - 34);
+    ctx.stroke();
+  }
+
+  // The top bar.
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, w, 40);
+  ctx.fillStyle = '#fcd34d';
+  ctx.fillRect(0, 38, w, 2);
+  ctx.font = 'bold 20px Arial';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillText(game.league.toUpperCase(), 16, 20);
+  const leagueWidth = ctx.measureText(game.league.toUpperCase()).width;
+  ctx.fillStyle = '#fcd34d';
+  ctx.font = 'bold 14px Arial';
+  ctx.fillText('★ SHOWDOWN', 26 + leagueWidth, 21);
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'right';
+  if (game.state === 'live') {
+    if (Math.floor(time / 600) % 2) {
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(w - 70, 20, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ef4444';
+    ctx.fillText('LIVE', w - 16, 20);
+  } else {
+    ctx.fillStyle = game.state === 'upcoming' ? '#fcd34d' : '#94a3b8';
+    ctx.fillText(game.state === 'final' ? 'FINAL' : game.state === 'off' ? 'OFF' : kickoff, w - 16, 20);
+  }
+
+  // The two teams, away above home.
+  ([game.away, game.home] as const).forEach((team, i) => {
+    const y = 62 + i * 82;
+    ctx.fillStyle = 'rgba(2,6,23,0.78)';
+    ctx.fillRect(16, y, w - 32, 70);
+    ctx.fillStyle = team.color;
+    ctx.fillRect(16, y, 14, 70);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 34px Arial';
+    ctx.fillText(team.short, 44, y + 26);
+    ctx.font = '15px Arial';
+    ctx.fillStyle = '#cbd5e1';
+    const name = team.name.length > 26 ? `${team.name.slice(0, 25)}…` : team.name;
+    ctx.fillText(name, 46, y + 54);
+    ctx.textAlign = 'right';
+    if (game.state === 'upcoming' || team.score === null) {
+      // Before the game: the coins backing this side of the Showdown.
+      ctx.font = 'bold 28px Arial';
+      ctx.fillStyle = '#fcd34d';
+      ctx.fillText(team.coins.toLocaleString('en-US'), w - 32, y + 28);
+      ctx.font = '13px Arial';
+      ctx.fillStyle = '#cbd5e1';
+      ctx.fillText(`COINS · ${team.players} ${team.players === 1 ? 'PLAYER' : 'PLAYERS'}`, w - 32, y + 54);
+    } else {
+      ctx.font = 'bold 46px Arial';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(team.score === null ? '–' : String(team.score), w - 32, y + 37);
+    }
+  });
+
+  // The ticker.
+  ctx.fillStyle = '#fcd34d';
+  ctx.fillRect(0, h - 30, w, 30);
+  ctx.fillStyle = '#111827';
+  ctx.font = 'bold 15px Arial';
+  ctx.textAlign = 'left';
+  const message =
+    game.state === 'upcoming'
+      ? `THE SHOWDOWN  ★  POOL ${game.pool.toLocaleString('en-US')} COINS  ★  BACK A TEAM AT THE SPORTSBOOK  ★  WINNERS SPLIT THE POOL  ★  `
+      : `THE SHOWDOWN  ★  POOL ${game.pool.toLocaleString('en-US')} COINS  ★  NEXT SHOWDOWN AT THE SPORTSBOOK  ★  `;
+  const span = ctx.measureText(message).width;
+  const offset = -((time / 18) % span);
+  for (let x = offset; x < w; x += span) ctx.fillText(message, x, h - 15);
 }

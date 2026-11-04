@@ -13,8 +13,15 @@
 
 import { GAMES } from './games';
 
-export const COLS = 26;
+export const COLS = 30;
 export const ROWS = 15;
+/**
+ * The first column of the room proper: the left wall's face is on its left
+ * edge. Only the bar's alcove (BAR_ALCOVE) goes further, into the wall.
+ */
+export const LEFT_WALL = 3;
+/** Where the bar is set into the left wall, in tiles: the columns behind the wall line, and the rows it spans. */
+export const BAR_ALCOVE = { x: 1, y: 5, w: LEFT_WALL - 1, h: 8 };
 /** One tile, in metres. */
 export const TILE_METRES = 0.8;
 
@@ -29,7 +36,7 @@ export interface Point {
 export interface FloorObject {
   id: string;
   /** What it is, for the drawing code. */
-  kind: 'poker' | 'blackjack' | 'roulette' | 'slots' | 'sports-betting' | 'shop' | 'plant' | 'pillar';
+  kind: 'poker' | 'blackjack' | 'roulette' | 'slots' | 'sports-betting' | 'shop' | 'bar' | 'plant' | 'pillar';
   /** Top-left tile, and size in tiles: where it is (its real shape is in pieceLayout()). */
   x: number;
   y: number;
@@ -40,13 +47,18 @@ export interface FloorObject {
     name: string;
     description: string;
     href: string | null;
+    /**
+     * A place to sit and stay rather than a game to open (the bar): Space
+     * takes a stool, and walking gets up again.
+     */
+    lounge?: boolean;
   };
 }
 
 const game = (id: string) => GAMES.find((candidate) => candidate.id === id);
 
 function gameObject(
-  kind: Exclude<FloorObject['kind'], 'shop' | 'plant' | 'pillar'>,
+  kind: Exclude<FloorObject['kind'], 'shop' | 'bar' | 'plant' | 'pillar'>,
   x: number,
   y: number,
   w: number,
@@ -68,20 +80,37 @@ function gameObject(
   };
 }
 
-// The room: the top two rows are the back wall (with the sign), the outer
-// columns and the bottom row are walls, and the way in is at the bottom
-// middle, where the player starts. Dealers stand behind their tables, as
-// part of them (pieceLayout()).
+// The room: the top two rows are the back wall (with the sign), the columns
+// left of LEFT_WALL, the last column and the bottom row are walls, and the
+// way in is at the bottom middle, where the player starts. The bar is set
+// into the left wall near the front (BAR_ALCOVE), its counter on the wall
+// line and its stools out in the room. Dealers (and the bartender) stand
+// behind their tables, as part of them (pieceLayout()).
 export const FLOOR_OBJECTS: FloorObject[] = [
-  gameObject('blackjack', 2, 4, 4, 3),
-  gameObject('poker', 10, 4, 6, 3),
-  gameObject('roulette', 19, 4, 5, 3),
-  gameObject('slots', 2, 9, 5, 2),
-  gameObject('sports-betting', 19, 9, 5, 2),
+  gameObject('blackjack', 6, 4, 4, 3),
+  gameObject('poker', 14, 4, 6, 3),
+  gameObject('roulette', 23, 4, 5, 3),
+  gameObject('slots', 6, 9, 5, 2),
+  gameObject('sports-betting', 23, 9, 5, 2),
+  {
+    id: 'bar',
+    kind: 'bar',
+    // The alcove, plus the column in front of it where the stools stand.
+    x: BAR_ALCOVE.x,
+    y: BAR_ALCOVE.y,
+    w: BAR_ALCOVE.w + 1,
+    h: BAR_ALCOVE.h,
+    interactive: {
+      name: 'The Bar',
+      description: 'Pull up a stool, have a drink and catch the Showdown games on the TVs.',
+      href: null,
+      lounge: true,
+    },
+  },
   {
     id: 'shop',
     kind: 'shop',
-    x: 10,
+    x: 14,
     y: 9,
     w: 6,
     h: 2,
@@ -92,18 +121,18 @@ export const FLOOR_OBJECTS: FloorObject[] = [
     },
   },
   // Plants in the corners, pillars between the rows of games.
-  { id: 'plant-1', kind: 'plant', x: 1, y: 2, w: 1, h: 1 },
-  { id: 'plant-2', kind: 'plant', x: 24, y: 2, w: 1, h: 1 },
-  { id: 'plant-3', kind: 'plant', x: 1, y: 13, w: 1, h: 1 },
-  { id: 'plant-4', kind: 'plant', x: 24, y: 13, w: 1, h: 1 },
-  { id: 'pillar-1', kind: 'pillar', x: 8, y: 7, w: 1, h: 1 },
-  { id: 'pillar-2', kind: 'pillar', x: 17, y: 7, w: 1, h: 1 },
+  { id: 'plant-1', kind: 'plant', x: LEFT_WALL, y: 2, w: 1, h: 1 },
+  { id: 'plant-2', kind: 'plant', x: 28, y: 2, w: 1, h: 1 },
+  { id: 'plant-3', kind: 'plant', x: LEFT_WALL, y: 13, w: 1, h: 1 },
+  { id: 'plant-4', kind: 'plant', x: 28, y: 13, w: 1, h: 1 },
+  { id: 'pillar-1', kind: 'pillar', x: 12, y: 7, w: 1, h: 1 },
+  { id: 'pillar-2', kind: 'pillar', x: 21, y: 7, w: 1, h: 1 },
 ];
 
 /** Where the player appears: just inside the door, facing in. */
-export const START: Point & { direction: Direction } = { x: 12, y: 13, direction: 'up' };
+export const START: Point & { direction: Direction } = { x: 16, y: 13, direction: 'up' };
 /** The door in the bottom wall (two tiles wide), drawn but not walkable. */
-export const DOOR = { x: 12, y: 14, w: 2 };
+export const DOOR = { x: 15, y: 14, w: 2 };
 
 export const INTERACTIVE_OBJECTS = FLOOR_OBJECTS.filter((object) => object.interactive);
 
@@ -163,10 +192,17 @@ export interface PieceLayout {
   /** What blocks the way: the piece itself, its chairs and its dealer. */
   solid: Shape[];
   chairs: Seat[];
-  /** Where the dealer stands (facing +z), and how high and how far ahead their hands rest. */
-  dealer?: { x: number; z: number; handsY: number; handsZ: number };
-  /** For someone sitting in one of the chairs: how high and how far ahead the table top is. */
-  seatedHands?: { y: number; z: number };
+  /**
+   * Where the dealer stands, and how high and how far ahead their hands
+   * rest. They face +z unless `facing` turns them (radians about the
+   * vertical, like a chair's angle the other way round: π/2 faces +x).
+   */
+  dealer?: { x: number; z: number; handsY: number; handsZ: number; facing?: number };
+  /**
+   * For someone sitting in one of the chairs: how high and how far ahead the
+   * table top is, and (for a seat higher than a chair's) how high their hips are.
+   */
+  seatedHands?: { y: number; z: number; hipY?: number };
   /**
    * Where the camera ends up once seated, in metres ahead of the chair and
    * up, and the point it looks at. Without one it looks down at the table
@@ -180,6 +216,47 @@ export interface PieceLayout {
 const CHAIR_RADIUS = 0.26;
 /** How far a slot stool stands out from the middle of its machine, metres (Furniture.tsx draws it there). */
 export const SLOT_STOOL_OUT = 0.9;
+
+/**
+ * The bar's measurements, metres across from the middle of its rectangle
+ * (towards the room is +x; the wall is at -width / 2), shared with
+ * Furniture.tsx's drawing.
+ */
+export const BAR = {
+  /** The back bar's depth out from the wall. */
+  backDepth: 0.4,
+  /** Where the bartender stands. */
+  bartenderX: -0.55,
+  /** The alcove's lowered ceiling, and so the bottom of the header over its mouth. */
+  ceiling: 3.4,
+  /**
+   * The counter: the middle of its body, how deep the body is, how high its
+   * top is, and how far the top overhangs the body on the room side, over
+   * the knees of whoever sits there.
+   */
+  counterX: 0.06,
+  counterDepth: 0.54,
+  counterTop: 1.08,
+  topOverhang: 0.22,
+  /** The stools: where they stand, and how high the seat is. */
+  stoolX: 0.92,
+  stoolTop: 0.76,
+};
+
+/** The bar's counter and back bar run the alcove's whole length, but for a hand's width at each end. */
+export function barLength(depth: number): number {
+  return depth - 0.1;
+}
+
+/** How far apart the bar's stools stand, metres: room for an elbow either side. */
+export const BAR_STOOL_SPACING = 1.1;
+
+/** Where the bar's stools stand along it, BAR_STOOL_SPACING apart about the middle. */
+export function BAR_STOOLS(length: number): number[] {
+  const count = Math.max(1, Math.floor((length - 0.6) / BAR_STOOL_SPACING) + 1);
+  const span = (count - 1) * BAR_STOOL_SPACING;
+  return Array.from({ length: count }, (_, i) => -span / 2 + i * BAR_STOOL_SPACING);
+}
 const PERSON_RADIUS = 0.24;
 
 function withChairsAndDealer(layout: Omit<PieceLayout, 'solid'> & { body: Shape[] }): PieceLayout {
@@ -293,6 +370,26 @@ export function pieceLayout(object: FloorObject): PieceLayout {
       });
       break;
     }
+    case 'bar': {
+      // Set into the left wall (local -x), running down the room (z): in the
+      // alcove, the back bar against its back wall (cabinet, shelves of
+      // bottles, the TVs above) and the bartender's walkway; on the wall
+      // line, the counter, wall to wall across the alcove's mouth; out in the
+      // room, the stools, facing the wall. The alcove's own walls are walls
+      // (isWall), so nothing more is needed at the ends.
+      const wall = -width / 2;
+      const length = barLength(depth);
+      layout = withChairsAndDealer({
+        body: [
+          { type: 'box', x: wall + BAR.backDepth / 2, z: 0, w: BAR.backDepth, d: length },
+          { type: 'box', x: BAR.counterX, z: 0, w: BAR.counterDepth, d: length },
+        ],
+        chairs: BAR_STOOLS(length).map((z) => ({ x: BAR.stoolX, z, angle: Math.PI / 2 })),
+        dealer: { x: BAR.bartenderX, z: 0.4, handsY: BAR.counterTop - 0.02, handsZ: BAR.counterX - BAR.counterDepth / 2 - BAR.bartenderX + 0.12, facing: Math.PI / 2 },
+        seatedHands: { y: BAR.counterTop, z: 0.45, hipY: BAR.stoolTop + 0.08 },
+      });
+      break;
+    }
     case 'plant':
       layout = withChairsAndDealer({ body: [{ type: 'circle', x: 0, z: 0, r: 0.3 }], chairs: [] });
       break;
@@ -310,7 +407,9 @@ export function pieceLayout(object: FloorObject): PieceLayout {
 
 export const PLAYER_RADIUS = 0.3;
 
-const isWall = (x: number, y: number) => x <= 0 || x >= COLS - 1 || y <= 1 || y >= ROWS - 1;
+const inBarAlcove = (x: number, y: number) =>
+  x >= BAR_ALCOVE.x && x < BAR_ALCOVE.x + BAR_ALCOVE.w && y >= BAR_ALCOVE.y && y < BAR_ALCOVE.y + BAR_ALCOVE.h;
+const isWall = (x: number, y: number) => (x < LEFT_WALL && !inBarAlcove(x, y)) || x >= COLS - 1 || y <= 1 || y >= ROWS - 1;
 
 /** A shape in tiles: centred, measured in the room's tile grid. */
 interface TileShape {

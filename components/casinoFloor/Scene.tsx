@@ -6,8 +6,11 @@ import { Bloom, EffectComposer, Vignette } from '@react-three/postprocessing';
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import {
+  BAR,
+  BAR_ALCOVE,
   COLS,
   FLOOR_OBJECTS,
+  LEFT_WALL,
   ROWS,
   START,
   TILE_METRES,
@@ -25,6 +28,7 @@ import {
   type TakenSeat,
 } from '../../lib/casinoFloor';
 import {
+  Bar,
   BlackjackTable,
   Pillar,
   Plant,
@@ -52,7 +56,8 @@ import { carpetTexture, neonTexture, wallTexture } from './textures';
 // the nearest screen) — then the page opens the game. Coming back from that
 // game, the same plays backwards (SRS-108.6): the player starts in the seat
 // with the camera over the table, the camera pulls back behind them, and
-// they get up beside the chair.
+// they get up beside the chair. At the bar there's no game to open: the
+// player sits on a stool and stays, watching the TVs, until they walk off.
 
 const TILE_M = TILE_METRES;
 const WALL_HEIGHT = 4.6;
@@ -71,6 +76,8 @@ export interface WalkInput {
   right: boolean;
   /** Shift: walk instead of jog. */
   slow: boolean;
+  /** The page's "Get up" button, for a player sitting at the bar on a touch screen; Player clears it. */
+  getUp?: boolean;
 }
 
 interface Props {
@@ -114,7 +121,8 @@ interface Seating {
   object: FloorObject;
   /** The chair (or screen) by index, as the page remembers it. */
   spot: number | null;
-  stage: 'walk' | 'turn' | 'sit' | 'zoom' | 'done' | 'rise' | 'stand';
+  /** 'seated' is staying on a bar stool (a lounge, not a game): walking gets up again. */
+  stage: 'walk' | 'turn' | 'sit' | 'zoom' | 'done' | 'seated' | 'rise' | 'stand';
   /** Seconds into the current stage. */
   t: number;
   /** World positions on the floor, metres: beside the chair, and the seat. */
@@ -122,12 +130,16 @@ interface Seating {
   seatAt: THREE.Vector2 | null;
   /** The heading to sit facing the table. */
   facing: number;
-  seatedHands: { y: number; z: number };
+  seatedHands: { y: number; z: number; hipY?: number };
   zoomFrom: { position: THREE.Vector3; look: THREE.Vector3 } | null;
   zoomTo: { position: THREE.Vector3; look: THREE.Vector3 };
+  /** At the bar: how far back the camera was before sitting, to put back on getting up. */
+  cameraDistance?: number;
 }
 
 const SIT_SECONDS = 1.1;
+/** How far behind a player sitting at the bar the camera stays, metres. */
+const SEATED_CAMERA_DISTANCE = 2.2;
 const ZOOM_SECONDS = 1.6;
 
 const smooth = (t: number) => {
@@ -271,7 +283,7 @@ function Player({
         heading.current = plan.facing;
         camera.current.yaw = plan.facing + Math.PI;
         if (plan.seatAt) {
-          seat.current = { amount: 1, handsY: plan.seatedHands.y, handsZ: plan.seatedHands.z };
+          seat.current = { amount: 1, handsY: plan.seatedHands.y, handsZ: plan.seatedHands.z, hipY: plan.seatedHands.hipY };
         }
         plan.zoomFrom = { position: plan.zoomTo.position.clone(), look: plan.zoomTo.look.clone() };
       }
@@ -336,6 +348,7 @@ function Player({
           plan.t = 0;
           seat.current.handsY = plan.seatedHands.y;
           seat.current.handsZ = plan.seatedHands.z;
+          seat.current.hipY = plan.seatedHands.hipY;
         }
       } else if (plan.stage === 'sit' && plan.approach && plan.seatAt) {
         const k = smooth(plan.t / SIT_SECONDS);
@@ -343,8 +356,32 @@ function Player({
         here.copy(plan.approach).lerp(plan.seatAt, k);
         seat.current.amount = k;
         if (plan.t >= SIT_SECONDS) {
-          plan.stage = 'zoom';
           plan.t = 0;
+          if (plan.object.interactive?.lounge) {
+            // Staying a while: swing the camera round behind them, lower and
+            // closer (the slot machines are just behind the stools), so the
+            // TVs over the bar fill the view. Getting up puts the distance back.
+            plan.stage = 'seated';
+            plan.cameraDistance = camera.current.distance;
+            camera.current.yaw = plan.facing + Math.PI;
+            camera.current.pitch = 0.2;
+            camera.current.distance = Math.min(camera.current.distance, SEATED_CAMERA_DISTANCE);
+          } else {
+            plan.stage = 'zoom';
+          }
+        }
+      } else if (plan.stage === 'seated' && plan.seatAt) {
+        here.copy(plan.seatAt);
+        heading.current = plan.facing;
+        const keys = input.current;
+        if (keys.forward || keys.back || keys.left || keys.right || keys.getUp) {
+          // Getting up: the same as after a game, minus the camera pulling
+          // back (it's already behind them).
+          keys.getUp = false;
+          if (plan.cameraDistance !== undefined) camera.current.distance = plan.cameraDistance;
+          plan.stage = 'stand';
+          plan.t = 0;
+          plan.zoomFrom = { position: view.position.clone(), look: lookAt.current.clone() };
         }
       }
       position.current = { x: here.x / TILE_M + COLS / 2, y: here.y / TILE_M + ROWS / 2 };
@@ -365,7 +402,8 @@ function Player({
         }
         return;
       }
-      followWith(here.x, here.y, 1.45 - seat.current.amount * 0.4, delta);
+      // Sitting at the bar, the camera looks up over their shoulder at the TVs.
+      followWith(here.x, here.y, plan.stage === 'seated' ? 1.7 : 1.45 - seat.current.amount * 0.4, delta);
       return;
     }
 
@@ -438,10 +476,11 @@ function Player({
       height + Math.sin(pitch) * distance,
       wz + Math.cos(yaw) * Math.cos(pitch) * distance
     );
-    const halfW = (COLS / 2 - 1.3) * TILE_M;
+    const [minX] = toWorld(LEFT_WALL + 0.3, 0);
+    const [maxX] = toWorld(COLS - 1.3, 0);
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = (ROWS / 2) * TILE_M + 2.2;
-    position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
+    position.x = THREE.MathUtils.clamp(position.x, minX, maxX);
     position.z = THREE.MathUtils.clamp(position.z, back, front);
     position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);
     return { position, look };
@@ -506,61 +545,188 @@ function CameraControls({ camera }: { camera: MutableRefObject<Camera> }) {
 
 // ---------- the room ----------
 function Room() {
-  const width = (COLS - 2) * TILE_M;
-  const depth = (ROWS - 3) * TILE_M;
-  const [, backZ] = toWorld(0, 2);
-  const [, frontZ] = toWorld(0, ROWS - 1);
+  const [leftX, backZ] = toWorld(LEFT_WALL, 2);
+  const [rightX, frontZ] = toWorld(COLS - 1, ROWS - 1);
+  const width = rightX - leftX;
+  const depth = frontZ - backZ;
+  const middleX = (leftX + rightX) / 2;
   const centerZ = (backZ + frontZ) / 2;
+  // The bar's alcove, set into the left wall: its back wall, and where it starts and ends along the room.
+  const [alcoveX, alcoveTop] = toWorld(BAR_ALCOVE.x, BAR_ALCOVE.y);
+  const [, alcoveBottom] = toWorld(0, BAR_ALCOVE.y + BAR_ALCOVE.h);
+  const alcoveDepth = leftX - alcoveX;
+  const alcoveLength = alcoveBottom - alcoveTop;
+  const alcoveMiddle = (alcoveTop + alcoveBottom) / 2;
+  // The left wall either side of the alcove.
+  const leftWalls = [
+    { from: backZ, to: alcoveTop },
+    { from: alcoveBottom, to: frontZ },
+  ];
   const walls = useMemo(() => wallTexture([width / 2.4, 1.6]), [width]);
-  const sideWalls = useMemo(() => wallTexture([depth / 2.4, 1.6]), [depth]);
-  const sign = useMemo(() => neonTexture('STACKS OVERFLOWED', '#ff3fa4'), []);
+  const rightWall = useMemo(() => wallTexture([depth / 2.4, 1.6]), [depth]);
+  const upperLength = alcoveTop - backZ;
+  const lowerLength = frontZ - alcoveBottom;
+  const upperWall = useMemo(() => wallTexture([upperLength / 2.4, 1.6]), [upperLength]);
+  const lowerWall = useMemo(() => wallTexture([lowerLength / 2.4, 1.6]), [lowerLength]);
+  const leftWallMaps = [upperWall, lowerWall];
+  const alcoveSides = useMemo(() => wallTexture([alcoveDepth / 2.4, 1.6]), [alcoveDepth]);
+  const sign = useMemo(() => neonTexture('STACKS OVERFLOWED', '#fbbf24'), []);
   const lobby = useMemo(() => carpetTexture([(width + 4) / 1.6, 6 / 1.6]), [width]);
+  const headerHeight = WALL_HEIGHT - BAR.ceiling;
   return (
     <group>
       {/* Polished floor: a clear coat that catches the lights. (A true mirror,
           MeshReflectorMaterial, drew the whole room twice a frame and needed a
           second copy of every shader, freezing the page for seconds at start.) */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, centerZ]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[middleX, 0, centerZ]} receiveShadow>
         <planeGeometry args={[width, depth]} />
-        <meshPhysicalMaterial color="#1a0c14" roughness={0.55} metalness={0.3} clearcoat={1} clearcoatRoughness={0.12} />
+        <meshPhysicalMaterial color="#0b0f19" roughness={0.5} metalness={0.3} clearcoat={1} clearcoatRoughness={0.12} />
       </mesh>
       {/* Back wall with the sign and a neon strip, side walls, a low front wall with the doors */}
-      <mesh position={[0, WALL_HEIGHT / 2, backZ]} receiveShadow>
+      <mesh position={[middleX, WALL_HEIGHT / 2, backZ]} receiveShadow>
         <planeGeometry args={[width, WALL_HEIGHT]} />
         <meshStandardMaterial map={walls} roughness={0.7} />
       </mesh>
-      <mesh position={[0, 3.2, backZ + 0.02]}>
+      <mesh position={[middleX, 3.2, backZ + 0.02]}>
         <planeGeometry args={[6.4, 1]} />
         <meshStandardMaterial map={sign} emissiveMap={sign} emissive="#ffffff" emissiveIntensity={2.4} transparent toneMapped={false} />
       </mesh>
-      <mesh position={[0, WALL_HEIGHT - 0.25, backZ + 0.03]}>
+      <mesh position={[middleX, WALL_HEIGHT - 0.25, backZ + 0.03]}>
         <boxGeometry args={[width, 0.05, 0.04]} />
-        <meshStandardMaterial color="#ff3fa4" emissive="#ff3fa4" emissiveIntensity={3} toneMapped={false} />
+        <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={2.2} toneMapped={false} />
+      </mesh>
+      {/* A gold frame round the sign */}
+      <mesh position={[middleX, 3.2, backZ + 0.01]}>
+        <planeGeometry args={[6.9, 1.3]} />
+        <meshStandardMaterial color="#05070d" roughness={0.4} />
       </mesh>
       {[-1, 1].map((side) => (
-        <group key={side}>
-          <mesh position={[(side * width) / 2, WALL_HEIGHT / 2, centerZ]} rotation={[0, -side * (Math.PI / 2), 0]} receiveShadow>
-            <planeGeometry args={[depth, WALL_HEIGHT]} />
-            <meshStandardMaterial map={sideWalls} roughness={0.7} />
-          </mesh>
-          <mesh position={[side * (width / 2 - 0.03), WALL_HEIGHT - 0.25, centerZ]}>
-            <boxGeometry args={[0.04, 0.05, depth]} />
-            <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={3} toneMapped={false} />
-          </mesh>
-        </group>
+        <mesh key={side} position={[middleX, 3.2 + side * 0.65, backZ + 0.03]}>
+          <boxGeometry args={[6.9, 0.04, 0.03]} />
+          <Brass />
+        </mesh>
       ))}
+      {/* Sconces along the back wall, either side of the sign */}
+      {sconces(width, 3.9).map((x) => (
+        <Sconce key={x} position={[middleX + x, 2.3, backZ]} rotation={0} />
+      ))}
+
+      {/* The right wall */}
+      <mesh position={[rightX, WALL_HEIGHT / 2, centerZ]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
+        <planeGeometry args={[depth, WALL_HEIGHT]} />
+        <meshStandardMaterial map={rightWall} roughness={0.7} />
+      </mesh>
+      <mesh position={[rightX - 0.03, WALL_HEIGHT - 0.25, centerZ]}>
+        <boxGeometry args={[0.04, 0.05, depth]} />
+        <NeonStrip />
+      </mesh>
+      {sconces(depth, 0).map((z) => (
+        <Sconce key={z} position={[rightX, 2.3, centerZ + z]} rotation={-Math.PI / 2} />
+      ))}
+
+      {/* The left wall, either side of the bar's alcove; the neon strip runs on across the header */}
+      {leftWalls.map(({ from, to }, i) => (
+        <mesh key={i} position={[leftX, WALL_HEIGHT / 2, (from + to) / 2]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
+          <planeGeometry args={[to - from, WALL_HEIGHT]} />
+          <meshStandardMaterial map={leftWallMaps[i]} roughness={0.7} />
+        </mesh>
+      ))}
+      <mesh position={[leftX + 0.03, WALL_HEIGHT - 0.25, centerZ]}>
+        <boxGeometry args={[0.04, 0.05, depth]} />
+        <NeonStrip />
+      </mesh>
+      {/* Sconces flanking the alcove, and one more towards the back */}
+      {[backZ + 0.9, alcoveTop - 0.5, (alcoveBottom + frontZ) / 2].map((z) => (
+        <Sconce key={z} position={[leftX, 2.3, z]} rotation={Math.PI / 2} />
+      ))}
+
+      {/* The alcove: a back wall, two side walls and a lowered dark-wood ceiling,
+          with the header across its mouth above the bar (the sign is on it, in
+          Furniture.tsx) and gold pilasters framing it. Its floor is dark wood. */}
+      <mesh position={[alcoveX, BAR.ceiling / 2, alcoveMiddle]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
+        <planeGeometry args={[alcoveLength, BAR.ceiling]} />
+        <meshStandardMaterial color="#0d1220" roughness={0.75} />
+      </mesh>
+      {[
+        { z: alcoveTop, facing: 0 },
+        { z: alcoveBottom, facing: Math.PI },
+      ].map(({ z, facing }) => (
+        <mesh key={z} position={[(alcoveX + leftX) / 2, BAR.ceiling / 2, z]} rotation={[0, facing, 0]} receiveShadow>
+          <planeGeometry args={[alcoveDepth, BAR.ceiling]} />
+          <meshStandardMaterial map={alcoveSides} roughness={0.7} />
+        </mesh>
+      ))}
+      <mesh position={[(alcoveX + leftX) / 2, BAR.ceiling, alcoveMiddle]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[alcoveDepth, alcoveLength]} />
+        <meshStandardMaterial color="#1c0f08" roughness={0.6} />
+      </mesh>
+      <mesh position={[leftX, BAR.ceiling + headerHeight / 2, alcoveMiddle]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
+        <planeGeometry args={[alcoveLength, headerHeight]} />
+        <meshStandardMaterial color="#0b1120" roughness={0.6} />
+      </mesh>
+      {/* The header's underside, and a gold edge along its bottom */}
+      <mesh position={[leftX + 0.06, BAR.ceiling + 0.04, alcoveMiddle]}>
+        <boxGeometry args={[0.12, 0.08, alcoveLength + 0.24]} />
+        <Brass />
+      </mesh>
+      {[alcoveTop, alcoveBottom].map((z, i) => (
+        <mesh key={z} position={[leftX + 0.04, BAR.ceiling / 2, z + (i ? 0.06 : -0.06)]} castShadow>
+          <boxGeometry args={[0.1, BAR.ceiling, 0.12]} />
+          <Brass />
+        </mesh>
+      ))}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(alcoveX + leftX) / 2, 0.001, alcoveMiddle]} receiveShadow>
+        <planeGeometry args={[alcoveDepth, alcoveLength]} />
+        <meshStandardMaterial color="#2a160b" roughness={0.45} />
+      </mesh>
+
       {/* A low rail at the front, so the camera can look over it, and the lobby beyond */}
-      <mesh position={[0, 0.25, frontZ]} castShadow receiveShadow>
+      <mesh position={[middleX, 0.25, frontZ]} castShadow receiveShadow>
         <boxGeometry args={[width, 0.5, 0.2]} />
-        <meshStandardMaterial color="#1b0f2e" roughness={0.6} />
+        <meshStandardMaterial color="#0f172a" roughness={0.6} />
       </mesh>
-      <mesh position={[0, 0.51, frontZ]}>
+      <mesh position={[middleX, 0.51, frontZ]}>
         <boxGeometry args={[width, 0.04, 0.24]} />
-        <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />
+        <Brass />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.002, frontZ + 3]} receiveShadow>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[middleX, -0.002, frontZ + 3]} receiveShadow>
         <planeGeometry args={[width + 4, 6]} />
         <meshStandardMaterial map={lobby} roughness={0.95} />
+      </mesh>
+    </group>
+  );
+}
+
+function Brass() {
+  return <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />;
+}
+
+function NeonStrip() {
+  return <meshStandardMaterial color="#34d399" emissive="#34d399" emissiveIntensity={1.6} toneMapped={false} />;
+}
+
+/** Where the sconces go along a wall `length` long: every 3 m, leaving `gap` either side of the middle clear. */
+function sconces(length: number, gap: number) {
+  const spots: number[] = [];
+  for (let x = -length / 2 + 1.5; x <= length / 2 - 1.5; x += 3) if (Math.abs(x) > gap) spots.push(x);
+  return spots;
+}
+
+/** A wall light: a gold back plate and a glowing frosted shade, facing +z before `rotation` (about y). */
+function Sconce({ position, rotation }: { position: [number, number, number]; rotation: number }) {
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      <mesh position={[0, 0, 0.015]}>
+        <boxGeometry args={[0.12, 0.34, 0.03]} />
+        <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />
+      </mesh>
+      <mesh position={[0, 0.06, 0.11]}>
+        <cylinderGeometry args={[0.07, 0.1, 0.2, 18, 1, true]} />
+        <meshStandardMaterial color="#fff1d0" emissive="#ffb85c" emissiveIntensity={1.8} side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -0.07, 0.07]}>
+        <boxGeometry args={[0.03, 0.04, 0.1]} />
+        <meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} />
       </mesh>
     </group>
   );
@@ -620,6 +786,8 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
       return <SportsBar width={width} depth={depth} highlight={highlight} />;
     case 'shop':
       return <ShopCounter width={width} depth={depth} layout={layout} />;
+    case 'bar':
+      return <Bar width={width} depth={depth} layout={layout} highlight={highlight} />;
     case 'plant':
       return <Plant />;
     case 'pillar':
@@ -679,21 +847,22 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
   return (
     <>
       <CameraControls camera={camera} />
-      <ambientLight intensity={0.35} color="#ffd9c2" />
-      <hemisphereLight args={['#6b4b8f', '#1a0d10', 0.55]} />
+      {/* Low, warm light overall, so each game's own spotlight makes a pool of light on the floor. */}
+      <ambientLight intensity={0.16} color="#ffd9b0" />
+      <hemisphereLight args={['#334155', '#07090f', 0.32]} />
       <directionalLight
         position={[4, 9, 6]}
-        intensity={1.3}
-        color="#ffe3c4"
+        intensity={0.6}
+        color="#ffdcb0"
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-12}
-        shadow-camera-right={12}
+        shadow-camera-left={-14}
+        shadow-camera-right={14}
         shadow-camera-top={9}
         shadow-camera-bottom={-9}
         shadow-bias={-0.0004}
       />
-      <pointLight position={[0, 3.2, toWorld(0, 2)[1] + 0.8]} color="#ff3fa4" intensity={12} distance={9} />
+      <pointLight position={[0, 3.2, toWorld(0, 2)[1] + 0.8]} color="#fbbf24" intensity={7} distance={9} />
 
       <Room />
       <group onClick={handleFloorClick}>
@@ -704,8 +873,14 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
           const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);
           return (
             <group key={`light-${object.id}`}>
-              <Rug object={object} />
-              <Spot x={x} z={z} color={object.kind === 'slots' ? '#ffd1e8' : '#ffe8c2'} />
+              {/* The bar stands on the polished floor; the games each have a rug. */}
+              {object.kind === 'bar' ? null : <Rug object={object} />}
+              <Spot
+                x={object.kind === 'bar' ? x + 0.6 : x}
+                z={z}
+                color={object.kind === 'bar' ? '#ffc27a' : object.kind === 'slots' ? '#ffd1e8' : '#ffe8c2'}
+                intensity={object.kind === 'bar' ? 32 : 45}
+              />
             </group>
           );
         })}
@@ -773,15 +948,15 @@ export default function Scene({ paused, ...props }: Props) {
         shadows
         dpr={[1, 1.75]}
         camera={{ fov: 52, near: 0.1, far: 80, position: [0, 3, 8] }}
-        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
+        gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.95 }}
       >
-        <color attach="background" args={['#06030a']} />
-        <fog attach="fog" args={['#06030a', 12, 30]} />
+        <color attach="background" args={['#04060b']} />
+        <fog attach="fog" args={['#04060b', 12, 32]} />
         <Floor {...props} />
         <Warmup onReady={onReady} />
       </Canvas>
       {ready ? null : (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#06030a] text-sm uppercase tracking-[0.3em] text-slate-400">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#04060b] text-sm uppercase tracking-[0.3em] text-slate-400">
           <span className="animate-pulse">Opening the casino…</span>
         </div>
       )}

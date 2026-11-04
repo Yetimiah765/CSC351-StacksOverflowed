@@ -85,6 +85,8 @@ export interface SeatPose {
   /** The table top: how high, and how far in front of the seat, metres. */
   handsY: number;
   handsZ: number;
+  /** How high the hips sit, for a seat taller than a chair (a bar stool); SEAT_HIP_HEIGHT if left out. */
+  hipY?: number;
 }
 
 /** How high the hip joints sit above the floor, sitting on a casino chair (its seat is about 0.5 m up), metres. */
@@ -366,7 +368,7 @@ function Body({ who, motion, idleOffset = 0, pose = 'idle', hands = { y: 0.9, z:
     const way = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyQuaternion(facing).normalize();
     const hips = bones.get('Hips');
     if (hips) {
-      const at = new THREE.Vector3(0, SEAT_HIP_HEIGHT, -0.04).divideScalar(scale).applyMatrix4(body.matrixWorld);
+      const at = new THREE.Vector3(0, sitting.hipY ?? SEAT_HIP_HEIGHT, -0.04).divideScalar(scale).applyMatrix4(body.matrixWorld);
       hips.position.copy(hips.parent!.worldToLocal(at));
       hips.updateMatrixWorld(true);
     }

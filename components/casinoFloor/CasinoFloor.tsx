@@ -22,6 +22,7 @@ import {
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
+import CheckInTablet from './CheckInTablet';
 import type { WalkInput } from './Scene';
 
 // The home page: a 3D casino floor to walk around, the camera following the
@@ -261,6 +262,28 @@ export default function CasinoFloor() {
     setLoggedOutHere(true);
   };
 
+  // Checking in at a front-desk tablet (SRS-103.13): the camera flies in
+  // (straight there with reduced motion), then the tablet's up close, with
+  // the scene paused behind it; stepping away flies back out. Once they've
+  // logged in, the page opens again with the walk in onto the casino floor.
+  const [nearKiosk, setNearKiosk] = useState<number | null>(null);
+  const nearKioskRef = useRef<number | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const [tabletOpen, setTabletOpen] = useState(false);
+  const checkIn = useRef<() => void>(() => {});
+  checkIn.current = () => {
+    if (!guest || checkingIn || leaving || playing) return;
+    setCheckingIn(true);
+  };
+  function checkedIn() {
+    try {
+      sessionStorage.setItem(ENTRANCE_KEY, '1');
+    } catch {
+      // Storage blocked: the floor just opens with the player inside.
+    }
+    window.location.assign('/');
+  }
+
   // Seated, the camera over the table: open the game — guests go to log in
   // (SRS-108.3). The scene stops drawing, holding that last frame while the
   // page (already prefetched) loads.
@@ -307,7 +330,8 @@ export default function CasinoFloor() {
         // Only take over Space/Enter for the floor, not a focused link or button.
         if ((event.target as HTMLElement | null)?.closest('a, button')) return;
         event.preventDefault();
-        if (nearDoorsRef.current) leave.current();
+        if (nearKioskRef.current !== null) checkIn.current();
+        else if (nearDoorsRef.current) leave.current();
         else if (nearRef.current) play.current(nearRef.current);
       }
     };
@@ -333,145 +357,180 @@ export default function CasinoFloor() {
   const ready = Boolean(label?.href);
 
   return (
-    <div className={`${display.className} flex min-h-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-6`}>
-      {/* How to play, and (for guests) sign up or log in. The website's name
-          is in the nav bar now (SRS-107.5), so it's only named here for
-          screen readers. */}
-      <header className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
-        <h1 className="sr-only">Stacks Overflowed Casino</h1>
-        <p className="hidden flex-1 text-center uppercase tracking-[0.15em] text-slate-400 md:block">
-          WASD to move · Shift to walk · drag to look · Space to play
-        </p>
-        {guest ? (
-          <div className="flex gap-2 uppercase tracking-wider">
-            <Link href="/register" className="rounded bg-emerald-400 px-4 py-2 font-bold text-slate-950 transition hover:bg-emerald-300">
-              Sign up
-            </Link>
-            <Link href="/login" className="rounded border border-slate-600 bg-slate-900 px-4 py-2 text-slate-100 transition hover:border-emerald-300">
-              Log in
-            </Link>
-          </div>
-        ) : null}
-      </header>
+    <>
+      <div className={`${display.className} flex min-h-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-6`}>
+        {/* How to play, and (for guests) sign up or log in. The website's name
+            is in the nav bar now (SRS-107.5), so it's only named here for
+            screen readers. */}
+        <header className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
+          <h1 className="sr-only">Stacks Overflowed Casino</h1>
+          <p className="hidden flex-1 text-center uppercase tracking-[0.15em] text-slate-400 md:block">
+            WASD to move · Shift to walk · drag to look · Space to play
+          </p>
+          {guest ? (
+            <div className="flex gap-2 uppercase tracking-wider">
+              <Link href="/register" className="rounded bg-emerald-400 px-4 py-2 font-bold text-slate-950 transition hover:bg-emerald-300">
+                Sign up
+              </Link>
+              <Link href="/login" className="rounded border border-slate-600 bg-slate-900 px-4 py-2 text-slate-100 transition hover:border-emerald-300">
+                Log in
+              </Link>
+            </div>
+          ) : null}
+        </header>
 
-      {/* The floor fills the rest of the window (on a phone, a fixed height). */}
-      <div className="relative h-[70vh] min-h-[320px] overflow-hidden rounded-xl border border-white/10 bg-[#06030a] shadow-[0_20px_60px_rgba(0,0,0,0.6)] lg:h-auto lg:min-h-0 lg:flex-1">
-        {webgl === null || returning === undefined ? (
-          <FloorMessage text="Opening the casino…" />
-        ) : webgl ? (
-          <div
-            className="absolute inset-0 cursor-grab touch-none active:cursor-grabbing"
-            role="img"
-            aria-label="The casino floor. Walk with WASD or the arrow keys, or click a spot; press Space or Enter next to a game to play it, or at the casino's doors to log out."
-          >
-            <Scene
-              input={input}
-              nearId={near?.id ?? null}
-              onNear={(object) => {
-                nearRef.current = object;
-                setNear(object);
-              }}
-              onPlay={(object) => play.current(object)}
-              playing={playing}
-              onSeated={(object, spot) => seated.current(object, spot)}
-              returning={returning}
-              onStood={forgetTakenSeat}
-              entering={entering}
-              onEntered={forgetEntrance}
-              canLeave={canLeave}
-              onNearDoors={(near) => {
-                nearDoorsRef.current = near;
-                setNearDoors(near);
-              }}
-              onLeave={() => leave.current()}
-              leaving={leaving !== null}
-              leaveAtOnce={leaving === 'now'}
-              onLeft={() => left.current()}
-              guest={guest}
-              spot={spot}
-              onSpot={rememberSpot}
-              paused={opening}
-            />
-          </div>
-        ) : (
-          <FloorMessage text="This browser can't show the 3D floor — pick a game below." />
-        )}
+        {/* The floor fills the rest of the window (on a phone, a fixed height). */}
+        <div className="relative h-[70vh] min-h-[320px] overflow-hidden rounded-xl border border-white/10 bg-[#06030a] shadow-[0_20px_60px_rgba(0,0,0,0.6)] lg:h-auto lg:min-h-0 lg:flex-1">
+          {webgl === null || returning === undefined ? (
+            <FloorMessage text="Opening the casino…" />
+          ) : webgl ? (
+            <div
+              className="absolute inset-0 cursor-grab touch-none active:cursor-grabbing"
+              role="img"
+              aria-label="The casino floor. Walk with WASD or the arrow keys, or click a spot; press Space or Enter next to a game to play it, or at the casino's doors to log out."
+            >
+              <Scene
+                input={input}
+                nearId={near?.id ?? null}
+                onNear={(object) => {
+                  nearRef.current = object;
+                  setNear(object);
+                }}
+                onPlay={(object) => play.current(object)}
+                playing={playing}
+                onSeated={(object, spot) => seated.current(object, spot)}
+                returning={returning}
+                onStood={forgetTakenSeat}
+                entering={entering}
+                onEntered={forgetEntrance}
+                canLeave={canLeave}
+                onNearDoors={(near) => {
+                  nearDoorsRef.current = near;
+                  setNearDoors(near);
+                }}
+                onLeave={() => leave.current()}
+                leaving={leaving !== null}
+                leaveAtOnce={leaving === 'now'}
+                onLeft={() => left.current()}
+                guest={guest}
+                spot={spot}
+                onSpot={rememberSpot}
+                onNearKiosk={(kiosk) => {
+                  nearKioskRef.current = kiosk;
+                  setNearKiosk(kiosk);
+                }}
+                onCheckIn={() => checkIn.current()}
+                checkingIn={checkingIn}
+                checkInAtOnce={prefersReducedMotion()}
+                onAtKiosk={() => setTabletOpen(true)}
+                paused={opening || tabletOpen}
+              />
+            </div>
+          ) : (
+            <FloorMessage text="This browser can't show the 3D floor — pick a game below." />
+          )}
 
-        {nearDoors && canLeave && !leaving && !playing ? (
-          // At the casino's doors: the same kind of help box, to leave.
-          <button
-            type="button"
-            onClick={() => leave.current()}
-            className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm sm:left-5 sm:top-5"
-          >
-            <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Casino doors</span>
-            <span className="mt-1 block text-sm leading-snug text-slate-200">Head back out through the lobby to the street.</span>
-            <span className="mt-2 block text-sm">
-              Press <Key>Space</Key> to log out
-            </span>
-          </button>
-        ) : near && label && !playing && !leaving ? (
-          // The help box, top left, like an open-world game's prompts.
-          <button
-            type="button"
-            onClick={() => play.current(near)}
-            disabled={!ready}
-            className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm disabled:cursor-default sm:left-5 sm:top-5"
-          >
-            <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">{label.name}</span>
-            <span className="mt-1 block text-sm leading-snug text-slate-200">{label.description}</span>
-            <span className="mt-2 block text-sm">
-              {!ready ? (
-                <span className="text-slate-400">Coming soon</span>
-              ) : guest ? (
-                <>
-                  Press <Key>Space</Key> to log in and play
-                </>
-              ) : (
-                <>
-                  Press <Key>Space</Key> to play {label.name}
-                </>
-              )}
-            </span>
-          </button>
-        ) : null}
+          {nearKiosk !== null && guest && !checkingIn && !playing ? (
+            // At a check-in tablet: the same kind of help box, to check in.
+            <button
+              type="button"
+              onClick={() => checkIn.current()}
+              className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm sm:left-5 sm:top-5"
+            >
+              <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Check-in kiosk</span>
+              <span className="mt-1 block text-sm leading-snug text-slate-200">Sign up, or log in if you already have an account, to play the games.</span>
+              <span className="mt-2 block text-sm">
+                Press <Key>Space</Key> to check in
+              </span>
+            </button>
+          ) : nearDoors && canLeave && !leaving && !playing ? (
+            // At the casino's doors: the same kind of help box, to leave.
+            <button
+              type="button"
+              onClick={() => leave.current()}
+              className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm sm:left-5 sm:top-5"
+            >
+              <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Casino doors</span>
+              <span className="mt-1 block text-sm leading-snug text-slate-200">Head back out into the lobby.</span>
+              <span className="mt-2 block text-sm">
+                Press <Key>Space</Key> to log out
+              </span>
+            </button>
+          ) : near && label && !playing && !leaving ? (
+            // The help box, top left, like an open-world game's prompts.
+            <button
+              type="button"
+              onClick={() => play.current(near)}
+              disabled={!ready}
+              className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm disabled:cursor-default sm:left-5 sm:top-5"
+            >
+              <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">{label.name}</span>
+              <span className="mt-1 block text-sm leading-snug text-slate-200">{label.description}</span>
+              <span className="mt-2 block text-sm">
+                {!ready ? (
+                  <span className="text-slate-400">Coming soon</span>
+                ) : guest ? (
+                  <>
+                    Press <Key>Space</Key> to log in and play
+                  </>
+                ) : (
+                  <>
+                    Press <Key>Space</Key> to play {label.name}
+                  </>
+                )}
+              </span>
+            </button>
+          ) : null}
 
-        {leaving ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
-            <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">Logging out…</span>
-          </div>
-        ) : null}
+          {leaving ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
+              <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">Logging out…</span>
+            </div>
+          ) : null}
 
-        {opening && playing ? (
-          // The camera's over the table; a word while the game opens.
-          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
-            <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">
-              {guest ? 'To the login…' : `Opening ${playing.interactive?.name ?? ''}…`}
-            </span>
-          </div>
-        ) : null}
+          {opening && playing ? (
+            // The camera's over the table; a word while the game opens.
+            <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
+              <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">
+                {guest ? 'To the login…' : `Opening ${playing.interactive?.name ?? ''}…`}
+              </span>
+            </div>
+          ) : null}
+        </div>
+
+        {/* The same games as a plain list, for anyone who'd rather not walk. */}
+        <nav aria-label="Games" className="flex flex-wrap items-center justify-center gap-2 text-xs uppercase tracking-wider text-slate-400">
+          <span>Or go straight to:</span>
+          {INTERACTIVE_OBJECTS.map((object) =>
+            object.interactive?.href ? (
+              <Link
+                key={object.id}
+                href={playHref(member, object.interactive.href)}
+                className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
+              >
+                {object.interactive.name}
+              </Link>
+            ) : (
+              <span key={object.id} className="rounded border border-slate-800 px-3 py-1.5 text-slate-600">
+                {object.interactive?.name} (soon)
+              </span>
+            )
+          )}
+        </nav>
       </div>
 
-      {/* The same games as a plain list, for anyone who'd rather not walk. */}
-      <nav aria-label="Games" className="flex flex-wrap items-center justify-center gap-2 text-xs uppercase tracking-wider text-slate-400">
-        <span>Or go straight to:</span>
-        {INTERACTIVE_OBJECTS.map((object) =>
-          object.interactive?.href ? (
-            <Link
-              key={object.id}
-              href={playHref(member, object.interactive.href)}
-              className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
-            >
-              {object.interactive.name}
-            </Link>
-          ) : (
-            <span key={object.id} className="rounded border border-slate-800 px-3 py-1.5 text-slate-600">
-              {object.interactive?.name} (soon)
-            </span>
-          )
-        )}
-      </nav>
-    </div>
+      {/* Outside the floor's part of the page, so the tablet's screens are in
+          the website's own font, as on the sign-up and login pages. */}
+      {tabletOpen ? (
+        <CheckInTablet
+          onClose={() => {
+            setTabletOpen(false);
+            setCheckingIn(false);
+          }}
+          onLoggedIn={checkedIn}
+        />
+      ) : null}
+    </>
   );
 }
 

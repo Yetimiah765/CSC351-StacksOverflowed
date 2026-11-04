@@ -4,6 +4,9 @@ import {
   DOOR,
   FLOOR_OBJECTS,
   FOYER_PLANTS,
+  KIOSKS,
+  atKiosk,
+  kioskStandingSpots,
   parseSpot,
   serializeSpot,
   FOUNTAIN,
@@ -471,6 +474,27 @@ describe('back where you were (SRS-107.7)', () => {
     for (const raw of [null, '', 'not json', '{}', '{"x":1,"y":2}', JSON.stringify({ ...onFloor, x: 'left' }), JSON.stringify({ ...onFloor, y: Infinity })]) {
       expect(parseSpot(raw, false), String(raw)).toBeNull();
     }
+  });
+});
+
+describe('the check-in kiosk (SRS-103.13)', () => {
+  it('lets a guest at the front desk use the tablet they are nearest', () => {
+    // Walking straight to the desk from the middle of the lobby.
+    let at = LOBBY_MIDDLE;
+    for (let i = 0; i < 400; i++) at = moveWithCollisions(at, { x: -0.05, y: 0 });
+    expect(atKiosk(at)).not.toBeNull();
+    // Each tablet has somewhere open to stand in reach of it, reachable from the middle.
+    KIOSKS.forEach((_, kiosk) => {
+      const spots = kioskStandingSpots(kiosk);
+      expect(spots.length, `kiosk ${kiosk}`).toBeGreaterThan(0);
+      for (const spot of spots) expect(atKiosk({ x: spot.x + 0.5, y: spot.y + 0.5 })).toBe(kiosk);
+      expect(findPath({ x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) }, spots)).not.toBeNull();
+    });
+  });
+
+  it('is out of reach from the middle of the lobby, and from the casino floor', () => {
+    expect(atKiosk(LOBBY_MIDDLE)).toBeNull();
+    expect(atKiosk({ x: START.x + 0.5, y: START.y + 0.5 })).toBeNull();
   });
 });
 

@@ -410,6 +410,18 @@ export const LOBBY_COLUMNS: { x: number; z: number }[] = [-1, 1].flatMap((side) 
 /** The curved front desk: its centre of curvature, the radius of its front, the angle its front spans (centred on +x, towards the lobby), and the radius its work surface reaches in to. */
 export const FRONT_DESK = { x: -LOBBY_HALF - 0.4, z: LOBBY_MID, radius: 2.5, span: 1.66, inner: 2.5 - 0.85 };
 
+/** The check-in tablets on the desk (SRS-103.13): the angles along its front they stand at, a little in from its edge, and how near a guest must be to use one. */
+export const KIOSKS = [-0.3, 0.3];
+export const KIOSK_INSET = 0.13;
+export const KIOSK_REACH = 1.3;
+
+/** Where a check-in tablet stands, in the lobby's metres. */
+export function kioskSpot(kiosk: number): { x: number; z: number } {
+  const angle = KIOSKS[kiosk] ?? 0;
+  const r = FRONT_DESK.radius - KIOSK_INSET;
+  return { x: FRONT_DESK.x + Math.cos(angle) * r, z: FRONT_DESK.z + Math.sin(angle) * r };
+}
+
 /** The benches against the side walls (`side` -1 the left wall, 1 the right), 1.4 m long. */
 export const LOBBY_BENCHES: { side: -1 | 1; z: number }[] = [
   { side: -1, z: 1.15 },
@@ -759,3 +771,35 @@ export function parseSpot(raw: string | null, guest: boolean): StoodSpot | null 
   if (guest !== spot.y > FRONT_WALL_Y) return null;
   return circleBlocked(spot.x, spot.y, PLAYER_RADIUS) ? null : spot;
 }
+
+// ---------- the check-in kiosk (SRS-103.13) ----------
+
+/** The check-in tablet a guest at `at` (in tiles, in the lobby) is near enough to use, the nearer of the two: its index in KIOSKS, or null. */
+export function atKiosk(at: Point): number | null {
+  if (at.y <= FRONT_WALL_Y) return null;
+  const x = (at.x - doorMiddle) * TILE_METRES;
+  const z = (at.y - FRONT_WALL_Y) * TILE_METRES;
+  let nearest: number | null = null;
+  let best = KIOSK_REACH;
+  KIOSKS.forEach((_, kiosk) => {
+    const spot = kioskSpot(kiosk);
+    const distance = Math.hypot(x - spot.x, z - spot.z);
+    if (distance < best) {
+      best = distance;
+      nearest = kiosk;
+    }
+  });
+  return nearest;
+}
+
+/** The open tiles in reach of a check-in tablet, where a click on it walks the guest to. */
+export function kioskStandingSpots(kiosk: number): Point[] {
+  const spots: Point[] = [];
+  for (let y = Math.ceil(FRONT_WALL_Y); y < FRONT_WALL_Y + LOBBY.depth; y++) {
+    for (let x = Math.floor(doorMiddle - LOBBY.width / 2); x < doorMiddle + LOBBY.width / 2; x++) {
+      if (!isBlocked(x, y) && atKiosk({ x: x + 0.5, y: y + 0.5 }) === kiosk) spots.push({ x, y });
+    }
+  }
+  return spots;
+}
+

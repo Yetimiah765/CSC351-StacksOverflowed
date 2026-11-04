@@ -1,6 +1,6 @@
 'use client';
 
-import { useFrame } from '@react-three/fiber';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import {
@@ -622,7 +622,18 @@ function StreetLamp({ x, z }: { x: number; z: number }) {
   );
 }
 
-export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }) {
+export default function Lobby({
+  state,
+  kioskOutlined = null,
+  kioskScreens,
+  onKioskClick,
+}: {
+  state: MutableRefObject<LobbyState>;
+  /** The check-in tablet a guest is near enough to use, outlined; each tablet's screen; a click on one (SRS-103.13). */
+  kioskOutlined?: number | null;
+  kioskScreens?: MutableRefObject<(THREE.Object3D | null)[]>;
+  onKioskClick?: (kiosk: number, event: ThreeEvent<MouseEvent>) => void;
+}) {
   const north = LOBBY_NORTH_Z;
   const south = LOBBY_SOUTH_Z;
   const depth = south - north;
@@ -905,7 +916,7 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
 
         {/* The front desk, in the middle of the left wall under the jackpot board. */}
         <group position={[doorX + FRONT_DESK.x, 0, north + FRONT_DESK.z]}>
-          <FrontDesk />
+          <FrontDesk outlined={kioskOutlined} screens={kioskScreens} onKioskClick={onKioskClick} />
         </group>
 
         {/* By the front windows: the giant dice, and a luggage cart. */}

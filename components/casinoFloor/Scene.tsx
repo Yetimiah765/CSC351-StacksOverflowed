@@ -27,6 +27,7 @@ import {
   exitWalk,
   findPath,
   isBlocked,
+  isInLobby,
   moveWithCollisions,
   nearbyObjectAt,
   nearestChair,
@@ -1512,8 +1513,9 @@ function Floor({
   // (SRS-103.12).
   const [entrance] = useState(() => (entering && !rising ? planEntrance(guest) : null));
   const walkIn = useRef<WalkIn | null>(entrance);
-  // A guest is in the lobby, whether or not they're seen walking in.
-  const inLobby = guest && !rising;
+  // In the lobby: a guest, whether or not they're seen walking in, or anyone
+  // put back where they last stood there (SRS-107.6, SRS-107.7).
+  const inLobby = !rising && (guest || (spot ? isInLobby(spot) : false));
   const lobby = useRef<LobbyState>({ front: 0, casino: 0, gate: 0, lit: 1, shown: entrance !== null || inLobby });
   // Leaving through the casino's doors (SRS-105.5), once the page says so;
   // Player plans the walk out from wherever the player is.

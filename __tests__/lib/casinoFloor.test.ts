@@ -20,7 +20,6 @@ import {
   parseSpot,
   serializeSpot,
   FOUNTAIN,
-  FOUNTAIN_ROPE,
   FRONT_DESK,
   LOBBY_SIZE,
   atCasinoDoors,
@@ -39,6 +38,7 @@ import {
   entranceWalk,
   findPath,
   isBlocked,
+  isInLobby,
   moveWithCollisions,
   chairTile,
   nearbyObjectAt,
@@ -499,7 +499,7 @@ describe('walking around the lobby (SRS-107.6)', () => {
   };
   const pace = 0.05;
 
-  it('lets a guest walk about from the middle of the lobby', () => {
+  it('lets the player walk about from the middle of the lobby', () => {
     expect(isBlocked(Math.floor(LOBBY_MIDDLE.x), Math.floor(LOBBY_MIDDLE.y))).toBe(false);
     for (const step of [{ x: 0, y: pace }, { x: -pace, y: 0 }, { x: pace, y: 0 }, { x: 0, y: -pace }]) {
       const at = walkFrom(LOBBY_MIDDLE, step, 20);
@@ -528,9 +528,12 @@ describe('walking around the lobby (SRS-107.6)', () => {
     expect(findPath(atDeskTile(atDesk), [{ x: Math.floor(behind.x), y: Math.floor(behind.y) }])).toBeNull();
   });
 
-  it('keeps them out of the roped-off fountain', () => {
-    const atRope = walkFrom(LOBBY_MIDDLE, { x: pace, y: 0 }, 400);
-    expect(atRope.x).toBeLessThan(tile(FOUNTAIN_ROPE[2]!.x, 0).x);
+  it("lets them walk right up to the fountain, but not into its basin", () => {
+    const atBasin = walkFrom(LOBBY_MIDDLE, { x: pace, y: 0 }, 400);
+    const rim = tile(FOUNTAIN.x - FOUNTAIN.radius, FOUNTAIN.z).x;
+    expect(atBasin.x).toBeLessThan(rim);
+    // No rope round it: they get to within half a metre of its rim.
+    expect(rim - atBasin.x).toBeLessThan(0.5 / TILE_METRES);
     const fountain = tile(FOUNTAIN.x, FOUNTAIN.z);
     expect(findPath({ x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) }, [{ x: Math.floor(fountain.x) - 1, y: Math.floor(fountain.y) }])).toBeNull();
   });
@@ -550,16 +553,17 @@ describe('back where you were (SRS-107.7)', () => {
   const onFloor = { x: START.x + 0.5, y: START.y + 0.5, heading: 1.2, yaw: -0.4 };
   const inLobby = { x: LOBBY_MIDDLE.x - 1, y: LOBBY_MIDDLE.y + 1.5, heading: 0.3, yaw: 2.1 };
 
-  it("remembers a logged-in player's spot on the casino floor, and a guest's in the lobby", () => {
+  it("remembers a logged-in player's spot on the casino floor or in the lobby, and a guest's in the lobby", () => {
     expect(parseSpot(serializeSpot(onFloor), false)).toEqual(onFloor);
+    expect(parseSpot(serializeSpot(inLobby), false)).toEqual(inLobby);
     expect(parseSpot(serializeSpot(inLobby), true)).toEqual(inLobby);
+    expect(isInLobby(inLobby)).toBe(true);
+    expect(isInLobby(onFloor)).toBe(false);
   });
 
   it('puts nobody where they may no longer stand', () => {
-    // A guest now (their session ended) can't be put back on the floor, and
-    // a logged-in player isn't put back in the lobby.
+    // A guest now (their session ended) can't be put back on the floor.
     expect(parseSpot(serializeSpot(onFloor), true)).toBeNull();
-    expect(parseSpot(serializeSpot(inLobby), false)).toBeNull();
     // Nor inside anything: a wall, the poker table.
     expect(parseSpot(serializeSpot({ ...onFloor, x: 0.2 }), false)).toBeNull();
     const poker = FLOOR_OBJECTS.find((object) => object.id === 'poker')!;

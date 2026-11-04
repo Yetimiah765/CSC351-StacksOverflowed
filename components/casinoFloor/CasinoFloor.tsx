@@ -11,6 +11,7 @@ import {
   SEAT_KEY,
   SPOT_KEY,
   VISITED_KEY,
+  isInLobby,
   parseSpot,
   parseTakenSeat,
   serializeSpot,
@@ -214,18 +215,23 @@ export default function CasinoFloor() {
   // Logged out on the profile (SRS-105.6): they're shown leaving from where
   // they were (getting up from their seat, or from where they stood on the
   // floor) and walking out into the lobby, a guest from then on; with
-  // reduced motion they're just a guest in the lobby.
+  // reduced motion they're just a guest in the lobby. Last in the lobby,
+  // they stay where they stood, a guest.
   const [outAfterProfile, setOutAfterProfile] = useState(false);
   const outAfterProfileRef = useRef(false);
   useEffect(() => {
     if (sessionOk === null || placed.current) return;
     placed.current = true;
     // (Each read, and so forgotten, either way; walking out comes first.)
-    const walkOut = takeWalkOut() && !sessionOk && !prefersReducedMotion();
+    let walkOut = takeWalkOut() && !sessionOk && !prefersReducedMotion();
     const handed = takeHandedOverCheckIn();
+    let seat = readTakenSeat();
+    if (walkOut && !seat) {
+      const last = readSpot(false);
+      if (last && isInLobby(last)) walkOut = false;
+    }
     const handOver = sessionOk || walkOut ? null : handed;
     setHandedOver(handOver);
-    let seat = readTakenSeat();
     if (seat && !sessionOk && !walkOut) {
       forgetTakenSeat();
       seat = null;

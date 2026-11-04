@@ -486,7 +486,9 @@ function alongWalk(points: THREE.Vector2[], walked: number) {
 /**
  * Leaving through the casino's doors (SRS-105.5): the player turns to the
  * doors as they swing open and walks out through them into the middle of the
- * lobby, then turns round to watch them shut. The camera swings round behind
+ * lobby, then turns round to watch them shut. After logging out on the
+ * profile (SRS-105.6) the walk starts wherever they were on the floor, the
+ * way round anything in the way, through the gate. The camera swings round behind
  * them from wherever it was, follows them through the doorway (a little to
  * one side, inside it), and once they're in the lobby swings round them,
  * between them and the fountain, to behind them, where it follows from — as
@@ -538,9 +540,10 @@ function planExit(from: Point, camera: THREE.Vector3, atOnce: boolean): WalkOut 
 
 /** How far open the casino's doors are, and how bright the lobby is, on the walk out. */
 function walkOutDoors(out: WalkOut) {
-  // The casino's doors open as the player turns to them, letting the lobby's
-  // light in, and shut once they're in the lobby and the camera's clear.
-  const opened = smooth((out.t - 0.15) / 1.3);
+  // The casino's doors open as the player turns to them (or, from further
+  // off on the floor, as they come up to them), letting the lobby's light
+  // in, and shut once they're in the lobby and the camera's clear.
+  const opened = smooth((out.t - 0.15) / 1.3) * smooth((out.progress - (out.doors - 3.5)) / 1.3);
   const shut = 1 - smooth((out.progress - (out.length + 1.6)) / 1.6);
   return {
     casino: out.skip ? 0 : opened * shut,
@@ -581,6 +584,8 @@ function walkOutCamera(out: WalkOut, here: THREE.Vector2, follow: Camera) {
     const halfW = (COLS / 2 - 1.3) * TILE_M;
     position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
     position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);
+    // (Walking out from the back of the room, SRS-105.6, it stays inside the back wall.)
+    position.z = Math.max(position.z, (2 - ROWS / 2) * TILE_M + 0.4);
   }
   return position;
 }
@@ -1400,7 +1405,11 @@ function Floor({
     const skip = (event: Event) => {
       if (walkIn.current) walkIn.current.skip = true;
       const out = walkOut.current;
-      if (out && typeof out === 'object' && !(event as KeyboardEvent).repeat) out.skip = true;
+      if (out && !(event as KeyboardEvent).repeat) {
+        // (Asked for but not yet planned, it starts skipped.)
+        if (typeof out === 'object') out.skip = true;
+        else walkOut.current = 'asked at once';
+      }
       // The walk to the desk, and the camera flying into or out of a check-in tablet, too (not while it's up close: those keys are for its forms).
       if (kiosk.current && kiosk.current.stage !== 'open' && !(event as KeyboardEvent).repeat) kiosk.current.skip = true;
     };

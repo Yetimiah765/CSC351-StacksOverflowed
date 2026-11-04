@@ -625,3 +625,49 @@ describe('casino doors for guests (SRS-103.15)', () => {
     }
   });
 });
+
+describe('walking out after logging out on the profile (SRS-105.6)', () => {
+  const middle = DOOR.x + DOOR.w / 2;
+
+  // Every tile a player can walk to on the floor from the door, stepping from tile to tile the way they're moved.
+  const walkable = (() => {
+    const key = (tile: Point) => `${tile.x},${tile.y}`;
+    const seen = new Map<string, Point>([[key(START), START]]);
+    const queue: Point[] = [START];
+    while (queue.length > 0) {
+      const tile = queue.shift()!;
+      for (const step of [{ x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]) {
+        const next = { x: tile.x + step.x, y: tile.y + step.y };
+        if (seen.has(key(next)) || next.y >= FRONT_WALL_Y || isBlocked(next.x, next.y)) continue;
+        if (!unblocked({ x: tile.x + 0.5, y: tile.y + 0.5 }, { x: next.x + 0.5, y: next.y + 0.5 })) continue;
+        seen.set(key(next), next);
+        queue.push(next);
+      }
+    }
+    return [...seen.values()];
+  })();
+
+  it('walks out from anywhere on the casino floor, round everything in the way, through the gate and the doors into the lobby', () => {
+    let checked = 0;
+    for (const { x, y } of walkable) {
+      {
+        const from = { x: x + 0.5, y: y + 0.5 };
+        const walk = exitWalk(from);
+        expect(walk[0]).toEqual(from);
+        expect(walk[walk.length - 1]).toEqual(LOBBY_MIDDLE);
+        expect(walk[walk.length - 2]).toEqual({ x: middle, y: FRONT_WALL_Y });
+        // Up to in front of the doors (which only the walk out goes through), nothing's in the way.
+        for (let i = 1; i < walk.length - 2; i++) expect(unblocked(walk[i - 1]!, walk[i]!), `${x},${y}: ${JSON.stringify(walk)}`).toBe(true);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+  });
+
+  it('still steps straight across to the doors from in reach of them, as leaving through them does (SRS-105.5)', () => {
+    for (const spot of doorStandingSpots()) {
+      const from = { x: spot.x + 0.5, y: spot.y + 0.5 };
+      expect(exitWalk(from).length).toBeLessThanOrEqual(4);
+    }
+  });
+});

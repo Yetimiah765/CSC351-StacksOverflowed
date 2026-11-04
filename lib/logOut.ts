@@ -20,3 +20,26 @@ export async function logOut(): Promise<void> {
   }
   localStorage.removeItem('player_token');
 }
+
+// Logging out on the profile, the player's then seen leaving the casino on
+// the home page (SRS-105.6): the profile leaves WALK_OUT_KEY in
+// sessionStorage, and the home page reads it once.
+export const WALK_OUT_KEY = 'casino-floor-walk-out';
+
+export function askToWalkOut() {
+  try {
+    sessionStorage.setItem(WALK_OUT_KEY, '1');
+  } catch {
+    // Not remembered: the home page just starts them in the lobby.
+  }
+}
+
+export function takeWalkOut(): boolean {
+  try {
+    const asked = sessionStorage.getItem(WALK_OUT_KEY) === '1';
+    sessionStorage.removeItem(WALK_OUT_KEY);
+    return asked;
+  } catch {
+    return false;
+  }
+}

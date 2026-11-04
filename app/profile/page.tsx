@@ -12,7 +12,7 @@ import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection, { type PlayerStats } from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
 import { notifyAppearanceChanged } from '../../lib/balanceEvents';
-import { logOut } from '../../lib/logOut';
+import { askToWalkOut, logOut } from '../../lib/logOut';
 import { publicProfilePath } from '../../lib/publicProfile';
 import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
 
@@ -187,9 +187,11 @@ export default function ProfilePage() {
   }
 
   // SRS-105.1: logOut() ends the session on the server and in this browser.
+  // Then the home page shows them leaving the casino (SRS-105.6).
   async function handleLogout() {
     setLoggingOut(true);
     await logOut();
+    askToWalkOut();
     router.push('/');
   }
 

@@ -21,7 +21,7 @@ import {
 } from '../../lib/casinoFloor';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm, type HandOver } from '../../lib/checkIn';
-import { logOut } from '../../lib/logOut';
+import { logOut, takeWalkOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import CheckInTablet from './CheckInTablet';
 import type { DoorsSide, WalkInput } from './Scene';
@@ -211,23 +211,36 @@ export default function CasinoFloor() {
   // on the floor). Turned away from a game's page, they don't walk in first
   // (SRS-108.8).
   const [handedOver, setHandedOver] = useState<HandOver | null>(null);
+  // Logged out on the profile (SRS-105.6): they're shown leaving from where
+  // they were (getting up from their seat, or from where they stood on the
+  // floor) and walking out into the lobby, a guest from then on; with
+  // reduced motion they're just a guest in the lobby.
+  const [outAfterProfile, setOutAfterProfile] = useState(false);
+  const outAfterProfileRef = useRef(false);
   useEffect(() => {
     if (sessionOk === null || placed.current) return;
     placed.current = true;
-    // (Read, and so forgotten, either way.)
+    // (Each read, and so forgotten, either way; walking out comes first.)
+    const walkOut = takeWalkOut() && !sessionOk && !prefersReducedMotion();
     const handed = takeHandedOverCheckIn();
-    const handOver = sessionOk ? null : handed;
+    const handOver = sessionOk || walkOut ? null : handed;
     setHandedOver(handOver);
     let seat = readTakenSeat();
-    if (seat && !sessionOk) {
+    if (seat && !sessionOk && !walkOut) {
       forgetTakenSeat();
       seat = null;
     }
     setReturning(seat);
-    const walkIn = wantsEntrance() && !seat && !handOver?.play;
+    const walkIn = wantsEntrance() && !seat && !handOver?.play && !walkOut;
     if (!walkIn) forgetEntrance();
     setEntering(walkIn);
-    setSpot(!walkIn && !seat ? readSpot(!sessionOk) : null);
+    setSpot(!walkIn && !seat ? readSpot(!sessionOk && !walkOut) : null);
+    if (walkOut) {
+      outAfterProfileRef.current = true;
+      setOutAfterProfile(true);
+      // Getting up first, if they were seated (see onStood); then the walk.
+      if (!seat) setLeaving('walk');
+    }
   }, [sessionOk]);
 
   // The game being sat down at (the scene plays the sitting and the camera
@@ -269,6 +282,8 @@ export default function CasinoFloor() {
   left.current = () => {
     setLeaving(null);
     setSignedInHere(false);
+    outAfterProfileRef.current = false;
+    setOutAfterProfile(false);
   };
 
   // Checking in at a front-desk tablet (SRS-103.13): the camera flies in
@@ -461,7 +476,11 @@ export default function CasinoFloor() {
                 playing={playing}
                 onSeated={(object, spot) => seated.current(object, spot)}
                 returning={returning}
-                onStood={forgetTakenSeat}
+                onStood={() => {
+                  forgetTakenSeat();
+                  // Up after logging out on the profile: on out of the casino (SRS-105.6).
+                  if (outAfterProfileRef.current) setLeaving('walk');
+                }}
                 entering={entering}
                 onEntered={forgetEntrance}
                 canLeave={canLeave}
@@ -473,7 +492,7 @@ export default function CasinoFloor() {
                 leaving={leaving !== null}
                 leaveAtOnce={leaving === 'now'}
                 onLeft={() => left.current()}
-                guest={guest}
+                guest={guest && !outAfterProfile}
                 spot={spot}
                 onSpot={rememberSpot}
                 onNearKiosk={(kiosk) => {

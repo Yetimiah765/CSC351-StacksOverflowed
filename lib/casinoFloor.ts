@@ -647,9 +647,11 @@ function throughRail(from: Point, to: Point) {
 /**
  * The shortest walk (4 directions, around anything in the way) from `from`
  * to the nearest of `targets`, as the tiles to step onto in order — empty if
- * already there, null if none can be reached.
+ * already there, null if none can be reached. `strict` takes a step only if
+ * the player can walk straight from one tile's middle to the next's (an open
+ * tile can still have a chair's edge between it and the next).
  */
-export function findPath(from: Point, targets: Point[]): Point[] | null {
+export function findPath(from: Point, targets: Point[], strict = false): Point[] | null {
   const key = (point: Point) => point.y * COLS + point.x;
   const goals = new Set(targets.map(key));
   if (goals.has(key(from))) return [];
@@ -662,6 +664,7 @@ export function findPath(from: Point, targets: Point[]): Point[] | null {
       const next = { x: current.x + step.x, y: current.y + step.y };
       const nextKey = key(next);
       if (cameFrom.has(nextKey) || isBlocked(next.x, next.y) || throughRail(current, next)) continue;
+      if (strict && !canStep(current, next)) continue;
       cameFrom.set(nextKey, key(current));
       if (goals.has(nextKey)) {
         const path: Point[] = [];
@@ -674,6 +677,18 @@ export function findPath(from: Point, targets: Point[]): Point[] | null {
     }
   }
   return null;
+}
+
+// Whether the player can walk straight between two neighbouring tiles' middles, worked out once each (the layout never changes).
+const stepsClear = new Map<string, boolean>();
+function canStep(from: Point, to: Point): boolean {
+  const key = `${from.x},${from.y},${to.x},${to.y}`;
+  let clear = stepsClear.get(key);
+  if (clear === undefined) {
+    clear = clearLine({ x: from.x + 0.5, y: from.y + 0.5 }, { x: to.x + 0.5, y: to.y + 0.5 });
+    stepsClear.set(key, clear);
+  }
+  return clear;
 }
 
 // ---------- the gate in the rail (SRS-105.4) ----------
@@ -727,9 +742,11 @@ export function doorStandingSpots(fromLobby = false): Point[] {
   return spots;
 }
 
-/** The walk out, in tiles: from `from` (in reach of the doors) to just in front of them, then through them into the middle of the lobby, where a guest's walk in ends. */
+/** The walk out, in tiles: from `from` to just in front of the doors (from further off on the floor, the way round anything in the way to within reach of them first, SRS-105.6), then through them into the middle of the lobby, where a guest's walk in ends. */
 export function exitWalk(from: Point): Point[] {
-  const points = [from, { x: doorMiddle, y: Math.max(from.y, FRONT_WALL_Y - 1.1) }, { x: doorMiddle, y: FRONT_WALL_Y }, LOBBY_MIDDLE];
+  const toDoors = atCasinoDoors(from) ? [from] : walkRoute(from, doorStandingSpots()) ?? [from];
+  const near = toDoors[toDoors.length - 1]!;
+  const points = [...toDoors, { x: doorMiddle, y: Math.max(near.y, FRONT_WALL_Y - 1.1) }, { x: doorMiddle, y: FRONT_WALL_Y }, LOBBY_MIDDLE];
   return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
 }
 
@@ -844,25 +861,35 @@ export function clearLine(a: Point, b: Point, radius = PLAYER_RADIUS): boolean {
 const PASSING_ROOM = 0.1;
 
 /**
- * The walk from `from` (tiles, in the lobby) to stand at the check-in tablet
- * it's the shorter walk to: the shortest way round anything in the way,
- * straightened wherever it can go straight. Null if neither can be reached.
+ * A walk from `from` (tiles) to the nearest of `targets` (tiles): the
+ * shortest way round anything in the way, straightened wherever it can go
+ * straight, ending at `end` if given (in the target tile), otherwise in the
+ * middle of the tile reached. Null if none can be reached.
  */
+export function walkRoute(from: Point, targets: Point[], end?: Point): Point[] | null {
+  const start = { x: Math.floor(from.x), y: Math.floor(from.y) };
+  const tiles = findPath(start, targets, true);
+  if (!tiles) return null;
+  const reached = tiles[tiles.length - 1] ?? start;
+  const steps = [from, ...tiles.slice(0, -1).map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), end ?? { x: reached.x + 0.5, y: reached.y + 0.5 }];
+  // From each point, on to the furthest one there's a clear line to.
+  const points = [from];
+  for (let i = 0; i < steps.length - 1; ) {
+    let j = steps.length - 1;
+    while (j > i + 1 && !clearLine(steps[i]!, steps[j]!, PLAYER_RADIUS + PASSING_ROOM)) j--;
+    points.push(steps[j]!);
+    i = j;
+  }
+  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}
+
+/** The walk from `from` (tiles, in the lobby) to stand at the check-in tablet it's the shorter walk to (see walkRoute). Null if neither can be reached. */
 export function deskWalk(from: Point): { kiosk: number; points: Point[] } | null {
   let best: { kiosk: number; points: Point[]; length: number } | null = null;
   KIOSKS.forEach((_, kiosk) => {
     const stand = kioskStand(kiosk);
-    const tiles = findPath({ x: Math.floor(from.x), y: Math.floor(from.y) }, [{ x: Math.floor(stand.x), y: Math.floor(stand.y) }]);
-    if (!tiles) return;
-    const steps = [from, ...tiles.slice(0, -1).map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), stand];
-    // From each point, on to the furthest one there's a clear line to.
-    const points = [from];
-    for (let i = 0; i < steps.length - 1; ) {
-      let j = steps.length - 1;
-      while (j > i + 1 && !clearLine(steps[i]!, steps[j]!, PLAYER_RADIUS + PASSING_ROOM)) j--;
-      points.push(steps[j]!);
-      i = j;
-    }
+    const points = walkRoute(from, [{ x: Math.floor(stand.x), y: Math.floor(stand.y) }], stand);
+    if (!points) return;
     const length = points.slice(1).reduce((sum, point, i) => sum + Math.hypot(point.x - points[i]!.x, point.y - points[i]!.y), 0);
     if (!best || length < best.length) best = { kiosk, points, length };
   });

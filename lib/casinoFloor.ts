@@ -132,7 +132,47 @@ export const FLOOR_OBJECTS: FloorObject[] = [
 /** Where the player appears: just inside the door, facing in. */
 export const START: Point & { direction: Direction } = { x: 16, y: 13, direction: 'up' };
 /** The door in the bottom wall (two tiles wide), drawn but not walkable. */
-export const DOOR = { x: 15, y: 14, w: 2 };
+export const DOOR = { x: 16, y: 14, w: 2 };
+
+// ---------- walking in (SRS-103.12) ----------
+// The first time the home page opens in a browser tab, and just after
+// logging in, the player is seen walking in from the street: a guest as far
+// as the middle of the lobby (they can't go into the casino until they've
+// checked in), a logged-in player on through the casino's doors onto the
+// floor. The tab remembers it's been opened under VISITED_KEY; logging in
+// leaves ENTRANCE_KEY, cleared once they're in.
+export const ENTRANCE_KEY = 'casino-floor-entrance';
+export const VISITED_KEY = 'casino-floor-visited';
+
+/** The casino's front wall, with its big doors in line with DOOR, in tiles:
+ * past the floor's front rail (DOOR.y, where the gate is), leaving a foyer
+ * the camera following the player can stand in without going through it. */
+export const FRONT_WALL_Y = DOOR.y + 4.25;
+
+/** The lobby in front of the casino, in tiles: it runs from the casino's
+ * front wall out to the building's front door, `depth` tiles away, and is
+ * `width` tiles wide, centred on the door. It's only there for the walk in. */
+export const LOBBY = { depth: 12.5, width: 15 };
+
+/** The middle of the lobby, in tiles: on the inlay, where a guest's walk in ends. */
+export const LOBBY_MIDDLE: Point = { x: DOOR.x + DOOR.w / 2, y: FRONT_WALL_Y + LOBBY.depth / 2 };
+
+/** The walk in, in tiles, all down the middle of the door: from outside the
+ * building through its front door into the lobby, and for a guest no
+ * further than its middle. A logged-in player goes on through the casino's
+ * doors and the foyer, through the gate in the rail, to a couple of steps
+ * onto the floor, short of the shop counter's reach, so no game's prompt
+ * pops up the moment they take over. */
+export function entranceWalk(guest = false): Point[] {
+  const doorMiddle = DOOR.x + DOOR.w / 2;
+  const front = FRONT_WALL_Y + LOBBY.depth;
+  const intoLobby = [
+    { x: doorMiddle, y: front + 2.25 },
+    { x: doorMiddle, y: front },
+  ];
+  if (guest) return [...intoLobby, LOBBY_MIDDLE];
+  return [...intoLobby, { x: doorMiddle, y: FRONT_WALL_Y }, { x: doorMiddle, y: DOOR.y }, { x: doorMiddle, y: DOOR.y - 2.1 }];
+}
 
 export const INTERACTIVE_OBJECTS = FLOOR_OBJECTS.filter((object) => object.interactive);
 
@@ -179,7 +219,9 @@ export function serializeTakenSeat(seat: TakenSeat): string {
 export type Shape =
   | { type: 'box'; x: number; z: number; w: number; d: number }
   | { type: 'ellipse'; x: number; z: number; rx: number; rz: number }
-  | { type: 'circle'; x: number; z: number; r: number };
+  | { type: 'circle'; x: number; z: number; r: number }
+  /** A rope between two posts: from (x, z) by (dx, dz), `r` thick. */
+  | { type: 'capsule'; x: number; z: number; dx: number; dz: number; r: number };
 
 export interface Seat {
   x: number;
@@ -409,14 +451,34 @@ export const PLAYER_RADIUS = 0.3;
 
 const inBarAlcove = (x: number, y: number) =>
   x >= BAR_ALCOVE.x && x < BAR_ALCOVE.x + BAR_ALCOVE.w && y >= BAR_ALCOVE.y && y < BAR_ALCOVE.y + BAR_ALCOVE.h;
-const isWall = (x: number, y: number) => (x < LEFT_WALL && !inBarAlcove(x, y)) || x >= COLS - 1 || y <= 1 || y >= ROWS - 1;
+
+// The front of the room (SRS-105.4): a rail runs across at y = DOOR.y, with
+// a gate in it in front of the casino's doors, and the foyer beyond it, up to
+// the front wall, is floor too, so the player can walk through the gate to
+// the doors and back. On the left the room stops at LEFT_WALL, except for the
+// bar's alcove.
+const isWall = (x: number, y: number) => {
+  if (y < Math.floor(FRONT_WALL_Y)) return (x < LEFT_WALL && !inBarAlcove(x, y)) || x >= COLS - 1 || y <= 1;
+  // From the front wall's row on there's only the lobby (its walls are
+  // solids, LOBBY_SOLIDS), and nothing beyond it.
+  return x < doorMiddle - LOBBY.width / 2 - 1 || x >= doorMiddle + LOBBY.width / 2 + 1 || y >= FRONT_WALL_Y + LOBBY.depth + 1;
+};
+
+/** The gate in the rail: how far it reaches each side of the door's middle, in tiles (each of its two leaves is this long). */
+export const GATE_HALF_WIDTH = 2;
+const doorMiddle = DOOR.x + DOOR.w / 2;
+/** The rail's depth, metres (its gold cap). */
+const RAIL_DEPTH = 0.24;
+/** The plants either side of the casino's doors, in the foyer (CasinoFront.tsx draws them), in tiles. */
+export const FOYER_PLANTS: Point[] = [-1, 1].map((side) => ({ x: doorMiddle + side * 3.4, y: FRONT_WALL_Y - 0.7 }));
 
 /** A shape in tiles: centred, measured in the room's tile grid. */
 interface TileShape {
   shape: Shape;
   cx: number;
   cy: number;
-  object: FloorObject;
+  /** The piece it's part of; none for the rail and the foyer's plants. */
+  object?: FloorObject;
 }
 
 const SOLIDS: TileShape[] = FLOOR_OBJECTS.flatMap((object) =>
@@ -427,6 +489,119 @@ const SOLIDS: TileShape[] = FLOOR_OBJECTS.flatMap((object) =>
     object,
   }))
 );
+
+/** The rail either side of its gate, from x1 to x2 along y = DOOR.y. */
+const railPiece = (x1: number, x2: number): TileShape => ({
+  shape: { type: 'box', x: 0, z: 0, w: (x2 - x1) * TILE_METRES, d: RAIL_DEPTH },
+  cx: (x1 + x2) / 2,
+  cy: DOOR.y,
+});
+
+const FRONT_SOLIDS: TileShape[] = [
+  railPiece(LEFT_WALL, doorMiddle - GATE_HALF_WIDTH),
+  railPiece(doorMiddle + GATE_HALF_WIDTH, COLS - 1),
+  ...FOYER_PLANTS.map((plant) => ({ shape: { type: 'circle', x: 0, z: 0, r: 0.3 } as Shape, cx: plant.x, cy: plant.y })),
+];
+
+// ---------- the lobby's layout (SRS-103.12, SRS-107.6) ----------
+// Where things stand in the lobby, in metres: `x` across from the middle of
+// the casino's doorway, `z` out from the casino's front wall towards the
+// building's front. Lobby.tsx and FrontDesk.tsx draw them here, and
+// LOBBY_SOLIDS keeps a guest walking round the lobby out of them.
+
+/** The lobby inside its walls, metres. */
+export const LOBBY_SIZE = { width: LOBBY.width * TILE_METRES, depth: LOBBY.depth * TILE_METRES };
+const LOBBY_HALF = LOBBY_SIZE.width / 2;
+const LOBBY_MID = LOBBY_SIZE.depth / 2;
+
+/** How far each column (and the chandelier and ceiling rose in line with it) is from the middle of the lobby's length, and its distance in from its wall. */
+export const COLUMN_GAP = 2.4;
+export const COLUMN_INSET = 0.6;
+export const LOBBY_COLUMNS: { x: number; z: number }[] = [-1, 1].flatMap((side) =>
+  [-1, 1].map((end) => ({ x: side * (LOBBY_HALF - COLUMN_INSET), z: LOBBY_MID + end * COLUMN_GAP }))
+);
+
+/** The curved front desk: its centre of curvature, the radius of its front, the angle its front spans (centred on +x, towards the lobby), and the radius its work surface reaches in to. */
+export const FRONT_DESK = { x: -LOBBY_HALF - 0.4, z: LOBBY_MID, radius: 2.5, span: 1.66, inner: 2.5 - 0.85 };
+
+/** The check-in tablets on the desk (SRS-103.13): the angles along its front they stand at, a little in from its edge, and how near a guest must be to use one. */
+export const KIOSKS = [-0.3, 0.3];
+export const KIOSK_INSET = 0.13;
+export const KIOSK_REACH = 1.3;
+
+/** Where a check-in tablet stands, in the lobby's metres. */
+export function kioskSpot(kiosk: number): { x: number; z: number } {
+  const angle = KIOSKS[kiosk] ?? 0;
+  const r = FRONT_DESK.radius - KIOSK_INSET;
+  return { x: FRONT_DESK.x + Math.cos(angle) * r, z: FRONT_DESK.z + Math.sin(angle) * r };
+}
+
+/** The benches against the side walls (`side` -1 the left wall, 1 the right), 1.4 m long. */
+export const LOBBY_BENCHES: { side: -1 | 1; z: number }[] = [
+  { side: -1, z: 1.15 },
+  { side: 1, z: 1.15 },
+];
+export const BENCH_SIZE = { length: 1.4, depth: 0.5, fromWall: 0.45 };
+
+/** The fountain against the right wall, facing the desk, and the posts of the rope round it, from column to column. */
+export const FOUNTAIN = { x: LOBBY_HALF - 1.5, z: LOBBY_MID, radius: 1.12 };
+export const FOUNTAIN_ROPE: { x: number; z: number }[] = [
+  { x: LOBBY_HALF - 1.3, z: LOBBY_MID - COLUMN_GAP + 0.65 },
+  { x: LOBBY_HALF - 2.6, z: LOBBY_MID - 1.4 },
+  { x: LOBBY_HALF - 3.15, z: LOBBY_MID },
+  { x: LOBBY_HALF - 2.6, z: LOBBY_MID + 1.4 },
+  { x: LOBBY_HALF - 1.3, z: LOBBY_MID + COLUMN_GAP - 0.65 },
+];
+
+/** The roped aisle up to the casino's doors: posts either side of the carpet. */
+export const DOOR_ROPE = { x: 1.5, posts: [1.3, 2.6, 3.9] };
+
+/** Plants: either side of the casino's doors, and either side of the building's front doors. */
+export const LOBBY_PLANTS: { x: number; z: number }[] = [
+  ...[-1, 1].map((side) => ({ x: side * 2.4, z: 0.7 })),
+  ...[-1, 1].map((side) => ({ x: side * 2.0, z: LOBBY_SIZE.depth - 0.8 })),
+];
+
+/** The giant dice on their plinth, and the luggage cart (turned by `turn`) with its bellhop at its push bar, `bellhop` metres along it. */
+export const LOBBY_DICE = { x: 3.7, z: LOBBY_SIZE.depth - 1.4, radius: 0.62 };
+export const LUGGAGE_CART = { x: -4.2, z: LOBBY_SIZE.depth - 0.85, turn: 0.25, bellhop: 1.08 };
+
+/** A lobby position in metres to tiles. */
+const lobbyTile = (x: number, z: number) => ({ cx: doorMiddle + x / TILE_METRES, cy: FRONT_WALL_Y + z / TILE_METRES });
+const lobbyCircle = (x: number, z: number, r: number): TileShape => ({ shape: { type: 'circle', x: 0, z: 0, r }, ...lobbyTile(x, z) });
+const lobbyBox = (x: number, z: number, w: number, d: number): TileShape => ({ shape: { type: 'box', x: 0, z: 0, w, d }, ...lobbyTile(x, z) });
+
+const LOBBY_SOLIDS: TileShape[] = [
+  // The casino's front wall, doors and all (a guest can't go in; a
+  // logged-in player leaves through them only by the walk out), the side
+  // walls, and the building's front, its glass doors shut.
+  { shape: { type: 'box', x: 0, z: 0, w: COLS * TILE_METRES, d: 0.4 }, cx: COLS / 2, cy: FRONT_WALL_Y + 0.05 / TILE_METRES },
+  ...[-1, 1].map((side) => lobbyBox(side * (LOBBY_HALF + 0.1), LOBBY_MID, 0.2, LOBBY_SIZE.depth)),
+  lobbyBox(0, LOBBY_SIZE.depth + 0.15, LOBBY_SIZE.width, 0.3),
+  ...LOBBY_COLUMNS.map(({ x, z }) => lobbyBox(x, z, 0.84, 0.84)),
+  // The desk: circles along its curve, and its ends closed off to the wall so nobody walks round behind it.
+  ...Array.from({ length: 7 }, (_, i) => {
+    const angle = -FRONT_DESK.span / 2 + (i * FRONT_DESK.span) / 6;
+    const r = (FRONT_DESK.radius + FRONT_DESK.inner) / 2 + 0.02;
+    return lobbyCircle(FRONT_DESK.x + Math.cos(angle) * r, FRONT_DESK.z + Math.sin(angle) * r, 0.48);
+  }),
+  ...[-1, 1].map((end) => lobbyBox(-LOBBY_HALF + 0.4, FRONT_DESK.z + end * 1.55, 0.9, 0.7)),
+  ...LOBBY_BENCHES.map(({ side, z }) => lobbyBox(side * (LOBBY_HALF - BENCH_SIZE.fromWall), z, BENCH_SIZE.depth, BENCH_SIZE.length)),
+  ...LOBBY_PLANTS.map(({ x, z }) => lobbyCircle(x, z, 0.3)),
+  // The roped aisle up to the casino's doors, and the fountain with the rope round it.
+  ...[-1, 1].map((side) => lobbyBox(side * DOOR_ROPE.x, (DOOR_ROPE.posts[0]! + DOOR_ROPE.posts[2]!) / 2, 0.36, DOOR_ROPE.posts[2]! - DOOR_ROPE.posts[0]! + 0.36)),
+  lobbyCircle(FOUNTAIN.x, FOUNTAIN.z, FOUNTAIN.radius + 0.05),
+  ...FOUNTAIN_ROPE.slice(1).map((to, i) => {
+    const from = FOUNTAIN_ROPE[i]!;
+    return { shape: { type: 'capsule', x: 0, z: 0, dx: to.x - from.x, dz: to.z - from.z, r: 0.18 } as Shape, ...lobbyTile(from.x, from.z) };
+  }),
+  lobbyCircle(LOBBY_DICE.x, LOBBY_DICE.z, LOBBY_DICE.radius),
+  lobbyCircle(LUGGAGE_CART.x, LUGGAGE_CART.z, 0.75),
+  lobbyCircle(LUGGAGE_CART.x + Math.cos(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, LUGGAGE_CART.z - Math.sin(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, 0.3),
+];
+
+/** Everything the player bumps into, besides the walls. */
+const BLOCKING: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS, ...LOBBY_SOLIDS];
 
 /** How far a point is outside a shape, in tiles (0 or less when inside). */
 function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): number {
@@ -451,6 +626,13 @@ function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): nu
       if (scaled === 0) return -Math.min(rx, ry);
       return Math.hypot(dx, dy) * (1 - 1 / scaled);
     }
+    case 'capsule': {
+      // The distance to the line between its ends, less its thickness.
+      const ex = shape.dx / TILE_METRES;
+      const ey = shape.dz / TILE_METRES;
+      const along = Math.max(0, Math.min(1, (dx * ex + dy * ey) / (ex * ex + ey * ey || 1)));
+      return Math.hypot(dx - ex * along, dy - ey * along) - shape.r / TILE_METRES;
+    }
   }
 }
 
@@ -464,7 +646,7 @@ function circleBlocked(x: number, y: number, radius: number): boolean {
       if ((x - nearestX) ** 2 + (y - nearestY) ** 2 < radius * radius) return true;
     }
   }
-  return SOLIDS.some((solid) => distanceOutside(solid, x, y) < radius);
+  return BLOCKING.some((solid) => distanceOutside(solid, x, y) < radius);
 }
 
 /** Whatever's rectangle covers this tile, if anything (what a click on it means). */
@@ -570,12 +752,20 @@ export function standingSpots(object: FloorObject): Point[] {
   return spots;
 }
 
+/** Whether a step from one tile to the next would go through the rail rather than its gate. */
+function throughRail(from: Point, to: Point) {
+  const crossing = Math.min(from.y, to.y) === DOOR.y - 1 && Math.max(from.y, to.y) === DOOR.y;
+  return crossing && (to.x < doorMiddle - GATE_HALF_WIDTH || to.x >= doorMiddle + GATE_HALF_WIDTH);
+}
+
 /**
  * The shortest walk (4 directions, around anything in the way) from `from`
  * to the nearest of `targets`, as the tiles to step onto in order — empty if
- * already there, null if none can be reached.
+ * already there, null if none can be reached. `strict` takes a step only if
+ * the player can walk straight from one tile's middle to the next's (an open
+ * tile can still have a chair's edge between it and the next).
  */
-export function findPath(from: Point, targets: Point[]): Point[] | null {
+export function findPath(from: Point, targets: Point[], strict = false): Point[] | null {
   const key = (point: Point) => point.y * COLS + point.x;
   const goals = new Set(targets.map(key));
   if (goals.has(key(from))) return [];
@@ -587,7 +777,8 @@ export function findPath(from: Point, targets: Point[]): Point[] | null {
     for (const step of Object.values(STEP)) {
       const next = { x: current.x + step.x, y: current.y + step.y };
       const nextKey = key(next);
-      if (cameFrom.has(nextKey) || isBlocked(next.x, next.y)) continue;
+      if (cameFrom.has(nextKey) || isBlocked(next.x, next.y) || throughRail(current, next)) continue;
+      if (strict && !canStep(current, next)) continue;
       cameFrom.set(nextKey, key(current));
       if (goals.has(nextKey)) {
         const path: Point[] = [];
@@ -600,4 +791,223 @@ export function findPath(from: Point, targets: Point[]): Point[] | null {
     }
   }
   return null;
+}
+
+// Whether the player can walk straight between two neighbouring tiles' middles, worked out once each (the layout never changes).
+const stepsClear = new Map<string, boolean>();
+function canStep(from: Point, to: Point): boolean {
+  const key = `${from.x},${from.y},${to.x},${to.y}`;
+  let clear = stepsClear.get(key);
+  if (clear === undefined) {
+    clear = clearLine({ x: from.x + 0.5, y: from.y + 0.5 }, { x: to.x + 0.5, y: to.y + 0.5 });
+    stepsClear.set(key, clear);
+  }
+  return clear;
+}
+
+// ---------- the gate in the rail (SRS-105.4) ----------
+
+/** How far open the gate is, 0 shut to 1 open, and which way it's swung: 1 in onto the floor (towards the back of the room), -1 out into the foyer, 0 while shut. */
+export interface GateState {
+  open: number;
+  way: -1 | 0 | 1;
+}
+
+export const GATE_SHUT: GateState = { open: 0, way: 0 };
+
+/** Seconds the gate takes to swing open, or shut. */
+export const GATE_SWING_SECONDS = 0.35;
+
+/**
+ * The gate `seconds` later, with the player at `at` having just `moved` (in
+ * tiles). It swings open away from a player coming up to it, the way they're
+ * walking, stays open while they're anywhere its leaves could swing through,
+ * and swings shut once they're clear of them.
+ */
+export function stepGate(gate: GateState, at: Point, moved: Point, seconds: number): GateState {
+  const toHinge = (side: number) => Math.hypot(at.x - (doorMiddle + side * GATE_HALF_WIDTH), at.y - DOOR.y);
+  const clear = Math.min(toHinge(-1), toHinge(1)) > GATE_HALF_WIDTH + PLAYER_RADIUS + 0.2;
+  const railAhead = DOOR.y - at.y;
+  const comingUp = Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH + 1 && Math.abs(railAhead) < 2.4 && railAhead * moved.y > 0;
+  let way = gate.way;
+  if (way === 0 && comingUp) way = moved.y > 0 ? -1 : 1;
+  const target = way !== 0 && (comingUp || !clear) ? 1 : 0;
+  const step = seconds / GATE_SWING_SECONDS;
+  const open = target === 1 ? Math.min(1, gate.open + step) : Math.max(0, gate.open - step);
+  return { open, way: open === 0 && target === 0 ? 0 : way };
+}
+
+// ---------- leaving through the casino's doors (SRS-105.5) ----------
+
+/** Whether the player at `at` is in reach of the casino's doors from the foyer (not the lobby's side): close enough to leave through them. */
+export function atCasinoDoors(at: Point): boolean {
+  return Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH && at.y > FRONT_WALL_Y - 2.4 && at.y < FRONT_WALL_Y;
+}
+
+/** The open tiles in reach of the casino's doors, from the foyer (or for a guest, from the lobby, SRS-103.15), where a click on the doors walks the player to. */
+export function doorStandingSpots(fromLobby = false): Point[] {
+  const inReach = fromLobby ? atCasinoDoorsFromLobby : atCasinoDoors;
+  const spots: Point[] = [];
+  for (let y = DOOR.y; y < FRONT_WALL_Y + 3; y++) {
+    for (let x = doorMiddle - GATE_HALF_WIDTH; x < doorMiddle + GATE_HALF_WIDTH; x++) {
+      if (!isBlocked(x, y) && inReach({ x: x + 0.5, y: y + 0.5 })) spots.push({ x, y });
+    }
+  }
+  return spots;
+}
+
+/** The walk out, in tiles: from `from` to just in front of the doors (from further off on the floor, the way round anything in the way to within reach of them first, SRS-105.6), then through them into the middle of the lobby, where a guest's walk in ends. */
+export function exitWalk(from: Point): Point[] {
+  const toDoors = atCasinoDoors(from) ? [from] : walkRoute(from, doorStandingSpots()) ?? [from];
+  const near = toDoors[toDoors.length - 1]!;
+  const points = [...toDoors, { x: doorMiddle, y: Math.max(near.y, FRONT_WALL_Y - 1.1) }, { x: doorMiddle, y: FRONT_WALL_Y }, LOBBY_MIDDLE];
+  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}
+
+// ---------- back where you were (SRS-107.7) ----------
+// While the player walks about, the home page keeps where they stand in the
+// browser tab (sessionStorage, under SPOT_KEY), so coming back to it puts
+// them there again rather than at the door or outside.
+
+export const SPOT_KEY = 'casino-floor-spot';
+
+/** Where the player stood, in tiles, the way they faced, and the way the camera following them looked. */
+export interface StoodSpot {
+  x: number;
+  y: number;
+  heading: number;
+  yaw: number;
+}
+
+export function serializeSpot(spot: StoodSpot): string {
+  return JSON.stringify(spot);
+}
+
+/**
+ * The remembered spot, if it's still somewhere this player may stand: in
+ * the lobby for a guest, on the casino floor for a logged-in player, and
+ * not inside a wall or anything standing there.
+ */
+export function parseSpot(raw: string | null, guest: boolean): StoodSpot | null {
+  if (!raw) return null;
+  let saved: unknown;
+  try {
+    saved = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const { x, y, heading, yaw } = (saved ?? {}) as Partial<Record<keyof StoodSpot, unknown>>;
+  const numbers = [x, y, heading, yaw];
+  if (!numbers.every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+  const spot = { x, y, heading, yaw } as StoodSpot;
+  if (guest !== spot.y > FRONT_WALL_Y) return null;
+  return circleBlocked(spot.x, spot.y, PLAYER_RADIUS) ? null : spot;
+}
+
+// ---------- the check-in kiosk (SRS-103.13) ----------
+
+/** The check-in tablet a guest at `at` (in tiles, in the lobby) is near enough to use, the nearer of the two: its index in KIOSKS, or null. */
+export function atKiosk(at: Point): number | null {
+  if (at.y <= FRONT_WALL_Y) return null;
+  const x = (at.x - doorMiddle) * TILE_METRES;
+  const z = (at.y - FRONT_WALL_Y) * TILE_METRES;
+  let nearest: number | null = null;
+  let best = KIOSK_REACH;
+  KIOSKS.forEach((_, kiosk) => {
+    const spot = kioskSpot(kiosk);
+    const distance = Math.hypot(x - spot.x, z - spot.z);
+    if (distance < best) {
+      best = distance;
+      nearest = kiosk;
+    }
+  });
+  return nearest;
+}
+
+/** The open tiles in reach of a check-in tablet, where a click on it walks the guest to. */
+export function kioskStandingSpots(kiosk: number): Point[] {
+  const spots: Point[] = [];
+  for (let y = Math.ceil(FRONT_WALL_Y); y < FRONT_WALL_Y + LOBBY.depth; y++) {
+    for (let x = Math.floor(doorMiddle - LOBBY.width / 2); x < doorMiddle + LOBBY.width / 2; x++) {
+      if (!isBlocked(x, y) && atKiosk({ x: x + 0.5, y: y + 0.5 }) === kiosk) spots.push({ x, y });
+    }
+  }
+  return spots;
+}
+
+
+// ---------- into the casino after checking in (SRS-103.14) ----------
+
+/** The walk from the front desk onto the casino floor once a guest has logged in at a check-in tablet, from where they stand: a step back from the desk to in front of its middle (clear of the roped aisle's end), across to the middle of the lobby, then on the way the walk in goes, through the casino's doors and the gate. */
+export function checkInWalk(from: Point): Point[] {
+  const offDesk = { x: doorMiddle + (FRONT_DESK.x + FRONT_DESK.radius + 1) / TILE_METRES, y: FRONT_WALL_Y + FRONT_DESK.z / TILE_METRES };
+  const points = [from, offDesk, LOBBY_MIDDLE, ...entranceWalk().slice(2)];
+  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}
+
+// ---------- casino doors for guests (SRS-103.15) ----------
+// A guest can't go through the casino's doors (they're solid from the
+// lobby's side). Using them walks the guest to the front desk instead, to
+// check in at a tablet there.
+
+/** Whether a guest at `at` is in reach of the casino's doors from the lobby's side. */
+export function atCasinoDoorsFromLobby(at: Point): boolean {
+  return Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH && at.y > FRONT_WALL_Y && at.y < FRONT_WALL_Y + 2.4;
+}
+
+/** Where a guest stands to use a check-in tablet, in tiles: just in front of it, on the lobby's side of the desk. */
+export function kioskStand(kiosk: number): Point {
+  const angle = KIOSKS[kiosk] ?? 0;
+  const r = FRONT_DESK.radius + 0.55;
+  return { x: doorMiddle + (FRONT_DESK.x + Math.cos(angle) * r) / TILE_METRES, y: FRONT_WALL_Y + (FRONT_DESK.z + Math.sin(angle) * r) / TILE_METRES };
+}
+
+/** Whether the player (or a circle of `radius` tiles) can go in a straight line from `a` to `b` (tiles) without touching anything. */
+export function clearLine(a: Point, b: Point, radius = PLAYER_RADIUS): boolean {
+  const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.05));
+  for (let i = 0; i <= steps; i++) {
+    if (circleBlocked(a.x + ((b.x - a.x) * i) / steps, a.y + ((b.y - a.y) * i) / steps, radius)) return false;
+  }
+  return true;
+}
+
+/** How far the walk to the desk keeps off whatever it passes, beyond the player's own width, in tiles. */
+const PASSING_ROOM = 0.1;
+
+/**
+ * A walk from `from` (tiles) to the nearest of `targets` (tiles): the
+ * shortest way round anything in the way, straightened wherever it can go
+ * straight, ending at `end` if given (in the target tile), otherwise in the
+ * middle of the tile reached. Null if none can be reached.
+ */
+export function walkRoute(from: Point, targets: Point[], end?: Point): Point[] | null {
+  const start = { x: Math.floor(from.x), y: Math.floor(from.y) };
+  const tiles = findPath(start, targets, true);
+  if (!tiles) return null;
+  const reached = tiles[tiles.length - 1] ?? start;
+  const steps = [from, ...tiles.slice(0, -1).map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), end ?? { x: reached.x + 0.5, y: reached.y + 0.5 }];
+  // From each point, on to the furthest one there's a clear line to.
+  const points = [from];
+  for (let i = 0; i < steps.length - 1; ) {
+    let j = steps.length - 1;
+    while (j > i + 1 && !clearLine(steps[i]!, steps[j]!, PLAYER_RADIUS + PASSING_ROOM)) j--;
+    points.push(steps[j]!);
+    i = j;
+  }
+  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}
+
+/** The walk from `from` (tiles, in the lobby) to stand at the check-in tablet it's the shorter walk to (see walkRoute). Null if neither can be reached. */
+export function deskWalk(from: Point): { kiosk: number; points: Point[] } | null {
+  let best: { kiosk: number; points: Point[]; length: number } | null = null;
+  KIOSKS.forEach((_, kiosk) => {
+    const stand = kioskStand(kiosk);
+    const points = walkRoute(from, [{ x: Math.floor(stand.x), y: Math.floor(stand.y) }], stand);
+    if (!points) return;
+    const length = points.slice(1).reduce((sum, point, i) => sum + Math.hypot(point.x - points[i]!.x, point.y - points[i]!.y), 0);
+    if (!best || length < best.length) best = { kiosk, points, length };
+  });
+  if (!best) return null;
+  const { kiosk, points } = best;
+  return { kiosk, points };
 }

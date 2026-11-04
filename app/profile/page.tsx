@@ -12,6 +12,7 @@ import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection, { type PlayerStats } from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
 import { notifyAppearanceChanged } from '../../lib/balanceEvents';
+import { askToWalkOut, logOut } from '../../lib/logOut';
 import { publicProfilePath } from '../../lib/publicProfile';
 import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
 
@@ -185,22 +186,12 @@ export default function ProfilePage() {
     }
   }
 
-  // SRS-105.1: end the session on the server too, so this token stops
-  // working everywhere. The local token is cleared even if that request
-  // fails, so the player is always logged out of this browser.
+  // SRS-105.1: logOut() ends the session on the server and in this browser.
+  // Then the home page shows them leaving the casino (SRS-105.6).
   async function handleLogout() {
     setLoggingOut(true);
-    try {
-      if (token) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
-    } catch {
-      // Network failure: still log out locally below.
-    }
-    localStorage.removeItem('player_token');
+    await logOut();
+    askToWalkOut();
     router.push('/');
   }
 

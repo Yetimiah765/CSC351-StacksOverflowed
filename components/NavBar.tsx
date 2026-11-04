@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { APPEARANCE_CHANGED_EVENT, BALANCE_CHANGED_EVENT } from '../lib/balanceEvents';
+import { askHomeToCheckIn } from '../lib/checkIn';
 import { OUTLINE_ACCENTS } from '../lib/cosmetics';
 import DefaultAvatar from './profile/DefaultAvatar';
 
@@ -112,8 +113,10 @@ export default function NavBar() {
     };
   }, [playerId, appearanceVersion]);
 
-  // SRS-111.3: guests are sent to log in (the login page links to sign up).
-  const profileHref = signedIn ? '/profile' : '/login';
+  // SRS-111.3: guests are sent to sign up (which links to log in) — on the
+  // home page, at a check-in tablet on its front desk, which the home page
+  // takes over the link for when it's showing the 3D lobby (SRS-103.16).
+  const profileHref = signedIn ? '/profile' : '/register';
   const balanceText = balance === null ? '—' : balance.toLocaleString();
   const accent = signedIn && outlineArtKey ? OUTLINE_ACCENTS[outlineArtKey] : undefined;
 
@@ -156,7 +159,14 @@ export default function NavBar() {
           {signedIn ? (
             <ProfileBadge active={pathname === profileHref} avatarUrl={avatarUrl} outlineArtKey={outlineArtKey} />
           ) : (
-            <NavIcon href={profileHref} label="Log in or sign up" active={pathname === profileHref}>
+            <NavIcon
+              href={profileHref}
+              label="Log in or sign up"
+              active={pathname === profileHref}
+              onClick={(event) => {
+                if (askHomeToCheckIn('signup')) event.preventDefault();
+              }}
+            >
               <circle cx="12" cy="8.5" r="3.5" />
               <path d="M5 20c1.2-3.6 4-5.5 7-5.5s5.8 1.9 7 5.5" />
             </NavIcon>
@@ -200,16 +210,19 @@ function NavIcon({
   href,
   label,
   active,
+  onClick,
   children,
 }: {
   href: string;
   label: string;
   active: boolean;
+  onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void;
   children: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
+      onClick={onClick}
       aria-label={label}
       title={label}
       aria-current={active ? 'page' : undefined}

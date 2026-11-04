@@ -966,7 +966,7 @@ flowchart LR
 
 *Traces to: UR-105*
 
-**SRS-105.5, JO, Leaving through the casino's doors.** When a logged-in player walks up to the casino's doors on the home page's casino floor, the system shall offer to log them out. If the player accepts, the system shall end their session as SRS-105.1 does, show the player's character walking out through the doors, the lobby and the building's front doors, the reverse of walking in (SRS-103.12), and then show the login page. The player shall be able to skip the walk with any key or a click, and it shall not play when the player's device is set to reduce motion.
+**SRS-105.5, JO, Leaving through the casino's doors.** When a logged-in player walks up to the casino's doors on the casino floor, the system shall offer to log them out. If the player accepts, the system shall end their session as SRS-105.1 does and show the player's character walking out through the doors into the lobby, the doors shutting behind them, where they continue as a guest. The player shall be able to skip the walk with any key or a click, and it shall not play when the player's device is set to reduce motion.
 
 *Traces to: UR-105*
 

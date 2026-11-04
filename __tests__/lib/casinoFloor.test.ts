@@ -174,6 +174,21 @@ describe('taking a seat', () => {
     }
   });
 
+  it('spaces the blackjack and roulette chairs about a metre apart', () => {
+    for (const id of ['blackjack', 'roulette']) {
+      const { chairs } = pieceLayout(byId(id));
+      for (let i = 1; i < chairs.length; i++) {
+        const gap = Math.hypot(chairs[i]!.x - chairs[i - 1]!.x, chairs[i]!.z - chairs[i - 1]!.z);
+        expect(gap, id).toBeGreaterThan(1);
+      }
+    }
+  });
+
+  it('looks ahead at the slot reels once seated, not back over the player', () => {
+    const view = pieceLayout(byId('slots')).seatedView!;
+    expect(view.lookAhead).toBeGreaterThan(view.ahead);
+  });
+
   it('zooms into the nearer of the sports bar screens, and the shop has no chair', () => {
     const sports = byId('sports-betting');
     expect(nearestChair(sports, { x: 20, y: 11 })).toBeNull();

@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import CardsAndChipsBackground from '../../components/auth/CardsAndChipsBackground';
 import CasinoMoments from '../../components/auth/CasinoMoments';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [birthday, setBirthday] = useState('');
@@ -31,12 +33,15 @@ export default function RegisterPage() {
     });
 
     const data = await response.json();
-    setLoading(false);
 
+    // SRS-101.15: straight to login, which fills in the new username. The
+    // button stays on "Creating account…" until the login page opens.
     if (response.ok) {
-      setMessage('Account created. You can log in now.');
+      router.push(`/login?registered=${encodeURIComponent(username)}`);
       return;
     }
+
+    setLoading(false);
 
     const detailParts = [data.error || 'Registration failed.'];
     if (data.code) detailParts.push(`code: ${data.code}`);

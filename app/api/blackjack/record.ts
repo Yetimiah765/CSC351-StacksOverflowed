@@ -87,7 +87,58 @@ export async function recordRound(
       .insert(rest.map((row) => ({ ...row, player_id: playerId, started_at: startedAt })));
     if (insertError) console.error(`Blackjack: could not save a split hand for player ${playerId}: ${insertError.message}`);
   }
+
+  await addToStats(supabase, playerId, outcome);
   return true;
+}
+
+const STATS_WRITE_ATTEMPTS = 3;
+
+/**
+ * SRS-117.1 / 117.4 / 118.1 / 118.3: adds a finished round to the player's
+ * blackjack money won and money lost in player_game_stats, which the profile
+ * shows. Each hand counts on its own, like the hand history: a split round
+ * that wins one hand and loses the other adds to both. Winnings are what the
+ * hand won, without the bet that came back. Like the balance, the row is
+ * changed only if it still holds the figures just read, retried on a lost
+ * race. The coins have already moved, so a failure is only logged.
+ */
+async function addToStats(supabase: SupabaseClient, playerId: number, outcome: BlackjackOutcome): Promise<void> {
+  const won = outcome.hands.reduce((total, hand) => total + Math.max(hand.net, 0), 0);
+  const lost = outcome.hands.reduce((total, hand) => total + Math.max(-hand.net, 0), 0);
+  if (won === 0 && lost === 0) return;
+
+  for (let attempt = 0; attempt < STATS_WRITE_ATTEMPTS; attempt++) {
+    const { data: row, error: readError } = await supabase
+      .from('player_game_stats')
+      .select('money_won, money_lost')
+      .eq('player_id', playerId)
+      .eq('game_code', 'blackjack')
+      .maybeSingle();
+    if (readError) break;
+
+    if (!row) {
+      const { error } = await supabase
+        .from('player_game_stats')
+        .insert({ player_id: playerId, game_code: 'blackjack', money_won: won, money_lost: lost });
+      if (!error) return;
+      // 23505: another round made the row first; add to it instead.
+      if (error.code !== '23505') break;
+      continue;
+    }
+
+    const { data: updated, error } = await supabase
+      .from('player_game_stats')
+      .update({ money_won: Number(row.money_won) + won, money_lost: Number(row.money_lost) + lost })
+      .eq('player_id', playerId)
+      .eq('game_code', 'blackjack')
+      .eq('money_won', row.money_won)
+      .eq('money_lost', row.money_lost)
+      .select('player_id');
+    if (error) break;
+    if (updated?.length) return;
+  }
+  console.error(`Blackjack: could not add won ${won} / lost ${lost} to the stats of player ${playerId}`);
 }
 
 /**

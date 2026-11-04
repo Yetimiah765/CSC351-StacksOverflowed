@@ -9,7 +9,6 @@ import type { Cosmetic } from "../../lib/cosmetics";
 import {
   BLACKJACK_CHIPS,
   MIN_BLACKJACK_BET,
-  NEXT_HAND_DELAY_MS,
   chipsFor,
   nearestChipBet,
   type BlackjackHandView,
@@ -322,19 +321,6 @@ export default function BlackjackPage() {
   const [error, setError] = useState<string | null>(null);
   // Good news to show, like the bet of a lost hand coming back.
   const [notice, setNotice] = useState<string | null>(null);
-  // When the next hand can be dealt (ms since the epoch): a hand that just
-  // ended starts a short wait, which the server also enforces.
-  const [nextHandAt, setNextHandAt] = useState(0);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (nextHandAt <= Date.now()) return;
-    const timer = window.setInterval(() => {
-      setNow(Date.now());
-      if (Date.now() >= nextHandAt) window.clearInterval(timer);
-    }, 250);
-    return () => window.clearInterval(timer);
-  }, [nextHandAt]);
-  const waitSeconds = Math.max(0, Math.ceil((nextHandAt - now) / 1000));
 
   const chipTotal = betChips.reduce((sum, chip) => sum + chip, 0);
   const typedAmount = typed ? Number(typed) : 0;
@@ -450,11 +436,6 @@ export default function BlackjackPage() {
     try {
       const { res, data } = await post("/api/blackjack/deal", { bet: chipTotal });
       if (!res.ok) {
-        if (res.status === 429 && typeof data.wait === "number") {
-          setNow(Date.now());
-          setNextHandAt(Date.now() + data.wait);
-          return;
-        }
         setError(data.error ?? "Could not deal the hand. Please try again.");
         // e.g. a hand still in play from another tab, or a bet to return.
         await loadHand();
@@ -463,19 +444,12 @@ export default function BlackjackPage() {
       setHand(data.hand);
       // Refreshes both the nav bar and this page's balance.
       notifyBalanceChanged();
-      if (data.hand.finished) handEnded();
+      if (data.hand.finished) loadHistory().catch(() => {});
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
       setBusy(false);
     }
-  }
-
-  // Refreshes the history and starts the wait before the next hand.
-  function handEnded() {
-    loadHistory().catch(() => {});
-    setNow(Date.now());
-    setNextHandAt(Date.now() + NEXT_HAND_DELAY_MS);
   }
 
   async function play(move: BlackjackMove) {
@@ -507,7 +481,7 @@ export default function BlackjackPage() {
       // The balance changes when the player doubles or splits (SRS-910.2,
       // SRS-911.2) and when the round ends (SRS-908.1).
       if (data.balance !== undefined || data.hand.finished) notifyBalanceChanged();
-      if (data.hand.finished) handEnded();
+      if (data.hand.finished) loadHistory().catch(() => {});
     } catch {
       setError("Could not reach the server. Please try again.");
     } finally {
@@ -833,10 +807,9 @@ export default function BlackjackPage() {
                     <button
                       type="button"
                       onClick={newHand}
-                      disabled={waitSeconds > 0}
-                      className="w-full rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-emerald-400"
+                      className="w-full rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300"
                     >
-                      {waitSeconds > 0 ? `Next hand in ${waitSeconds}s` : "New hand"}
+                      New hand
                     </button>
                   </div>
                 ) : (
@@ -866,10 +839,10 @@ export default function BlackjackPage() {
                     <button
                       type="button"
                       onClick={deal}
-                      disabled={chipTotal < MIN_BLACKJACK_BET || busy || waitSeconds > 0}
+                      disabled={chipTotal < MIN_BLACKJACK_BET || busy}
                       className="col-span-2 rounded-xl bg-emerald-400 py-3 font-semibold text-slate-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-emerald-400"
                     >
-                      {busy ? "Dealing…" : waitSeconds > 0 ? `Deal in ${waitSeconds}s` : "Deal"}
+                      {busy ? "Dealing…" : "Deal"}
                     </button>
                   </div>
                 )}

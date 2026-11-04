@@ -17,13 +17,22 @@ describe('Links to a public profile (SRS-121.1)', () => {
     expect(publicProfilePath('a/b?c')).toBe('/players/a%2Fb%3Fc');
   });
 
-  it("is how the poker table links a seated player's photo and name, and your own profile links yours", () => {
-    const table = readFileSync(join(APP, 'poker/[tableId]/page.tsx'), 'utf8');
-    expect(table).toContain('publicProfilePath(seat.playerId)');
-    // Opened in a new tab, so leaving to look doesn't take the player away from the hand.
-    expect(table).toMatch(/target: '_blank'/);
-
+  it('is how your own profile links yours', () => {
     const ownProfile = readFileSync(join(APP, 'profile/page.tsx'), 'utf8');
     expect(ownProfile).toContain('publicProfilePath(profile.playerId)');
+  });
+
+  it("opens a seated player's profile from the poker table in a window over the game, not a new tab (SRS-121.14)", () => {
+    const table = readFileSync(join(APP, 'poker/[tableId]/page.tsx'), 'utf8');
+    expect(table).toContain("import ProfileWindow from '../../../components/profile/ProfileWindow'");
+    expect(table).toContain('setProfileWindow({ playerId: seatPlayerId');
+    expect(table).not.toMatch(/_blank/);
+    // The window shows the same public fields as the page.
+    const page = readFileSync(join(APP, 'players/[playerId]/page.tsx'), 'utf8');
+    const window = readFileSync(join(APP, '../components/profile/ProfileWindow.tsx'), 'utf8');
+    for (const file of [page, window]) {
+      expect(file).toContain('usePublicProfile(');
+      expect(file).toContain('<PublicProfileView');
+    }
   });
 });

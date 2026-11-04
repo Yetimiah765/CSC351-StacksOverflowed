@@ -2,15 +2,7 @@ import { randomInt } from 'crypto';
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { checkBlackjackBet, dealHand, handView } from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
-import {
-  changeBalance,
-  finishBusy,
-  getHand,
-  nextHandWait,
-  saveHand,
-  startBusy,
-  startNextHandDelay,
-} from '../hands';
+import { changeBalance, finishBusy, getHand, saveHand, startBusy } from '../hands';
 import { openRound, recordRound, refundLostRounds } from '../record';
 
 // Deal (SRS-901.1, SRS-902.1). Body: { bet }. Returns any bets of rounds the
@@ -18,8 +10,7 @@ import { openRound, recordRound, refundLostRounds } from '../record';
 // blackjack_hands row, then shuffles with crypto.randomInt (SRS-NFR-5) and
 // deals. A deal that is already a blackjack for either side is settled and
 // paid at once; otherwise the hand is kept in memory (../hands.ts) for the
-// player's moves. Returns { hand, balance }. A deal within NEXT_HAND_DELAY_MS
-// of the last hand ending is refused (429, with `wait` in ms).
+// player's moves. Returns { hand, balance }.
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -38,16 +29,41 @@ export async function POST(request: Request) {
   if (!check.ok) return Response.json({ error: check.error }, { status: 400 });
   const bet = check.amount;
 
-  if (getHand(playerId!) || !startBusy(playerId!)) {
-    return Response.json({ error: 'Finish your current hand first.' }, { status: 409 });
-  }
-  const wait = nextHandWait(playerId!);
-  if (wait > 0) {
-    finishBusy(playerId!);
-    const seconds = Math.ceil(wait / 1000);
+  // One round at a time per player, whether it's still in play (maybe in
+  // another tab) or a Deal/move is still being handled (e.g. a double click).
+  // Each refusal says which check fired (`reason`) and logs what the server
+  // holds, to tell the two apart when debugging.
+  const inPlay = getHand(playerId!);
+  if (inPlay) {
+    const ageSeconds = Math.round((Date.now() - Date.parse(inPlay.startedAt)) / 1000);
+    console.warn(
+      `Blackjack deal refused (hand_in_play): player ${playerId} asked to deal a bet of ${bet}, ` +
+        `but hand ${inPlay.handId} (bet ${inPlay.bet}, step ${inPlay.state.step}, ` +
+        `hand ${inPlay.state.active + 1} of ${inPlay.state.hands.length}) was dealt ${ageSeconds}s ago and isn't finished.`
+    );
     return Response.json(
-      { error: `Wait ${seconds} second${seconds === 1 ? '' : 's'} before the next hand.`, wait },
-      { status: 429 }
+      {
+        error:
+          `Finish your current hand first: you already have a hand in play (hand #${inPlay.handId}, bet ${inPlay.bet}), ` +
+          'maybe in another tab. Hit, Stand, Double or Split to finish it, then deal again. ' +
+          "Refresh the page if you can't see it.",
+        reason: 'hand_in_play',
+        handId: inPlay.handId,
+      },
+      { status: 409 }
+    );
+  }
+  if (!startBusy(playerId!)) {
+    console.warn(
+      `Blackjack deal refused (request_in_progress): player ${playerId} asked to deal a bet of ${bet} ` +
+        'while another Deal or move of theirs was still being handled (e.g. a double click).'
+    );
+    return Response.json(
+      {
+        error: 'Finish your current hand first: your last Deal or move is still being played. Wait a moment, then try again.',
+        reason: 'request_in_progress',
+      },
+      { status: 409 }
     );
   }
 
@@ -75,7 +91,6 @@ export async function POST(request: Request) {
     // A blackjack on the deal: save it to the history (SRS-909.1) and pay
     // back the bet plus any winnings now. If it can't be saved, the open
     // row returns the bet instead.
-    startNextHandDelay(playerId!);
     if (!(await recordRound(supabase, playerId!, handId, bet, state, outcome, startedAt))) {
       return Response.json({ error: 'The hand could not be saved, so your bet will be returned.' }, { status: 500 });
     }

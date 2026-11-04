@@ -842,6 +842,10 @@ flowchart LR
 
 *Traces to: UR-101*
 
+**SRS-101.15, JO, Log in after sign-up.** After the system creates an account, it shall take the player straight to the login page, tell the player that the account was created, and fill in the new username.
+
+*Traces to: UR-101*
+
 ### UR-102, JO – Age Requirement
 
 *User story: As a new player, I want the system to verify my birthday before creating my account, so that access to the gambling-themed platform is limited to players who are at least 21 years old.*
@@ -902,6 +906,10 @@ flowchart LR
 
 *Traces to: UR-103*
 
+**SRS-103.11, JO, Home page after login.** After a successful login, the system shall take the player to the home page.
+
+*Traces to: UR-103*
+
 ### UR-104, JO – Account Validation
 
 *User story: As a player, I want the website to validate my registration and login information, so that invalid information is rejected and my account can be securely accessed.*
@@ -927,6 +935,10 @@ flowchart LR
 *Traces to: UR-104*
 
 **SRS-104.6, JO, Password verification.** Login and password-confirmation operations shall verify submitted passwords against the stored password hash rather than against plaintext password data.
+
+*Traces to: UR-104*
+
+**SRS-104.7, JO, Account not found.** When no account has the submitted username, the system shall deny the login with a message saying that no account was found, together with a link to the sign-up page. When the account exists but the password does not verify, the message shall say that the password is incorrect.
 
 *Traces to: UR-104*
 
@@ -1038,11 +1050,15 @@ flowchart LR
 
 *Traces to: UR-108*
 
-**SRS-108.5, JO, Return to the home page.** The main page of each game, and the Cosmetic Shop, shall provide a back button that returns the player to the home page.
+**SRS-108.5, JO, Return to the home page.** The main page of each game, and the Cosmetic Shop, shall provide a back button that works as SRS-108.7 describes.
 
 *Traces to: UR-108*
 
 **SRS-108.6, JO, Getting up from a game.** When a player returns to the home page from a game they opened by taking a seat on the casino floor, the home page shall show the player's character getting up from that seat, the reverse of sitting down, before the player can walk again.
+
+*Traces to: UR-108*
+
+**SRS-108.7, JO, Back to the previous page.** The back button on each game's main page, the Cosmetic Shop and the player's profile page shall return the player to the page of the website they were on before it, or to the home page when there is no such page.
 
 *Traces to: UR-108*
 
@@ -1105,6 +1121,10 @@ flowchart LR
 *Traces to: UR-111*
 
 **SRS-111.3, JO, Guest profile restriction.** If an unauthenticated guest attempts to access a profile, the system shall redirect the guest to the login/registration page.
+
+*Traces to: UR-111*
+
+**SRS-111.4, JO, Return to the home page.** The player's profile page shall provide a back button, the same as each game's main page and the Cosmetic Shop (SRS-108.5), that works as SRS-108.7 describes.
 
 *Traces to: UR-111*
 
@@ -1401,6 +1421,10 @@ flowchart LR
 *Traces to: UR-121*
 
 **SRS-121.13, JO, Public equipped cosmetics.** The public profile shall display the player's currently equipped card cosmetic, chip cosmetic, and profile-outline cosmetic.
+
+*Traces to: UR-121*
+
+**SRS-121.14, JO, Profile window during gameplay.** When a player opens another player's public profile during gameplay (SRS-121.1), the system shall show it in a small window over the game, without opening a new browser tab or leaving the game, and the player shall be able to move the window around the screen and close it.
 
 *Traces to: UR-121*
 

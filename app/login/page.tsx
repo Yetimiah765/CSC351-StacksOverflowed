@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import CardsAndChipsBackground from '../../components/auth/CardsAndChipsBackground';
 import PokerWinHeader from '../../components/auth/PokerWinHeader';
 
@@ -11,12 +11,29 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const [accountNotFound, setAccountNotFound] = useState(false);
+  const [notice, setNotice] = useState('');
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
+
+  // SRS-101.15: coming straight from sign-up, the new username is filled in
+  // and the cursor waits in the password box. The address is tidied so a
+  // refresh doesn't say it again.
+  useEffect(() => {
+    const registered = new URLSearchParams(window.location.search).get('registered');
+    if (!registered) return;
+    setUsername(registered);
+    setNotice('Account created. Log in with your new password.');
+    window.history.replaceState(null, '', '/login');
+    passwordRef.current?.focus();
+  }, []);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage('');
+    setNotice('');
+    setAccountNotFound(false);
 
     const response = await fetch('/api/auth/login', {
       method: 'POST',
@@ -28,9 +45,11 @@ export default function LoginPage() {
     setLoading(false);
     if (response.ok) {
       if (data?.token) localStorage.setItem('player_token', data.token);
-      router.push('/profile');
+      // SRS-103.11: straight to the casino floor, where play starts.
+      router.push('/');
     } else {
       setMessage(data.error || 'Login failed.');
+      setAccountNotFound(Boolean(data?.accountNotFound));
     }
   }
 
@@ -47,6 +66,11 @@ export default function LoginPage() {
           <PokerWinHeader />
         </div>
         <h1 className="text-4xl font-semibold sm:text-5xl">Welcome back</h1>
+        {notice ? (
+          <p role="status" className="mt-6 rounded-xl border border-emerald-800 bg-emerald-900/30 p-3 text-base text-emerald-200">
+            {notice}
+          </p>
+        ) : null}
 
         <form onSubmit={handleSubmit} className="mt-12 grid items-start gap-x-6 gap-y-10 sm:grid-cols-2">
           <label className="block text-base text-slate-200">
@@ -65,6 +89,7 @@ export default function LoginPage() {
           <label className="block text-base text-slate-200">
             Password
             <input
+              ref={passwordRef}
               type="password"
               value={password}
               autoComplete="current-password"
@@ -84,7 +109,21 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {message ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">{message}</p> : null}
+        {message ? (
+          <p role="alert" className="mt-4 rounded-xl border border-slate-700 bg-slate-800/80 p-3 text-base text-slate-100">
+            {message}
+            {/* SRS-104.7: no such account, so offer to make one. */}
+            {accountNotFound ? (
+              <>
+                {' '}
+                <Link href="/register" className="font-semibold text-emerald-300 hover:underline">
+                  Sign up
+                </Link>{' '}
+                to create an account.
+              </>
+            ) : null}
+          </p>
+        ) : null}
 
         <div className="mt-12 flex flex-wrap justify-between gap-x-6 gap-y-2 text-base text-slate-300">
           <p>

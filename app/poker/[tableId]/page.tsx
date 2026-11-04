@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import ProfileWindow from '../../../components/profile/ProfileWindow';
 import { useRouter } from 'next/navigation';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
@@ -26,7 +27,6 @@ import {
 import { EMOTE_SHOW_MS } from '../../../lib/emotes';
 import EmoteArt from '../../../components/emotes/EmoteArt';
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
-import { publicProfilePath } from '../../../lib/publicProfile';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
 import BettingControls from '../BettingControls';
 import ActionCallout, { calloutDuration } from '../ActionCallout';
@@ -167,6 +167,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const [cosmetics, setCosmetics] = useState<Record<string, EquippedArt>>({});
   // The open seat the player clicked; they pick one before buying in.
   const [selectedSeat, setSelectedSeat] = useState<number | null>(null);
+  // SRS-121.14: whose public profile is open in the window over the table.
+  const [profileWindow, setProfileWindow] = useState<{ playerId: string; username: string | null } | null>(null);
   // Empty until the table's bigBlind is known (from the first table:state),
   // at which point it's initialized to the minimum buy-in once. A string,
   // not a number, so a player can freely type/clear it (same pattern as
@@ -1010,12 +1012,14 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             const isDealer = Boolean(seat.playerId) && tableState.dealerSeat === seat.seatNumber;
             const seatCosmetics = seat.playerId ? cosmetics[seat.playerId] : undefined;
             // SRS-121.1: a seated player's photo and name open their public
-            // profile, in a new tab so the hand carries on here.
-            const profileLink = seat.playerId
+            // profile, in a small window over the table that can be moved
+            // around and closed, so the hand carries on here (SRS-121.14).
+            const seatPlayerId = seat.playerId;
+            const profileLink = seatPlayerId
               ? {
-                  href: publicProfilePath(seat.playerId),
-                  target: '_blank',
-                  rel: 'noopener noreferrer',
+                  type: 'button' as const,
+                  onClick: () => setProfileWindow({ playerId: seatPlayerId, username: seat.username ?? null }),
+                  'aria-haspopup': 'dialog' as const,
                   title: isOwnSeat ? 'View your public profile' : `View ${seat.username ?? 'this player'}'s profile`,
                 }
               : null;
@@ -1194,9 +1198,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     style={award && showdown ? cssVars({ animationDelay: `${winnerStart + 1300 + awardIndex * 350}ms` }) : undefined}
                   >
                     {seat.playerId && profileLink ? (
-                      <Link
+                      <button
                         {...profileLink}
-                        aria-label={`${profileLink.title} (opens in a new tab)`}
+                        aria-label={profileLink.title}
                         className={`block h-full w-full overflow-hidden rounded-full transition hover:brightness-110 ${
                           isActive
                             ? 'border-2 border-amber-300 bg-slate-900 ring-4 ring-amber-300/40 shadow-[0_0_26px_rgba(252,211,77,0.6)] animate-pulse'
@@ -1214,7 +1218,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                             {seat.username?.[0]?.toUpperCase()}
                           </span>
                         )}
-                      </Link>
+                      </button>
                     ) : (
                       <button
                         type="button"
@@ -1268,9 +1272,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                       }`}
                     >
                       {profileLink ? (
-                        <Link {...profileLink} className="underline-offset-2 hover:underline">
+                        <button {...profileLink} className="underline-offset-2 hover:underline">
                           {isOwnSeat ? 'You' : seat.username}
-                        </Link>
+                        </button>
                       ) : isSelected ? (
                         'Your pick'
                       ) : (
@@ -1683,6 +1687,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
             ) : null}
         </aside>
       </div>
+      {profileWindow ? (
+        <ProfileWindow playerId={profileWindow.playerId} username={profileWindow.username} onClose={() => setProfileWindow(null)} />
+      ) : null}
     </main>
   );
 }

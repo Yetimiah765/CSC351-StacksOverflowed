@@ -16,10 +16,12 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
     }
 
-    // SRS-104.2/104.4: a single generic message on failure avoids revealing
-    // whether the username or the password was the wrong part.
-    const invalidCredentials = () =>
-      Response.json({ error: 'Invalid username or password.' }, { status: 401 });
+    // SRS-104.7: say which part was wrong, and offer sign-up when there's no
+    // such account. Sign-up already says when a username is taken, so this
+    // reveals nothing new about which usernames exist.
+    const accountNotFound = () =>
+      Response.json({ error: 'No account was found with that username.', accountNotFound: true }, { status: 404 });
+    const incorrectPassword = () => Response.json({ error: 'Incorrect password.' }, { status: 401 });
 
     // SRS-101.7: username lookup is case-insensitive, and only the current
     // username (not a reserved former one) can be used to log in.
@@ -34,7 +36,7 @@ export async function POST(request: Request) {
       return Response.json({ error: usernameError.message }, { status: 500 });
     }
     if (!usernameRow) {
-      return invalidCredentials();
+      return accountNotFound();
     }
 
     const { data: player, error: playerError } = await supabase
@@ -44,13 +46,13 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (playerError || !player) {
-      return invalidCredentials();
+      return accountNotFound();
     }
 
     // SRS-104.6: verify against the stored hash rather than plaintext.
     const passwordMatches = await verifyPassword(password, player.password_hash);
     if (!passwordMatches) {
-      return invalidCredentials();
+      return incorrectPassword();
     }
 
     // Accounts are deleted immediately (SRS-106.6), so none is left pending

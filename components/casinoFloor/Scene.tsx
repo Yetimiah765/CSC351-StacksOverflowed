@@ -8,7 +8,6 @@ import * as THREE from 'three';
 import {
   COLS,
   FLOOR_OBJECTS,
-  KIOSKS,
   ROWS,
   LOBBY_MIDDLE,
   START,
@@ -200,8 +199,6 @@ interface KioskVisit {
   /** The walk to the desk, world metres, once planned from where the player is, and how far along it they are. */
   walk: { points: THREE.Vector2[]; length: number; walked: number } | null;
   from: { position: THREE.Vector3; look: THREE.Vector3 } | null;
-  /** For each tablet, in front of its screen, close enough that it fills the view, and the screen's middle. */
-  screens: { position: THREE.Vector3; look: THREE.Vector3 }[];
   /** Logged in on the tablet: once the camera's back out, the walk onto the casino floor. */
   thenIn: boolean;
 }
@@ -209,6 +206,13 @@ interface KioskVisit {
 const KIOSK_SECONDS = 1.4;
 /** How far in front of the tablet's screen the camera stops, metres (just past the camera's near plane). */
 const KIOSK_VIEW = 0.15;
+
+/** Where the camera stops in front of a tablet's screen, close enough that it fills the view, and the screen's middle. */
+function closeUp(screen: THREE.Object3D) {
+  const look = screen.getWorldPosition(new THREE.Vector3());
+  const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(screen.getWorldQuaternion(new THREE.Quaternion()));
+  return { position: look.clone().addScaledVector(facing, KIOSK_VIEW), look };
+}
 
 /** How far the following camera keeps off the player when it's up against a wall behind it, metres. */
 const WALL_ROOM = 2;
@@ -600,6 +604,7 @@ function Player({
   onLeft,
   onNearDoors,
   kiosk,
+  kioskScreens,
   onAtKiosk,
   onNearKiosk,
 }: {
@@ -626,6 +631,8 @@ function Player({
   onNearDoors: (near: DoorsSide) => void;
   /** Checking in at a front-desk tablet (SRS-103.13), while it plays. */
   kiosk: MutableRefObject<KioskVisit | null>;
+  /** The tablets' screens, which the camera flies up to (there once the lobby's drawn). */
+  kioskScreens: MutableRefObject<(THREE.Object3D | null)[]>;
   onAtKiosk?: () => void;
   onNearKiosk: (kiosk: number | null) => void;
 }) {
@@ -782,8 +789,8 @@ function Player({
         // At the tablet, away from the doors: on to flying in. The camera's
         // orbit is set to end up behind them facing it, so stepping away
         // pulls back to there however the walk went.
-        const tablet = visit.screens[visit.kiosk]!.look;
-        camera.current.yaw = Math.atan2(tablet.x - here.x, tablet.z - here.y) + Math.PI;
+        const tablet = kioskScreens.current[visit.kiosk]?.getWorldPosition(new THREE.Vector3());
+        if (tablet) camera.current.yaw = Math.atan2(tablet.x - here.x, tablet.z - here.y) + Math.PI;
         visit.stage = 'in';
         visit.t = 0;
         visit.skip = visit.atOnce;
@@ -795,10 +802,13 @@ function Player({
       return;
     }
     if (visit) {
+      // (The tablets are there once the lobby's drawn; until then, it waits.)
+      const screen = kioskScreens.current[visit.kiosk];
+      if (!screen) return;
       visit.t += delta;
       motion.current.speed = 0;
       const [wx, wz] = toWorld(position.current.x, position.current.y);
-      const to = visit.screens[visit.kiosk]!;
+      const to = closeUp(screen);
       if (visit.stage === 'in') {
         turnTowards(Math.atan2(to.look.x - wx, to.look.z - wz), 8);
         if (!visit.from) visit.from = { position: view.position.clone(), look: lookAt.current.clone() };
@@ -1362,14 +1372,6 @@ function Floor({
   const kiosk = useRef<KioskVisit | null>(null);
   useEffect(() => {
     if (checkingIn && !kiosk.current) {
-      const screens = KIOSKS.map((_, which) => {
-        const screen = kioskScreens.current[which];
-        if (!screen) return null;
-        const look = screen.getWorldPosition(new THREE.Vector3());
-        const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(screen.getWorldQuaternion(new THREE.Quaternion()));
-        return { position: look.clone().addScaledVector(facing, KIOSK_VIEW), look };
-      });
-      if (screens.some((screen) => !screen)) return;
       const atOnce = Boolean(checkInAtOnce);
       kiosk.current = {
         kiosk: nearKioskRef.current ?? 0,
@@ -1379,7 +1381,6 @@ function Floor({
         atOnce,
         walk: null,
         from: null,
-        screens: screens as KioskVisit['screens'],
         thenIn: false,
       };
     } else if (!checkingIn && kiosk.current && kiosk.current.stage !== 'out') {
@@ -1530,6 +1531,7 @@ function Floor({
         onLeft={onLeft}
         onNearDoors={handleNearDoors}
         kiosk={kiosk}
+        kioskScreens={kioskScreens}
         onAtKiosk={onAtKiosk}
         onNearKiosk={handleNearKiosk}
       />

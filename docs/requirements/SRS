@@ -1046,6 +1046,10 @@ flowchart LR
 
 *Traces to: UR-107*
 
+**SRS-107.7, JO, Back where you were.** After the first visit in a browser tab, returning to the home page (with a back button, the website's name, or by reloading it) shall put the player's character back where it was: getting up from the seat, or stepping back from the screen, of the game they left for; or standing where they last stood in the lobby or on the casino floor. If the player's session has ended since (it expired, or they logged in elsewhere), the character shall be put in the lobby as a guest instead.
+
+*Traces to: UR-107, UR-108*
+
 ### UR-108, JO – Select Game
 
 *User story: As a logged-in player, I want to select an available game from the home page, so that I can begin playing.*

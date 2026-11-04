@@ -728,12 +728,13 @@ export function atCasinoDoors(at: Point): boolean {
   return Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH && at.y > FRONT_WALL_Y - 2.4 && at.y < FRONT_WALL_Y;
 }
 
-/** The open tiles in reach of the casino's doors, where a click on the doors walks the player to. */
-export function doorStandingSpots(): Point[] {
+/** The open tiles in reach of the casino's doors, from the foyer (or for a guest, from the lobby, SRS-103.15), where a click on the doors walks the player to. */
+export function doorStandingSpots(fromLobby = false): Point[] {
+  const inReach = fromLobby ? atCasinoDoorsFromLobby : atCasinoDoors;
   const spots: Point[] = [];
-  for (let y = DOOR.y; y < Math.floor(FRONT_WALL_Y); y++) {
+  for (let y = DOOR.y; y < FRONT_WALL_Y + 3; y++) {
     for (let x = doorMiddle - GATE_HALF_WIDTH; x < doorMiddle + GATE_HALF_WIDTH; x++) {
-      if (!isBlocked(x, y) && atCasinoDoors({ x: x + 0.5, y: y + 0.5 })) spots.push({ x, y });
+      if (!isBlocked(x, y) && inReach({ x: x + 0.5, y: y + 0.5 })) spots.push({ x, y });
     }
   }
   return spots;
@@ -824,4 +825,61 @@ export function checkInWalk(from: Point): Point[] {
   const offDesk = { x: doorMiddle + (FRONT_DESK.x + FRONT_DESK.radius + 1) / TILE_METRES, y: FRONT_WALL_Y + FRONT_DESK.z / TILE_METRES };
   const points = [from, offDesk, LOBBY_MIDDLE, ...entranceWalk().slice(2)];
   return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
+}
+
+// ---------- casino doors for guests (SRS-103.15) ----------
+// A guest can't go through the casino's doors (they're solid from the
+// lobby's side). Using them walks the guest to the front desk instead, to
+// check in at a tablet there.
+
+/** Whether a guest at `at` is in reach of the casino's doors from the lobby's side. */
+export function atCasinoDoorsFromLobby(at: Point): boolean {
+  return Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH && at.y > FRONT_WALL_Y && at.y < FRONT_WALL_Y + 2.4;
+}
+
+/** Where a guest stands to use a check-in tablet, in tiles: just in front of it, on the lobby's side of the desk. */
+export function kioskStand(kiosk: number): Point {
+  const angle = KIOSKS[kiosk] ?? 0;
+  const r = FRONT_DESK.radius + 0.55;
+  return { x: doorMiddle + (FRONT_DESK.x + Math.cos(angle) * r) / TILE_METRES, y: FRONT_WALL_Y + (FRONT_DESK.z + Math.sin(angle) * r) / TILE_METRES };
+}
+
+/** Whether the player (or a circle of `radius` tiles) can go in a straight line from `a` to `b` (tiles) without touching anything. */
+export function clearLine(a: Point, b: Point, radius = PLAYER_RADIUS): boolean {
+  const steps = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.05));
+  for (let i = 0; i <= steps; i++) {
+    if (circleBlocked(a.x + ((b.x - a.x) * i) / steps, a.y + ((b.y - a.y) * i) / steps, radius)) return false;
+  }
+  return true;
+}
+
+/** How far the walk to the desk keeps off whatever it passes, beyond the player's own width, in tiles. */
+const PASSING_ROOM = 0.1;
+
+/**
+ * The walk from `from` (tiles, in the lobby) to stand at the check-in tablet
+ * it's the shorter walk to: the shortest way round anything in the way,
+ * straightened wherever it can go straight. Null if neither can be reached.
+ */
+export function deskWalk(from: Point): { kiosk: number; points: Point[] } | null {
+  let best: { kiosk: number; points: Point[]; length: number } | null = null;
+  KIOSKS.forEach((_, kiosk) => {
+    const stand = kioskStand(kiosk);
+    const tiles = findPath({ x: Math.floor(from.x), y: Math.floor(from.y) }, [{ x: Math.floor(stand.x), y: Math.floor(stand.y) }]);
+    if (!tiles) return;
+    const steps = [from, ...tiles.slice(0, -1).map((tile) => ({ x: tile.x + 0.5, y: tile.y + 0.5 })), stand];
+    // From each point, on to the furthest one there's a clear line to.
+    const points = [from];
+    for (let i = 0; i < steps.length - 1; ) {
+      let j = steps.length - 1;
+      while (j > i + 1 && !clearLine(steps[i]!, steps[j]!, PLAYER_RADIUS + PASSING_ROOM)) j--;
+      points.push(steps[j]!);
+      i = j;
+    }
+    const length = points.slice(1).reduce((sum, point, i) => sum + Math.hypot(point.x - points[i]!.x, point.y - points[i]!.y), 0);
+    if (!best || length < best.length) best = { kiosk, points, length };
+  });
+  if (!best) return null;
+  const { kiosk, points } = best;
+  return { kiosk, points };
 }

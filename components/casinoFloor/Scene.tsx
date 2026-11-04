@@ -8,12 +8,15 @@ import * as THREE from 'three';
 import {
   COLS,
   FLOOR_OBJECTS,
+  KIOSKS,
   ROWS,
   LOBBY_MIDDLE,
   START,
   TILE_METRES,
   atCasinoDoors,
+  atCasinoDoorsFromLobby,
   atKiosk,
+  deskWalk,
   doorStandingSpots,
   kioskStandingSpots,
   checkInWalk,
@@ -114,9 +117,9 @@ interface Props {
   onEntered?: () => void;
   /** Logged in, so the casino's doors can be left through, logging out (SRS-105.5). */
   canLeave?: boolean;
-  /** The player came in reach of the casino's doors (true), or went out of it. */
-  onNearDoors?: (near: boolean) => void;
-  /** A click on the casino's doors while in reach of them. */
+  /** The player came in reach of the casino's doors, from the foyer ('floor') or the lobby ('lobby', SRS-103.15), or went out of it (null). */
+  onNearDoors?: (near: DoorsSide) => void;
+  /** A click on the casino's doors while in reach of them from the foyer. */
   onLeave?: () => void;
   /** Set by the page once the player has chosen to leave: the scene walks them out, or with `leaveAtOnce` (reduced motion) puts them straight in the lobby. */
   leaving?: boolean;
@@ -125,9 +128,9 @@ interface Props {
   onLeft?: () => void;
   /** A guest came in reach of a check-in tablet at the front desk (its index), or went out of reach (null) (SRS-103.13). */
   onNearKiosk?: (kiosk: number | null) => void;
-  /** A click on the check-in tablet in reach. */
+  /** A click on the check-in tablet in reach, or (for a guest) on the casino's doors from the lobby (SRS-103.15). */
   onCheckIn?: () => void;
-  /** Set by the page while the guest is checking in: the camera flies into the tablet (straight there with `checkInAtOnce`), then `onAtKiosk`; cleared, it flies back out. */
+  /** Set by the page while the guest is checking in: they walk to the front desk if they aren't at a tablet (SRS-103.15), the camera flies into the tablet (all straight there with `checkInAtOnce`), then `onAtKiosk`; cleared, it flies back out. */
   checkingIn?: boolean;
   checkInAtOnce?: boolean;
   onAtKiosk?: () => void;
@@ -174,21 +177,31 @@ interface Seating {
   zoomTo: { position: THREE.Vector3; look: THREE.Vector3 };
 }
 
+/** Which side of the casino's doors the player is in reach of them from, if either. */
+export type DoorsSide = 'floor' | 'lobby' | null;
+
 /**
- * Checking in at a front-desk tablet (SRS-103.13): the guest turns to it and
- * the camera flies in from wherever it was until the tablet's screen fills
- * the view ('in'); the page then shows the tablet up close ('open'), and
- * stepping away flies the camera back out to behind them ('out'). Having
+ * Checking in at a front-desk tablet (SRS-103.13): a guest who isn't at one
+ * (they used the casino's doors, SRS-103.15) first walks to the desk
+ * ('walk'), the camera swinging round behind them. Then they turn to the
+ * tablet and the camera flies in from wherever it was until its screen
+ * fills the view ('in'); the page then shows the tablet up close ('open'),
+ * and stepping away flies the camera back out to behind them ('out'). Having
  * logged in there, they then walk onto the casino floor (SRS-103.14).
  */
 interface KioskVisit {
+  /** The tablet; for a walk to the desk, chosen once the walk is planned. */
   kiosk: number;
-  stage: 'in' | 'open' | 'out';
+  stage: 'walk' | 'in' | 'open' | 'out';
   t: number;
   skip: boolean;
+  /** With reduced motion: each stage goes straight to its end. */
+  atOnce: boolean;
+  /** The walk to the desk, world metres, once planned from where the player is, and how far along it they are. */
+  walk: { points: THREE.Vector2[]; length: number; walked: number } | null;
   from: { position: THREE.Vector3; look: THREE.Vector3 } | null;
-  /** In front of the tablet's screen, close enough that it fills the view, and the screen's middle. */
-  to: { position: THREE.Vector3; look: THREE.Vector3 };
+  /** For each tablet, in front of its screen, close enough that it fills the view, and the screen's middle. */
+  screens: { position: THREE.Vector3; look: THREE.Vector3 }[];
   /** Logged in on the tablet: once the camera's back out, the walk onto the casino floor. */
   thenIn: boolean;
 }
@@ -610,7 +623,7 @@ function Player({
   /** The walk out through the casino's doors (SRS-105.5): 'asked' (or 'asked at once', skipped from the start) until Player plans it from where the player is. */
   walkOut: MutableRefObject<WalkOut | 'asked' | 'asked at once' | null>;
   onLeft?: () => void;
-  onNearDoors: (near: boolean) => void;
+  onNearDoors: (near: DoorsSide) => void;
   /** Checking in at a front-desk tablet (SRS-103.13), while it plays. */
   kiosk: MutableRefObject<KioskVisit | null>;
   onAtKiosk?: () => void;
@@ -637,7 +650,7 @@ function Player({
   );
   const lookAt = useRef(new THREE.Vector3());
   const near = useRef<NearSpot>({ object: null, spot: null });
-  const nearDoors = useRef(false);
+  const nearDoors = useRef<DoorsSide>(null);
   const nearKiosk = useRef<number | null>(null);
   const { camera: view } = useThree();
 
@@ -737,19 +750,61 @@ function Player({
       return;
     }
 
-    // Checking in at a tablet (SRS-103.13): the camera flies in, holds while
-    // the tablet's up close, and flies back out.
+    // Checking in at a tablet (SRS-103.13): walking to the desk first if
+    // they used the casino's doors (SRS-103.15), then the camera flies in,
+    // holds while the tablet's up close, and flies back out.
     const visit = kiosk.current;
+    if (visit?.stage === 'walk') {
+      if (!visit.walk) {
+        const route = deskWalk(position.current);
+        const points = (route?.points ?? [position.current]).map((point) => new THREE.Vector2(...toWorld(point.x, point.y)));
+        visit.kiosk = route?.kiosk ?? 0;
+        visit.walk = { points, length: points.slice(1).reduce((sum, point, i) => sum + point.distanceTo(points[i]!), 0), walked: 0 };
+        path.current = [];
+      }
+      const walk = visit.walk;
+      walk.walked = visit.skip ? walk.length : Math.min(walk.length, walk.walked + ENTER_SPEED * delta);
+      const { here, heading: way } = alongWalk(walk.points, walk.walked);
+      const walking = walk.walked < walk.length;
+      motion.current.speed = walking ? ENTER_SPEED : 0;
+      if (walking) turnTowards(way, 10);
+      // The camera swings round behind them as they go.
+      const behind = heading.current + Math.PI - camera.current.yaw;
+      camera.current.yaw += Math.atan2(Math.sin(behind), Math.cos(behind)) * Math.min(1, delta * 1.5);
+      position.current = { x: here.x / TILE_M + COLS / 2, y: here.y / TILE_M + ROWS / 2 };
+      tile.current = { x: Math.floor(position.current.x), y: Math.floor(position.current.y) };
+      if (body.current) {
+        body.current.position.set(here.x, 0, here.y);
+        body.current.rotation.y = heading.current;
+      }
+      followWith(here.x, here.y, 1.45, delta);
+      if (!walking) {
+        // At the tablet, away from the doors: on to flying in. The camera's
+        // orbit is set to end up behind them facing it, so stepping away
+        // pulls back to there however the walk went.
+        const tablet = visit.screens[visit.kiosk]!.look;
+        camera.current.yaw = Math.atan2(tablet.x - here.x, tablet.z - here.y) + Math.PI;
+        visit.stage = 'in';
+        visit.t = 0;
+        visit.skip = visit.atOnce;
+        nearDoors.current = null;
+        onNearDoors(null);
+        nearKiosk.current = visit.kiosk;
+        onNearKiosk(visit.kiosk);
+      }
+      return;
+    }
     if (visit) {
       visit.t += delta;
       motion.current.speed = 0;
       const [wx, wz] = toWorld(position.current.x, position.current.y);
+      const to = visit.screens[visit.kiosk]!;
       if (visit.stage === 'in') {
-        turnTowards(Math.atan2(visit.to.look.x - wx, visit.to.look.z - wz), 8);
+        turnTowards(Math.atan2(to.look.x - wx, to.look.z - wz), 8);
         if (!visit.from) visit.from = { position: view.position.clone(), look: lookAt.current.clone() };
         const k = visit.skip ? 1 : smooth(visit.t / KIOSK_SECONDS);
-        view.position.lerpVectors(visit.from.position, visit.to.position, k);
-        lookAt.current.lerpVectors(visit.from.look, visit.to.look, k);
+        view.position.lerpVectors(visit.from.position, to.position, k);
+        lookAt.current.lerpVectors(visit.from.look, to.look, k);
         view.lookAt(lookAt.current);
         if (k >= 1) {
           visit.stage = 'open';
@@ -758,8 +813,8 @@ function Player({
       } else if (visit.stage === 'out') {
         const pose = followPose(wx, wz, 1.45);
         const k = visit.skip ? 1 : smooth(visit.t / KIOSK_SECONDS);
-        view.position.lerpVectors(visit.to.position, pose.position, k);
-        lookAt.current.lerpVectors(visit.to.look, pose.look, k);
+        view.position.lerpVectors(to.position, pose.position, k);
+        lookAt.current.lerpVectors(to.look, pose.look, k);
         view.lookAt(lookAt.current);
         if (k >= 1) {
           kiosk.current = null;
@@ -951,8 +1006,8 @@ function Player({
       near.current = { object, spot };
       onNear(near.current);
     }
-    // In reach of the casino's doors, from the foyer (SRS-105.5).
-    const doors = atCasinoDoors(after);
+    // In reach of the casino's doors, from the foyer (SRS-105.5) or the lobby (SRS-103.15).
+    const doors: DoorsSide = atCasinoDoors(after) ? 'floor' : atCasinoDoorsFromLobby(after) ? 'lobby' : null;
     if (doors !== nearDoors.current) {
       nearDoors.current = doors;
       onNearDoors(doors);
@@ -1277,11 +1332,12 @@ function Floor({
   useEffect(() => {
     if (leaving && !walkOut.current) walkOut.current = leaveAtOnce ? 'asked at once' : 'asked';
   }, [leaving, leaveAtOnce]);
-  // In reach of the casino's doors: they're outlined (for a player who can leave).
-  const [nearDoors, setNearDoors] = useState(false);
-  const nearDoorsRef = useRef(false);
+  // In reach of the casino's doors: they're outlined (for a player who can
+  // leave, or from the lobby for a guest, who's walked to the desk instead).
+  const [nearDoors, setNearDoors] = useState<DoorsSide>(null);
+  const nearDoorsRef = useRef<DoorsSide>(null);
   const handleNearDoors = useCallback(
-    (doors: boolean) => {
+    (doors: DoorsSide) => {
       nearDoorsRef.current = doors;
       setNearDoors(doors);
       onNearDoors?.(doors);
@@ -1306,24 +1362,30 @@ function Floor({
   const kiosk = useRef<KioskVisit | null>(null);
   useEffect(() => {
     if (checkingIn && !kiosk.current) {
-      const which = nearKioskRef.current ?? 0;
-      const screen = kioskScreens.current[which];
-      if (!screen) return;
-      const look = screen.getWorldPosition(new THREE.Vector3());
-      const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(screen.getWorldQuaternion(new THREE.Quaternion()));
+      const screens = KIOSKS.map((_, which) => {
+        const screen = kioskScreens.current[which];
+        if (!screen) return null;
+        const look = screen.getWorldPosition(new THREE.Vector3());
+        const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(screen.getWorldQuaternion(new THREE.Quaternion()));
+        return { position: look.clone().addScaledVector(facing, KIOSK_VIEW), look };
+      });
+      if (screens.some((screen) => !screen)) return;
+      const atOnce = Boolean(checkInAtOnce);
       kiosk.current = {
-        kiosk: which,
-        stage: 'in',
+        kiosk: nearKioskRef.current ?? 0,
+        stage: nearKioskRef.current === null ? 'walk' : 'in',
         t: 0,
-        skip: Boolean(checkInAtOnce),
+        skip: atOnce,
+        atOnce,
+        walk: null,
         from: null,
-        to: { position: look.clone().addScaledVector(facing, KIOSK_VIEW), look },
+        screens: screens as KioskVisit['screens'],
         thenIn: false,
       };
     } else if (!checkingIn && kiosk.current && kiosk.current.stage !== 'out') {
       kiosk.current.stage = 'out';
       kiosk.current.t = 0;
-      kiosk.current.skip = Boolean(checkInAtOnce);
+      kiosk.current.skip = kiosk.current.atOnce;
       kiosk.current.thenIn = !guest;
     }
   }, [checkingIn, checkInAtOnce, guest]);
@@ -1336,7 +1398,7 @@ function Floor({
       if (walkIn.current) walkIn.current.skip = true;
       const out = walkOut.current;
       if (out && typeof out === 'object' && !(event as KeyboardEvent).repeat) out.skip = true;
-      // The camera flying into or out of a check-in tablet, too (not while it's up close: those keys are for its forms).
+      // The walk to the desk, and the camera flying into or out of a check-in tablet, too (not while it's up close: those keys are for its forms).
       if (kiosk.current && kiosk.current.stage !== 'open' && !(event as KeyboardEvent).repeat) kiosk.current.skip = true;
     };
     const element = gl.domElement;
@@ -1368,12 +1430,14 @@ function Floor({
   }
 
   // A click on the casino's doors leaves through them when in reach (for a
-  // player who can), or walks up to them.
+  // player who can), or for a guest in the lobby walks them to the front
+  // desk to check in (SRS-103.15); otherwise it walks up to them.
   function handleDoorsClick(event: ThreeEvent<MouseEvent>) {
-    if (walkIn.current || walkOut.current || event.delta > 6 || seating.current) return;
+    if (walkIn.current || walkOut.current || kiosk.current || event.delta > 6 || seating.current) return;
     event.stopPropagation();
-    if (nearDoorsRef.current && canLeave) onLeave?.();
-    else walkTo(doorStandingSpots());
+    if (nearDoorsRef.current === 'floor' && canLeave) onLeave?.();
+    else if (nearDoorsRef.current === 'lobby' && guest) onCheckIn?.();
+    else walkTo(doorStandingSpots(guest));
   }
 
   function handleFloorClick(event: ThreeEvent<MouseEvent>) {
@@ -1412,7 +1476,7 @@ function Floor({
       />
       <pointLight position={[0, 3.2, toWorld(0, 2)[1] + 0.8]} color="#ff3fa4" intensity={12} distance={9} />
 
-      <Room lobbyState={lobby} doorsOutlined={nearDoors && Boolean(canLeave) && !leaving} onDoorsClick={handleDoorsClick} />
+      <Room lobbyState={lobby} doorsOutlined={(nearDoors === 'floor' && Boolean(canLeave) && !leaving) || (nearDoors === 'lobby' && guest && !checkingIn)} onDoorsClick={handleDoorsClick} />
       {/* Always there, so walking out shows it without new shaders to build:
           it's hidden (its lights at zero) except while a guest is in it or the player walks in or out. */}
       <Lobby state={lobby} kioskOutlined={guest && !checkingIn ? nearKiosk : null} kioskScreens={kioskScreens} onKioskClick={handleKioskClick} />

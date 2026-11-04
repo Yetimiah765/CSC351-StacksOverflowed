@@ -23,7 +23,7 @@ import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import CheckInTablet from './CheckInTablet';
-import type { WalkInput } from './Scene';
+import type { DoorsSide, WalkInput } from './Scene';
 
 // The home page: a 3D casino floor to walk around, the camera following the
 // player from behind (./Scene.tsx draws it; lib/casinoFloor.ts has the
@@ -249,8 +249,11 @@ export default function CasinoFloor() {
   // player out into the lobby ('walk'), or puts them straight there when the
   // device asks for reduced motion ('now'). From then on they're a guest.
   const canLeave = member;
-  const [nearDoors, setNearDoors] = useState(false);
-  const nearDoorsRef = useRef(false);
+  // In reach of the casino's doors, from the foyer ('floor') or, for a guest,
+  // the lobby ('lobby'), where using them walks the guest to the front desk
+  // to check in (SRS-103.15).
+  const [nearDoors, setNearDoors] = useState<DoorsSide>(null);
+  const nearDoorsRef = useRef<DoorsSide>(null);
   const [leaving, setLeaving] = useState<'walk' | 'now' | null>(null);
   const leave = useRef<() => void>(() => {});
   leave.current = () => {
@@ -307,8 +310,9 @@ export default function CasinoFloor() {
     }
   }, [router, sessionOk, member]);
 
-  // Keys: walk while held; Space or Enter plays the game in reach, or leaves
-  // through the casino's doors.
+  // Keys: walk while held; Space or Enter checks in at the tablet in reach
+  // (or, for a guest, at the casino's doors), leaves through the casino's
+  // doors, or plays the game in reach.
   useEffect(() => {
     const typing = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -332,8 +336,8 @@ export default function CasinoFloor() {
         // Only take over Space/Enter for the floor, not a focused link or button.
         if ((event.target as HTMLElement | null)?.closest('a, button')) return;
         event.preventDefault();
-        if (nearKioskRef.current !== null) checkIn.current();
-        else if (nearDoorsRef.current) leave.current();
+        if (nearKioskRef.current !== null || nearDoorsRef.current === 'lobby') checkIn.current();
+        else if (nearDoorsRef.current === 'floor') leave.current();
         else if (nearRef.current) play.current(nearRef.current);
       }
     };
@@ -445,7 +449,20 @@ export default function CasinoFloor() {
                 Press <Key>Space</Key> to check in
               </span>
             </button>
-          ) : nearDoors && canLeave && !leaving && !playing ? (
+          ) : nearDoors === 'lobby' && guest && !checkingIn && !playing ? (
+            // At the casino's doors from the lobby: only for players who've checked in.
+            <button
+              type="button"
+              onClick={() => checkIn.current()}
+              className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm sm:left-5 sm:top-5"
+            >
+              <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Casino floor</span>
+              <span className="mt-1 block text-sm leading-snug text-slate-200">Check in at the front desk first: sign up, or log in if you already have an account.</span>
+              <span className="mt-2 block text-sm">
+                Press <Key>Space</Key> to check in
+              </span>
+            </button>
+          ) : nearDoors === 'floor' && canLeave && !leaving && !playing ? (
             // At the casino's doors: the same kind of help box, to leave.
             <button
               type="button"

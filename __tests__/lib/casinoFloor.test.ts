@@ -6,7 +6,11 @@ import {
   FOYER_PLANTS,
   KIOSKS,
   atKiosk,
+  atCasinoDoorsFromLobby,
   checkInWalk,
+  clearLine,
+  deskWalk,
+  kioskStand,
   kioskStandingSpots,
   parseSpot,
   serializeSpot,
@@ -514,20 +518,21 @@ describe('the check-in kiosk (SRS-103.13)', () => {
   });
 });
 
+// Walking a straight line in small steps, the way the player's moved: nothing in the way stops them.
+function unblocked(from: Point, to: Point) {
+  const steps = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 0.05);
+  const step = { x: (to.x - from.x) / steps, y: (to.y - from.y) / steps };
+  let at = from;
+  for (let i = 0; i < steps; i++) {
+    const next = moveWithCollisions(at, step);
+    if (Math.hypot(next.x - at.x - step.x, next.y - at.y - step.y) > 1e-9) return false;
+    at = next;
+  }
+  return true;
+}
+
 describe('into the casino after checking in (SRS-103.14)', () => {
   const middle = DOOR.x + DOOR.w / 2;
-  // Walking a straight line in small steps, the way the player's moved: nothing in the way stops them.
-  const unblocked = (from: Point, to: Point) => {
-    const steps = Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / 0.05);
-    const step = { x: (to.x - from.x) / steps, y: (to.y - from.y) / steps };
-    let at = from;
-    for (let i = 0; i < steps; i++) {
-      const next = moveWithCollisions(at, step);
-      if (Math.hypot(next.x - at.x - step.x, next.y - at.y - step.y) > 1e-9) return false;
-      at = next;
-    }
-    return true;
-  };
 
   // Where a guest can stand at each tablet, and get to from the middle of the lobby.
   const lobbyMiddle = { x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) };
@@ -552,5 +557,71 @@ describe('into the casino after checking in (SRS-103.14)', () => {
     for (let i = 3; i < walk.length; i++) expect(walk[i]!.y).toBeLessThan(walk[i - 1]!.y);
     // Up the roped aisle to just short of the doors, nothing's in the way.
     expect(unblocked(LOBBY_MIDDLE, { x: middle, y: FRONT_WALL_Y + 1 })).toBe(true);
+  });
+});
+
+describe('casino doors for guests (SRS-103.15)', () => {
+  const middle = DOOR.x + DOOR.w / 2;
+  const lobbyMiddle = { x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) };
+  const centre = (tile: Point) => ({ x: tile.x + 0.5, y: tile.y + 0.5 });
+
+  it("keeps a guest out of the casino floor: walking at the casino's doors from the lobby, they stop at them", () => {
+    for (const x of [middle - 1.5, middle, middle + 1.5]) {
+      let at = { x, y: LOBBY_MIDDLE.y };
+      for (let i = 0; i < 600; i++) at = moveWithCollisions(at, { x: 0, y: -0.05 });
+      expect(at.y, String(x)).toBeGreaterThan(FRONT_WALL_Y);
+      if (x === middle) expect(atCasinoDoorsFromLobby(at)).toBe(true);
+    }
+    // And no way round: nowhere on the floor can be walked to from the lobby.
+    expect(findPath(lobbyMiddle, [START])).toBeNull();
+  });
+
+  it("is in reach of the doors only from the lobby's side, where the floor's way out isn't", () => {
+    for (const spot of doorStandingSpots(true)) {
+      expect(spot.y).toBeGreaterThan(FRONT_WALL_Y - 1);
+      expect(atCasinoDoorsFromLobby(centre(spot))).toBe(true);
+      expect(atCasinoDoors(centre(spot))).toBe(false);
+    }
+    expect(doorStandingSpots(true).length).toBeGreaterThan(0);
+    expect(findPath(lobbyMiddle, doorStandingSpots(true))).not.toBeNull();
+    for (const spot of doorStandingSpots()) expect(atCasinoDoorsFromLobby(centre(spot))).toBe(false);
+    expect(atCasinoDoorsFromLobby(LOBBY_MIDDLE)).toBe(false);
+  });
+
+  it('has somewhere open to stand in front of each tablet, in its reach', () => {
+    KIOSKS.forEach((_, kiosk) => {
+      const stand = kioskStand(kiosk);
+      expect(atKiosk(stand)).toBe(kiosk);
+      expect(clearLine(stand, stand)).toBe(true);
+      expect(isBlocked(Math.floor(stand.x), Math.floor(stand.y))).toBe(false);
+      // Logging in there, the walk onto the floor (SRS-103.14) sets off clear of everything.
+      const [, offDesk, lobby] = checkInWalk(stand);
+      expect(unblocked(stand, offDesk!) && unblocked(offDesk!, lobby!)).toBe(true);
+    });
+  });
+
+  it("walks a guest from the doors to stand at a tablet, in a few straight lines that nothing's in the way of", () => {
+    for (const spot of doorStandingSpots(true)) {
+      const from = centre(spot);
+      const walk = deskWalk(from);
+      expect(walk, JSON.stringify(from)).not.toBeNull();
+      const { kiosk, points } = walk!;
+      expect(points[0]).toEqual(from);
+      expect(points[points.length - 1]).toEqual(kioskStand(kiosk));
+      expect(points.length).toBeLessThanOrEqual(5);
+      for (let i = 1; i < points.length; i++) expect(unblocked(points[i - 1]!, points[i]!), JSON.stringify(points)).toBe(true);
+    }
+  });
+
+  it('finds the way to the desk from anywhere in the lobby a guest can get to', () => {
+    for (let y = Math.ceil(FRONT_WALL_Y); y < FRONT_WALL_Y + LOBBY.depth; y++) {
+      for (let x = Math.floor(middle - LOBBY.width / 2); x < middle + LOBBY.width / 2; x++) {
+        if (isBlocked(x, y) || findPath(lobbyMiddle, [{ x, y }]) === null) continue;
+        const walk = deskWalk(centre({ x, y }));
+        expect(walk, `${x},${y}`).not.toBeNull();
+        const { points } = walk!;
+        for (let i = 1; i < points.length; i++) expect(unblocked(points[i - 1]!, points[i]!), `${x},${y}: ${JSON.stringify(points)}`).toBe(true);
+      }
+    }
   });
 });

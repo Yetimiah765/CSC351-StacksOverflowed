@@ -816,7 +816,7 @@ export function flutedWoodTexture(repeat: [number, number]) {
   return texture(element, repeat);
 }
 
-/** A check-in kiosk's screen: a strip of green felt with chips and cards, CHECK IN, and buttons to log in or sign up. */
+/** A check-in kiosk's screen: a strip of green felt with chips and cards, CHECK IN, and buttons to sign up (first, as the tablet opens on it) or log in. */
 export function kioskScreenTexture() {
   const w = 640;
   const h = 400;
@@ -888,7 +888,7 @@ export function kioskScreenTexture() {
   ctx.fillText('CHECK IN', w / 2, 212);
   ctx.fillStyle = '#94a3b8';
   ctx.font = '600 20px Arial, sans-serif';
-  ctx.fillText('Log in, or sign up if you are new here', w / 2, 252);
+  ctx.fillText('Sign up, or log in if you have an account', w / 2, 252);
   ctx.fillStyle = '#34d399';
   ctx.beginPath();
   ctx.roundRect(110, 290, 200, 56, 12);
@@ -900,9 +900,9 @@ export function kioskScreenTexture() {
   ctx.stroke();
   ctx.font = `900 22px ${family}`;
   ctx.fillStyle = '#020617';
-  ctx.fillText('LOG IN', 210, 319);
+  ctx.fillText('SIGN UP', 210, 319);
   ctx.fillStyle = '#e2e8f0';
-  ctx.fillText('SIGN UP', 430, 319);
+  ctx.fillText('LOG IN', 430, 319);
   // The home bar at the bottom.
   ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
   ctx.beginPath();

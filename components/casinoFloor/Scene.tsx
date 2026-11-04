@@ -30,6 +30,7 @@ import {
   type FloorObject,
   type GateState,
   type Point,
+  type StoodSpot,
   type TakenSeat,
 } from '../../lib/casinoFloor';
 import {
@@ -119,6 +120,10 @@ interface Props {
   leaveAtOnce?: boolean;
   /** The walk out is over (or was skipped): they're a guest in the lobby. */
   onLeft?: () => void;
+  /** Where the player last stood in this tab, to start them there (SRS-107.7). */
+  spot?: StoodSpot | null;
+  /** Where the player stands now, every so often while they walk about (and as the page closes), to remember. */
+  onSpot?: (spot: StoodSpot) => void;
   /** Stop drawing (while a game's page loads), so the page isn't held up. */
   paused?: boolean;
 }
@@ -509,6 +514,8 @@ function walkOutCamera(out: WalkOut, here: THREE.Vector2, follow: Camera) {
 
 function Player({
   start,
+  startHeading,
+  onSpot,
   input,
   onNear,
   path,
@@ -524,8 +531,10 @@ function Player({
   onLeft,
   onNearDoors,
 }: {
-  /** Where the player starts, in tiles (the middle of the start tile, if not given). */
+  /** Where the player starts, in tiles (the middle of the start tile, if not given), and the way they face (into the room). */
   start?: Point;
+  startHeading?: number;
+  onSpot?: (spot: StoodSpot) => void;
   input: MutableRefObject<WalkInput>;
   onNear: (near: NearSpot) => void;
   path: MutableRefObject<Point[]>;
@@ -552,7 +561,17 @@ function Player({
   // The camera's put straight into place the first time it follows, rather
   // than easing in from wherever it began (from the floor into the lobby, say).
   const placed = useRef(false);
-  const heading = useRef(Math.PI);
+  const heading = useRef(startHeading ?? Math.PI);
+  // Where they stand while it's theirs to walk, reported every half second
+  // or so (when it's changed), and once more as the page closes.
+  const stood = useRef<StoodSpot | null>(null);
+  const sinceReport = useRef(0);
+  useEffect(
+    () => () => {
+      if (stood.current) onSpot?.(stood.current);
+    },
+    [onSpot]
+  );
   const lookAt = useRef(new THREE.Vector3());
   const near = useRef<NearSpot>({ object: null, spot: null });
   const nearDoors = useRef(false);
@@ -833,6 +852,19 @@ function Player({
       onNearDoors(doors);
     }
 
+    // Remembered for coming back to the page (SRS-107.7).
+    const here = { x: after.x, y: after.y, heading: heading.current, yaw: camera.current.yaw };
+    const last = stood.current;
+    const changed = !last || Math.hypot(here.x - last.x, here.y - last.y) > 0.05 || Math.abs(here.heading - last.heading) > 0.05 || Math.abs(here.yaw - last.yaw) > 0.05;
+    sinceReport.current += delta;
+    if (changed && sinceReport.current > 0.5) {
+      stood.current = here;
+      sinceReport.current = 0;
+      onSpot?.(here);
+    } else if (!last) {
+      stood.current = here;
+    }
+
     followWith(wx, wz, 1.45, delta);
   });
 
@@ -1074,7 +1106,7 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
   }
 }
 
-function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered, canLeave, onNearDoors, onLeave, leaving, leaveAtOnce, onLeft, guest = false }: Props) {
+function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered, canLeave, onNearDoors, onLeave, leaving, leaveAtOnce, onLeft, guest = false, spot, onSpot }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
   const [nearSpot, setNearSpot] = useState<number | null>(null);
@@ -1140,7 +1172,7 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
   useEffect(() => {
     if (playing && !seating.current) seating.current = { object: playing, spot: nearSpotRef.current };
   }, [playing]);
-  const camera = useRef<Camera>({ yaw: 0, pitch: 0.42, distance: 4.6 });
+  const camera = useRef<Camera>({ yaw: spot?.yaw ?? 0, pitch: 0.42, distance: 4.6 });
   const near = FLOOR_OBJECTS.find((object) => object.id === nearId);
   const playerTile = useRef<Point>({ x: START.x, y: START.y });
 
@@ -1230,7 +1262,9 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
       </group>
 
       <Player
-        start={inLobby ? LOBBY_MIDDLE : undefined}
+        start={spot ? { x: spot.x, y: spot.y } : inLobby ? LOBBY_MIDDLE : undefined}
+        startHeading={spot?.heading}
+        onSpot={onSpot}
         input={input}
         onNear={handleNear}
         path={path}

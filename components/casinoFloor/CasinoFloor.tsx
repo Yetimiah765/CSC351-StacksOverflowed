@@ -5,7 +5,20 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { ENTRANCE_KEY, INTERACTIVE_OBJECTS, SEAT_KEY, VISITED_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
+import {
+  ENTRANCE_KEY,
+  INTERACTIVE_OBJECTS,
+  SEAT_KEY,
+  SPOT_KEY,
+  VISITED_KEY,
+  parseSpot,
+  parseTakenSeat,
+  serializeSpot,
+  serializeTakenSeat,
+  type FloorObject,
+  type StoodSpot,
+  type TakenSeat,
+} from '../../lib/casinoFloor';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
@@ -82,6 +95,24 @@ function forgetTakenSeat() {
   }
 }
 
+// Where the player last stood in this tab (SRS-107.7), if they may still
+// stand there.
+function readSpot(guest: boolean): StoodSpot | null {
+  try {
+    return parseSpot(sessionStorage.getItem(SPOT_KEY), guest);
+  } catch {
+    return null;
+  }
+}
+
+function rememberSpot(spot: StoodSpot) {
+  try {
+    sessionStorage.setItem(SPOT_KEY, serializeSpot(spot));
+  } catch {
+    // Not remembered: they start at the door, or in the lobby, next time.
+  }
+}
+
 // Walking in (SRS-103.12): the first time the home page opens in the tab,
 // and just after logging in (the login page leaves ENTRANCE_KEY), the player
 // starts outside and walks in, unless the device asks for reduced motion.
@@ -135,17 +166,64 @@ export default function CasinoFloor() {
   // The seat taken to open a game, read once the page is in the browser:
   // undefined until then, null when there's nothing to get up from.
   const [returning, setReturning] = useState<TakenSeat | null | undefined>(undefined);
-  // Walking in after logging in (SRS-103.12); never when back from a game.
+  // Walking in (SRS-103.12); never when back from a game.
   const [entering, setEntering] = useState(false);
+  // Where they last stood, when they're not getting up or walking in (SRS-107.7).
+  const [spot, setSpot] = useState<StoodSpot | null>(null);
+
+  // Whether the session this browser holds is still good: one that ended
+  // elsewhere (a newer login, or it ran out) makes them a guest, put in the
+  // lobby (SRS-107.7). Null until known; false for a guest.
+  const [sessionOk, setSessionOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (signedIn === null) return;
+    if (!signedIn) {
+      setSessionOk(false);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 401) {
+          localStorage.removeItem('player_token');
+          notifyBalanceChanged();
+          setSessionOk(false);
+        } else {
+          setSessionOk(true);
+        }
+      })
+      // Offline or the like: take the session as good; the games check it anyway.
+      .catch(() => {
+        if (!cancelled) setSessionOk(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [signedIn]);
 
   useEffect(() => {
     setWebgl(canDraw3d());
-    const seat = readTakenSeat();
+  }, []);
+
+  // Once it's known who they are, where they start: getting up from the seat
+  // they took to open a game, walking in, or back where they last stood. A
+  // guest (perhaps because their session ended) gets up from no seat.
+  const placed = useRef(false);
+  useEffect(() => {
+    if (sessionOk === null || placed.current) return;
+    placed.current = true;
+    let seat = readTakenSeat();
+    if (seat && !sessionOk) {
+      forgetTakenSeat();
+      seat = null;
+    }
     setReturning(seat);
     const walkIn = wantsEntrance() && !seat;
     if (!walkIn) forgetEntrance();
     setEntering(walkIn);
-  }, []);
+    setSpot(!walkIn && !seat ? readSpot(!sessionOk) : null);
+  }, [sessionOk]);
 
   // The game being sat down at (the scene plays the sitting and the camera
   // flying in), then, once that's over, the one whose page is opening.
@@ -165,8 +243,8 @@ export default function CasinoFloor() {
   // device asks for reduced motion ('now'). From then on, without changing
   // page, they're a guest.
   const [loggedOutHere, setLoggedOutHere] = useState(false);
-  const member = signedIn === true && !loggedOutHere;
-  const guest = signedIn === false || loggedOutHere;
+  const member = sessionOk === true && !loggedOutHere;
+  const guest = sessionOk === false || loggedOutHere;
   const canLeave = member;
   const [nearDoors, setNearDoors] = useState(false);
   const nearDoorsRef = useRef(false);
@@ -198,11 +276,11 @@ export default function CasinoFloor() {
   // Load every game's page in the background, so walking up to one and
   // pressing Space opens it right away.
   useEffect(() => {
-    if (signedIn === null) return;
+    if (sessionOk === null) return;
     for (const object of INTERACTIVE_OBJECTS) {
       if (object.interactive?.href) router.prefetch(playHref(member, object.interactive.href));
     }
-  }, [router, signedIn, member]);
+  }, [router, sessionOk, member]);
 
   // Keys: walk while held; Space or Enter plays the game in reach, or leaves
   // through the casino's doors.
@@ -278,7 +356,7 @@ export default function CasinoFloor() {
 
       {/* The floor fills the rest of the window (on a phone, a fixed height). */}
       <div className="relative h-[70vh] min-h-[320px] overflow-hidden rounded-xl border border-white/10 bg-[#06030a] shadow-[0_20px_60px_rgba(0,0,0,0.6)] lg:h-auto lg:min-h-0 lg:flex-1">
-        {webgl === null || returning === undefined || signedIn === null ? (
+        {webgl === null || returning === undefined ? (
           <FloorMessage text="Opening the casino…" />
         ) : webgl ? (
           <div
@@ -310,6 +388,8 @@ export default function CasinoFloor() {
               leaveAtOnce={leaving === 'now'}
               onLeft={() => left.current()}
               guest={guest}
+              spot={spot}
+              onSpot={rememberSpot}
               paused={opening}
             />
           </div>

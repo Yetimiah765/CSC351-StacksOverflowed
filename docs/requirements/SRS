@@ -910,9 +910,9 @@ flowchart LR
 
 *Traces to: UR-103*
 
-**SRS-103.12, JO, Walking into the casino.** After a successful login, the home page shall show the player's character walking into the casino through its entrance before giving the player control. The player shall be able to skip it with any key or a click, and it shall not play when the player's device is set to reduce motion.
+**SRS-103.12, JO, Walking into the lobby.** The first time the home page opens in a browser tab, it shall show the player's character walking in from the street through the building's front doors into the lobby, the front doors staying shut behind them. A logged-in player's character shall carry on through the casino's doors onto the casino floor, the doors shutting behind them. The player shall be able to skip the walk with any key or a click, and it shall not play when the player's device is set to reduce motion.
 
-*Traces to: UR-103*
+*Traces to: UR-103, UR-107*
 
 ### UR-104, JO – Account Validation
 

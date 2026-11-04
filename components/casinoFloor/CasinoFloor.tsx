@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { ENTRANCE_KEY, INTERACTIVE_OBJECTS, SEAT_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
+import { ENTRANCE_KEY, INTERACTIVE_OBJECTS, SEAT_KEY, VISITED_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import type { WalkInput } from './Scene';
@@ -81,12 +81,18 @@ function forgetTakenSeat() {
   }
 }
 
-// Just logged in (SRS-103.12): the login page leaves ENTRANCE_KEY, and the
-// floor starts with the player walking in through the doors, unless the
-// device asks for reduced motion. It's cleared once they're in.
+// Walking in (SRS-103.12): the first time the home page opens in the tab,
+// and just after logging in (the login page leaves ENTRANCE_KEY), the player
+// starts outside and walks in, unless the device asks for reduced motion.
+// Once they're in (or if they aren't walking in), the tab remembers it's
+// been opened and the login is forgotten. (Only read here, and written when
+// it's over, so React running the page's first effect twice in development
+// doesn't lose the first visit.)
 function wantsEntrance() {
   try {
-    return sessionStorage.getItem(ENTRANCE_KEY) === '1' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const firstVisit = sessionStorage.getItem(VISITED_KEY) === null;
+    const justLoggedIn = sessionStorage.getItem(ENTRANCE_KEY) === '1';
+    return (firstVisit || justLoggedIn) && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   } catch {
     return false;
   }
@@ -95,6 +101,7 @@ function wantsEntrance() {
 function forgetEntrance() {
   try {
     sessionStorage.removeItem(ENTRANCE_KEY);
+    sessionStorage.setItem(VISITED_KEY, '1');
   } catch {
     // Nothing to forget.
   }
@@ -275,7 +282,7 @@ export default function CasinoFloor() {
 
       {/* The floor fills the rest of the window (on a phone, a fixed height). */}
       <div className="relative h-[70vh] min-h-[320px] overflow-hidden rounded-xl border border-white/10 bg-[#06030a] shadow-[0_20px_60px_rgba(0,0,0,0.6)] lg:h-auto lg:min-h-0 lg:flex-1">
-        {webgl === null || returning === undefined ? (
+        {webgl === null || returning === undefined || signedIn === null ? (
           <FloorMessage text="Opening the casino…" />
         ) : webgl ? (
           <div
@@ -305,6 +312,7 @@ export default function CasinoFloor() {
               onLeave={() => leave.current()}
               leaving={leaving === 'walk'}
               onLeft={() => left.current()}
+              guest={signedIn === false}
               paused={opening}
             />
           </div>

@@ -9,6 +9,7 @@ import {
   COLS,
   FLOOR_OBJECTS,
   ROWS,
+  LOBBY_MIDDLE,
   START,
   TILE_METRES,
   atCasinoDoors,
@@ -101,8 +102,10 @@ interface Props {
   returning?: TakenSeat | null;
   /** Getting up is over. */
   onStood?: () => void;
-  /** Just logged in: start outside the building and walk in through its lobby (SRS-103.12). */
+  /** The first visit in the tab, or just logged in: start outside the building and walk in (SRS-103.12). */
   entering?: boolean;
+  /** A guest: they walk in no further than the lobby, and stay there (they can't go into the casino until they've checked in). */
+  guest?: boolean;
   /** The walk in is over (or was skipped). */
   onEntered?: () => void;
   /** Logged in, so the casino's doors can be left through, logging out (SRS-105.5). */
@@ -233,20 +236,22 @@ function planRising(object: FloorObject, spot: number | null): Seating {
 }
 
 /**
- * Walking in after logging in (SRS-103.12), through the building's lobby
- * (Lobby.tsx): the player stands outside the glass front doors while they
- * slide open, then walks in along `points` (outside, the front door, down the
- * lobby, through the casino's doors and the foyer, through the gate in the
- * rail, a few steps onto the floor). The camera holds inside the lobby
- * facing them as they come in while the front doors slide shut behind them,
- * orbits round to behind them, and follows them down the lobby as the
- * casino's doors open. Then it overtakes them on their right, through the
- * doorway beside them, and turns to watch the doors shut behind them; once
- * they're through the gate it swings back round behind them, to where the
+ * Walking in (SRS-103.12), through the building's lobby (Lobby.tsx): the
+ * player stands outside the glass front doors while they slide open, then
+ * walks in along `points`. The camera holds inside the lobby facing them as
+ * they come in while the front doors slide shut behind them, then orbits
+ * round to behind them. A guest stops there, in the middle of the lobby. A
+ * logged-in player carries on down the lobby (the casino's doors opening),
+ * through the doors and the foyer, through the gate in the rail, a few steps
+ * onto the floor: the camera overtakes them on their right, through the
+ * doorway beside them, turns to watch the doors shut behind them, and once
+ * they're through the gate swings back round behind them, to where the
  * camera follows from. Any key or a click skips to the end.
  */
 interface WalkIn {
-  /** The walk, world metres, and how far along it the casino's doors and the gate are. */
+  /** A guest's walk, which ends in the lobby. */
+  guest: boolean;
+  /** The walk, world metres, and how far along it the casino's doors and the gate are (never, for a guest). */
   points: THREE.Vector2[];
   length: number;
   doors: number;
@@ -267,15 +272,16 @@ const ENTER_SPEED = 1.3;
 /** After the player stops, how much further (metres, at walking pace) the camera takes to swing round behind them. */
 const SETTLE = 2.2;
 
-function planEntrance(): WalkIn {
-  const points = entranceWalk().map((point) => new THREE.Vector2(...toWorld(point.x, point.y)));
+function planEntrance(guest: boolean): WalkIn {
+  const points = entranceWalk(guest).map((point) => new THREE.Vector2(...toWorld(point.x, point.y)));
   const legs = points.slice(1).map((point, i) => point.distanceTo(points[i]!));
   const upTo = (n: number) => legs.slice(0, n).reduce((sum, leg) => sum + leg, 0);
   return {
+    guest,
     points,
     length: upTo(legs.length),
-    doors: upTo(2),
-    gate: upTo(3),
+    doors: guest ? Infinity : upTo(2),
+    gate: guest ? Infinity : upTo(3),
     progress: 0,
     walked: 0,
     t: 0,
@@ -297,10 +303,11 @@ function walkInDoors(entry: WalkIn) {
   const shut = (from: number, over: number) => 1 - smooth((s - from) / over);
   return {
     front: smooth((entry.t - 0.25) / 1.1) * shut(4.4, 1.3),
-    casino: opening(entry.doors - 4.6, 2.2) * shut(entry.doors + 1.4, 1.4),
+    // (A guest never reaches the casino's doors or the gate: they stay shut, and the lobby lit.)
+    casino: entry.guest ? 0 : opening(entry.doors - 4.6, 2.2) * shut(entry.doors + 1.4, 1.4),
     // Shut only once the player is clear of its leaves' swing.
-    gate: opening(entry.gate - 2.8, 1.2) * shut(entry.gate + 1.1, 1.1),
-    lit: shut(entry.doors + 1.4, 1.4),
+    gate: entry.guest ? 0 : opening(entry.gate - 2.8, 1.2) * shut(entry.gate + 1.1, 1.1),
+    lit: entry.guest ? 1 : shut(entry.doors + 1.4, 1.4),
   };
 }
 
@@ -314,6 +321,17 @@ function walkInCamera(entry: WalkIn, here: THREE.Vector2, follow: Camera) {
   // From then on it's placed around the player: `across` metres away
   // towards `yaw` (0 is behind them, as they walk towards -z), and `up`
   // metres above their head.
+  if (entry.guest) {
+    // A guest stops in the lobby: the camera orbits from the first shot round to behind them, where it follows from.
+    const holdHere = alongWalk(entry.points, holdUntil).here;
+    const startYaw = Math.atan2(entry.from.x - holdHere.x, entry.from.z - holdHere.y);
+    const startAcross = Math.hypot(entry.from.x - holdHere.x, entry.from.z - holdHere.y);
+    const k = smooth((s - holdUntil) / (entry.length + SETTLE - holdUntil));
+    const yaw = THREE.MathUtils.lerp(startYaw, follow.yaw, k);
+    const across = THREE.MathUtils.lerp(startAcross, Math.cos(follow.pitch) * follow.distance, k);
+    const up = THREE.MathUtils.lerp(entry.from.y - head, Math.sin(follow.pitch) * follow.distance, k);
+    return new THREE.Vector3(here.x + Math.sin(yaw) * across, head + up, here.y + Math.cos(yaw) * across);
+  }
   const { doors } = entry;
   const overtakeFrom = doors - 4.2;
   const overtaken = doors + 1.6;
@@ -471,6 +489,7 @@ function walkOutCamera(out: WalkOut, here: THREE.Vector2) {
 }
 
 function Player({
+  start,
   input,
   onNear,
   path,
@@ -486,6 +505,8 @@ function Player({
   onLeft,
   onNearDoors,
 }: {
+  /** Where the player starts, in tiles (the middle of the start tile, if not given). */
+  start?: Point;
   input: MutableRefObject<WalkInput>;
   onNear: (near: NearSpot) => void;
   path: MutableRefObject<Point[]>;
@@ -508,7 +529,10 @@ function Player({
   const motion = useRef<Motion>({ speed: 0 });
   const seat = useRef<SeatPose>({ amount: 0, handsY: 0.85, handsZ: 0.4 });
   // Position in tiles (the middle of the start tile), and the way they face.
-  const position = useRef<Point>({ x: START.x + 0.5, y: START.y + 0.5 });
+  const position = useRef<Point>(start ?? { x: START.x + 0.5, y: START.y + 0.5 });
+  // The camera's put straight into place the first time it follows, rather
+  // than easing in from wherever it began (from the floor into the lobby, say).
+  const placed = useRef(false);
   const heading = useRef(Math.PI);
   const lookAt = useRef(new THREE.Vector3());
   const near = useRef<NearSpot>({ object: null, spot: null });
@@ -550,7 +574,7 @@ function Player({
       }
       Object.assign(lobby.current, walkInDoors(entry));
       // Once the casino's doors have shut behind them, the lobby goes.
-      lobby.current.shown = entry.progress < entry.doors + 2.8;
+      lobby.current.shown = entry.guest || entry.progress < entry.doors + 2.8;
       view.position.copy(walkInCamera(entry, here, camera.current));
       lookAt.current.set(here.x, 1.45, here.y);
       view.lookAt(lookAt.current);
@@ -790,6 +814,13 @@ function Player({
       height + Math.sin(pitch) * distance,
       wz + Math.cos(yaw) * Math.cos(pitch) * distance
     );
+    if (wz > FRONT_WALL_Z) {
+      // In the lobby (a guest): kept inside its walls and under its ceiling.
+      position.x = THREE.MathUtils.clamp(position.x, -LOBBY_HALF_WIDTH + 0.4, LOBBY_HALF_WIDTH - 0.4);
+      position.z = THREE.MathUtils.clamp(position.z, FRONT_WALL_Z + 0.5, LOBBY_SOUTH_Z - 0.4);
+      position.y = THREE.MathUtils.clamp(position.y, 0.6, LOBBY_HEIGHT - 0.4);
+      return { position, look };
+    }
     const halfW = (COLS / 2 - 1.3) * TILE_M;
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = FRONT_WALL_Z - 0.4;
@@ -812,6 +843,11 @@ function Player({
   /** The camera: easing after the player into its following pose. */
   function followWith(wx: number, wz: number, height: number, delta: number) {
     const pose = followPose(wx, wz, height);
+    if (!placed.current) {
+      placed.current = true;
+      view.position.copy(pose.position);
+      lookAt.current.copy(pose.look);
+    }
     const ease = 1 - Math.exp(-delta * 7);
     view.position.lerp(pose.position, ease);
     lookAt.current.lerp(pose.look, 1 - Math.exp(-delta * 12));
@@ -1001,7 +1037,7 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
   }
 }
 
-function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered, canLeave, onNearDoors, onLeave, leaving, onLeft }: Props) {
+function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered, canLeave, onNearDoors, onLeave, leaving, onLeft, guest = false }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
   const [nearSpot, setNearSpot] = useState<number | null>(null);
@@ -1024,9 +1060,11 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
   const seating = useRef<{ object: FloorObject; spot: number | null } | Seating | null>(rising);
   // Just logged in, and not back from a game: walk in through the entrance
   // (SRS-103.12).
-  const [entrance] = useState(() => (entering && !rising ? planEntrance() : null));
+  const [entrance] = useState(() => (entering && !rising ? planEntrance(guest) : null));
   const walkIn = useRef<WalkIn | null>(entrance);
-  const lobby = useRef<LobbyState>({ front: 0, casino: 0, gate: 0, lit: 1, shown: entrance !== null });
+  // A guest is in the lobby, whether or not they're seen walking in.
+  const inLobby = guest && !rising;
+  const lobby = useRef<LobbyState>({ front: 0, casino: 0, gate: 0, lit: 1, shown: entrance !== null || inLobby });
   // Leaving through the casino's doors (SRS-105.5), once the page says so;
   // Player plans the walk out from wherever the player is.
   const walkOut = useRef<WalkOut | 'asked' | null>(null);
@@ -1121,7 +1159,7 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
 
       <Room lobbyState={lobby} doorsOutlined={nearDoors && Boolean(canLeave) && !leaving} onDoorsClick={handleDoorsClick} />
       {/* Always there, so walking out shows it without new shaders to build:
-          it's hidden (its lights at zero) except while walking in or out. */}
+          it's hidden (its lights at zero) except while a guest is in it or the player walks in or out. */}
       <Lobby state={lobby} />
       <group onClick={handleFloorClick}>
         {/* What a click lands on: the floor, and the foyer out to the front wall. */}
@@ -1155,6 +1193,7 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
       </group>
 
       <Player
+        start={inLobby ? LOBBY_MIDDLE : undefined}
         input={input}
         onNear={handleNear}
         path={path}

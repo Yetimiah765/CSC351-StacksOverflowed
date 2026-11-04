@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import CardsAndChipsBackground from '../../components/auth/CardsAndChipsBackground';
 import PokerWinHeader from '../../components/auth/PokerWinHeader';
+import { ENTRANCE_KEY } from '../../lib/casinoFloor';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -45,7 +46,13 @@ export default function LoginPage() {
     setLoading(false);
     if (response.ok) {
       if (data?.token) localStorage.setItem('player_token', data.token);
-      // SRS-103.11: straight to the casino floor, where play starts.
+      // SRS-103.11: straight to the casino floor, where play starts, walking
+      // in through its doors first (SRS-103.12).
+      try {
+        sessionStorage.setItem(ENTRANCE_KEY, '1');
+      } catch {
+        // Storage blocked: the floor just opens with the player inside.
+      }
       router.push('/');
     } else {
       setMessage(data.error || 'Login failed.');

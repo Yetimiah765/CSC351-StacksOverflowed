@@ -1,9 +1,11 @@
 'use client';
 
 import { RoundedBox } from '@react-three/drei';
-import { useMemo, type ReactNode } from 'react';
+import type { ThreeEvent } from '@react-three/fiber';
+import { useMemo, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
-import { FRONT_DESK } from '../../lib/casinoFloor';
+import { FRONT_DESK, KIOSKS, KIOSK_INSET } from '../../lib/casinoFloor';
+import Highlight from './Highlight';
 import Person from './Person';
 import { arcShadowTexture, flutedWoodTexture, kioskScreenTexture, marbleTexture, medallionTexture } from './textures';
 
@@ -110,7 +112,7 @@ function Aluminium() {
  * rounded aluminium body, a black glass front with a camera in the top
  * bezel, and the check-in screen.
  */
-function KioskTablet({ screen }: { screen: THREE.Texture }) {
+function KioskTablet({ screen, screenRef }: { screen: THREE.Texture; screenRef?: (mesh: THREE.Mesh | null) => void }) {
   const glass = useMemo(() => roundedRect(0.352, 0.237, 0.011), []);
   return (
     <group>
@@ -139,7 +141,7 @@ function KioskTablet({ screen }: { screen: THREE.Texture }) {
             <mesh geometry={glass} position={[0, 0, 0.0072]}>
               <meshPhysicalMaterial color="#05060a" roughness={0.08} clearcoat={1} clearcoatRoughness={0.05} />
             </mesh>
-            <mesh position={[0, 0, 0.0076]}>
+            <mesh ref={screenRef} position={[0, 0, 0.0076]}>
               <planeGeometry args={[0.318, 0.199]} />
               <meshStandardMaterial map={screen} emissiveMap={screen} emissive="#ffffff" emissiveIntensity={1.1} toneMapped={false} />
             </mesh>
@@ -210,7 +212,17 @@ function BankersLamp() {
   );
 }
 
-export default function FrontDesk() {
+export default function FrontDesk({
+  outlined = null,
+  screens,
+  onKioskClick,
+}: {
+  /** The check-in tablet a guest is near enough to use, outlined (SRS-103.13). */
+  outlined?: number | null;
+  /** Each tablet's screen, for the camera to fly into. */
+  screens?: MutableRefObject<(THREE.Object3D | null)[]>;
+  onKioskClick?: (kiosk: number, event: ThreeEvent<MouseEvent>) => void;
+} = {}) {
   const fluted = useMemo(() => flutedWoodTexture([(R * SPAN) / 0.64, 1]), []);
   const marble = useMemo(() => marbleTexture([0.6, 0.6], false), []);
   const shadowSize = 2 * (R + 0.7);
@@ -309,11 +321,18 @@ export default function FrontDesk() {
       </group>
 
       {/* On the top: the two kiosks either side of the middle, the bell and the lamp at the ends. */}
-      {[-0.3, 0.3].map((a) => {
-        const [x, z] = along(R - 0.13, a);
+      {KIOSKS.map((a, kiosk) => {
+        const [x, z] = along(R - KIOSK_INSET, a);
         return (
-          <group key={a} position={[x, TOP, z]} rotation={[0, facingOut(a), 0]}>
-            <KioskTablet screen={screen} />
+          <group key={a} position={[x, TOP, z]} rotation={[0, facingOut(a), 0]} onClick={(event) => onKioskClick?.(kiosk, event)}>
+            <Highlight enabled={outlined === kiosk}>
+              <KioskTablet
+                screen={screen}
+                screenRef={(mesh) => {
+                  if (screens) screens.current[kiosk] = mesh;
+                }}
+              />
+            </Highlight>
           </group>
         );
       })}

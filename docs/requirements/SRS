@@ -922,6 +922,10 @@ flowchart LR
 
 *Traces to: UR-103*
 
+**SRS-103.15, JO, Casino doors for guests.** A guest shall not be able to enter the casino floor. When a guest uses the casino's doors from the lobby, the system shall show their character walking to the front desk and open a check-in tablet on the sign-up form (SRS-103.13). The player shall be able to skip the walk with any key or a click, and it shall not play when the player's device is set to reduce motion.
+
+*Traces to: UR-103, UR-107*
+
 ### UR-104, JO – Account Validation
 
 *User story: As a player, I want the website to validate my registration and login information, so that invalid information is rejected and my account can be securely accessed.*
@@ -1035,6 +1039,8 @@ flowchart LR
 *Traces to: UR-107*
 
 **SRS-107.2, JO, Guest home-page access.** The system shall allow unauthenticated guests to view the home page and available game listings.
+
+*Note added on 2026-11-04: since SRS-103.15, guests stay in the lobby until they log in, so they see the available games on the lobby's posters and in the game list below the 3D view, not on the casino floor.*
 
 *Traces to: UR-107*
 

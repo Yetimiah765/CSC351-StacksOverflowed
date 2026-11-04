@@ -6,9 +6,10 @@ import * as THREE from 'three';
 import { COLS, DOOR, LOBBY, TILE_METRES } from '../../lib/casinoFloor';
 import { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
 import FrontDesk from './FrontDesk';
-import { Pillar, Plant } from './Furniture';
+import { Plant } from './Furniture';
 import {
   cityTexture,
+  columnFlutingTexture,
   dieFaceTexture,
   jackpotBoard,
   lobbyWallTexture,
@@ -17,6 +18,8 @@ import {
   neonTexture,
   paintJackpotBoard,
   posterTexture,
+  softShadowTexture,
+  tuftedVelvetTexture,
   type PosterGame,
 } from './textures';
 
@@ -52,6 +55,8 @@ const HALF_W = (LOBBY.width / 2) * M;
 export const LOBBY_HALF_WIDTH = HALF_W;
 export const LOBBY_HEIGHT = 6.5;
 const H = LOBBY_HEIGHT;
+/** How far each column (and the chandelier and ceiling rose in line with it) is from the middle of the lobby's length. */
+const COLUMN_GAP = 2.4;
 /** The building's front doorway. */
 const FRONT_DOOR_HALF = 1.3;
 const FRONT_DOOR_HEIGHT = 3.4;
@@ -65,7 +70,7 @@ function WallPiece({ x1, x2, y1, y2, z, depth = 0.3, map }: { x1: number; x2: nu
   return (
     <mesh position={[(x1 + x2) / 2, (y1 + y2) / 2, z]} receiveShadow>
       <boxGeometry args={[x2 - x1, y2 - y1, depth]} />
-      <meshStandardMaterial map={map} roughness={0.75} />
+      <meshStandardMaterial map={map} bumpMap={map} bumpScale={0.8} roughness={0.75} />
     </mesh>
   );
 }
@@ -150,24 +155,159 @@ function OnWall({ side, z, y, children }: { side: -1 | 1; z: number; y: number; 
   );
 }
 
-/** A gold frame `w` x `h` with a little picture light over it. */
+/** Where a picture sits in front of its Frame. */
+const PICTURE_Z = 0.062;
+
+/**
+ * A frame for a picture `w` x `h`, stepping in towards it: a broad gold
+ * moulding with a beaded lip, a dark liner, and a fine gold fillet; and a
+ * picture light on a little arm over it.
+ */
 function Frame({ w, h }: { w: number; h: number }) {
+  const lip = (key: string, x: number, y: number, bw: number, bh: number) => (
+    <mesh key={key} position={[x, y, 0.05]}>
+      <boxGeometry args={[bw, bh, 0.012]} />
+      <Gold />
+    </mesh>
+  );
+  const ow = w + 0.22;
+  const oh = h + 0.22;
   return (
     <>
       <mesh position={[0, 0, 0.02]}>
-        <boxGeometry args={[w + 0.16, h + 0.16, 0.05]} />
+        <boxGeometry args={[ow, oh, 0.05]} />
         <Gold />
       </mesh>
-      <mesh position={[0, h / 2 + 0.2, 0.1]}>
-        <boxGeometry args={[0.05, 0.05, 0.2]} />
+      {lip('top', 0, oh / 2 - 0.012, ow, 0.024)}
+      {lip('bottom', 0, -oh / 2 + 0.012, ow, 0.024)}
+      {lip('left', -ow / 2 + 0.012, 0, 0.024, oh)}
+      {lip('right', ow / 2 - 0.012, 0, 0.024, oh)}
+      <mesh position={[0, 0, 0.026]}>
+        <boxGeometry args={[w + 0.11, h + 0.11, 0.05]} />
+        <meshStandardMaterial color="#1a120a" roughness={0.6} />
+      </mesh>
+      <mesh position={[0, 0, 0.032]}>
+        <boxGeometry args={[w + 0.035, h + 0.035, 0.05]} />
         <Gold />
       </mesh>
-      <mesh position={[0, h / 2 + 0.2, 0.2]}>
-        <boxGeometry args={[w * 0.6, 0.05, 0.06]} />
+      <mesh position={[0, oh / 2 + 0.08, 0.1]}>
+        <boxGeometry args={[0.04, 0.04, 0.18]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, oh / 2 + 0.08, 0.2]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.03, 0.03, w * 0.6, 16]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, oh / 2 + 0.06, 0.21]}>
+        <boxGeometry args={[w * 0.56, 0.012, 0.04]} />
         <meshStandardMaterial color="#fff4d6" emissive="#ffd9a0" emissiveIntensity={2} toneMapped={false} />
       </mesh>
     </>
   );
+}
+
+/** A wall light: a gold back plate and arm holding a glowing shade. */
+function Sconce({ side, z, y }: { side: -1 | 1; z: number; y: number }) {
+  return (
+    <OnWall side={side} z={z} y={y}>
+      <mesh position={[0, 0, 0.03]}>
+        <boxGeometry args={[0.15, 0.34, 0.05]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, 0, 0.06]}>
+        <boxGeometry args={[0.1, 0.26, 0.02]} />
+        <meshStandardMaterial color="#1a120a" roughness={0.6} />
+      </mesh>
+      <mesh position={[0, -0.06, 0.13]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.014, 0.014, 0.16, 10]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, 0.03, 0.21]}>
+        <cylinderGeometry args={[0.075, 0.045, 0.14, 20, 1, true]} />
+        <meshStandardMaterial color="#fff4d6" emissive="#ffd9a0" emissiveIntensity={1.4} side={THREE.DoubleSide} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -0.04, 0.21]} rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.046, 0.008, 6, 20]} />
+        <Gold />
+      </mesh>
+    </OnWall>
+  );
+}
+
+/** A soft shadow on the floor under something, rx by rz metres, turned by `turn`. */
+function FloorShadow({ map, x, z, rx, rz = rx, turn = 0 }: { map: THREE.Texture; x: number; z: number; rx: number; rz?: number; turn?: number }) {
+  return (
+    <mesh position={[x, 0.004, z]} rotation={[-Math.PI / 2, 0, turn]}>
+      <planeGeometry args={[rx * 2, rz * 2]} />
+      <meshBasicMaterial map={map} transparent depthWrite={false} />
+    </mesh>
+  );
+}
+
+/**
+ * One of the lobby's classical columns, `height` tall: a fluted marble shaft
+ * (tapering a little) on a moulded base — square plinth, gold fillet, torus,
+ * hollow and a gold ring — under a capital of a gold astragal, a flared
+ * echinus, a gold band and a square abacus.
+ */
+function Column({ height, fluting }: { height: number; fluting: THREE.Texture }) {
+  const base = 0.42;
+  const capital = 0.52;
+  const shaft = height - base - capital;
+  const top = base + shaft;
+  const ring = (key: string, y: number, r: number, tube: number, gold: boolean) => (
+    <mesh key={key} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+      <torusGeometry args={[r, tube, 12, 48]} />
+      {gold ? <Gold /> : <Stone />}
+    </mesh>
+  );
+  return (
+    <group>
+      <mesh position={[0, 0.1, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.8, 0.2, 0.8]} />
+        <Stone />
+      </mesh>
+      <mesh position={[0, 0.206, 0]}>
+        <boxGeometry args={[0.82, 0.012, 0.82]} />
+        <Gold />
+      </mesh>
+      {ring('torus', 0.26, 0.31, 0.05, false)}
+      <mesh position={[0, 0.33, 0]}>
+        <cylinderGeometry args={[0.29, 0.31, 0.06, 48]} />
+        <Stone />
+      </mesh>
+      {ring('ring', 0.385, 0.29, 0.032, true)}
+      <mesh position={[0, base + shaft / 2, 0]} castShadow>
+        <cylinderGeometry args={[0.255, 0.275, shaft, 48]} />
+        <meshStandardMaterial map={fluting} bumpMap={fluting} bumpScale={2} roughness={0.35} />
+      </mesh>
+      {ring('astragal', top + 0.03, 0.262, 0.024, true)}
+      <mesh position={[0, top + 0.16, 0]}>
+        <cylinderGeometry args={[0.37, 0.27, 0.2, 48]} />
+        <Stone />
+      </mesh>
+      <mesh position={[0, top + 0.275, 0]}>
+        <boxGeometry args={[0.84, 0.03, 0.84]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, top + 0.37, 0]}>
+        <boxGeometry args={[0.8, 0.16, 0.8]} />
+        <Stone />
+      </mesh>
+      <mesh position={[0, top + 0.455, 0]}>
+        <boxGeometry args={[0.84, 0.012, 0.84]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, top + 0.49, 0]}>
+        <boxGeometry args={[0.76, 0.06, 0.76]} />
+        <Stone />
+      </mesh>
+    </group>
+  );
+}
+
+function Stone() {
+  return <meshStandardMaterial color="#e9dfcc" roughness={0.4} />;
 }
 
 const POSTER_W = 1.3;
@@ -178,7 +318,7 @@ function Poster({ game, side, z }: { game: PosterGame; side: -1 | 1; z: number }
   return (
     <OnWall side={side} z={z} y={2.75}>
       <Frame w={POSTER_W} h={POSTER_H} />
-      <mesh position={[0, 0, 0.05]}>
+      <mesh position={[0, 0, PICTURE_Z]}>
         <planeGeometry args={[POSTER_W, POSTER_H]} />
         <meshStandardMaterial map={map} roughness={0.6} />
       </mesh>
@@ -186,7 +326,7 @@ function Poster({ game, side, z }: { game: PosterGame; side: -1 | 1; z: number }
   );
 }
 
-/** The progressive jackpot's LED board over the concierge desk, ticking up while the lobby's shown. */
+/** The progressive jackpot's LED board over the front desk, ticking up while the lobby's shown. */
 function JackpotBoard({ side, z, state }: { side: -1 | 1; z: number; state: MutableRefObject<LobbyState> }) {
   const jackpot = useRef({ amount: 1_284_512, next: 0 });
   const board = useMemo(() => {
@@ -207,7 +347,7 @@ function JackpotBoard({ side, z, state }: { side: -1 | 1; z: number; state: Muta
   return (
     <OnWall side={side} z={z} y={3.3}>
       <Frame w={w} h={h} />
-      <mesh position={[0, 0, 0.05]}>
+      <mesh position={[0, 0, PICTURE_Z]}>
         <planeGeometry args={[w, h]} />
         <meshStandardMaterial map={board.texture} emissiveMap={board.texture} emissive="#ffffff" emissiveIntensity={1.6} toneMapped={false} />
       </mesh>
@@ -215,20 +355,20 @@ function JackpotBoard({ side, z, state }: { side: -1 | 1; z: number; state: Muta
   );
 }
 
-/** A velvet bench against a side wall, its length along the wall. */
-function Bench({ side, z }: { side: -1 | 1; z: number }) {
+/** A buttoned velvet bench against a side wall, its length along the wall. */
+function Bench({ side, z, velvet }: { side: -1 | 1; z: number; velvet: THREE.Texture }) {
   const length = 1.4;
   return (
     <group position={[doorX + side * (HALF_W - 0.45), 0, z]}>
       <mesh position={[0, 0.33, 0]} castShadow>
         <boxGeometry args={[0.5, 0.3, length]} />
-        <meshStandardMaterial color="#6b1235" roughness={0.85} />
+        <meshStandardMaterial map={velvet} bumpMap={velvet} bumpScale={2} roughness={0.85} />
       </mesh>
-      {/* Buttons in the tufting, a gold band, and gold legs. */}
-      {[-0.5, -0.25, 0, 0.25, 0.5].map((f) => (
-        <mesh key={f} position={[0, 0.485, f * length * 0.85]}>
-          <sphereGeometry args={[0.022, 8, 6]} />
-          <Gold />
+      {/* Piping along its top edges, a gold band, and gold legs. */}
+      {[-1, 1].map((sx) => (
+        <mesh key={sx} position={[sx * 0.25, 0.48, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.012, 0.012, length, 8]} />
+          <meshStandardMaterial color="#3f0a1f" roughness={0.7} />
         </mesh>
       ))}
       <mesh position={[0, 0.19, 0]}>
@@ -392,6 +532,9 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
   const depth = south - north;
   const mid = (north + south) / 2;
   const marble = useMemo(() => marbleTexture([HALF_W / 1.2, depth / 1.2]), [depth]);
+  const fluting = useMemo(() => columnFlutingTexture(), []);
+  const velvet = useMemo(() => tuftedVelvetTexture([1, 2.8]), []);
+  const shadow = useMemo(() => softShadowTexture(), []);
   const walls = useMemo(() => lobbyWallTexture([depth / 1.8, 1]), [depth]);
   const endWalls = useMemo(() => lobbyWallTexture([2, 1]), []);
   const city = useMemo(() => cityTexture(), []);
@@ -452,9 +595,13 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
     </group>
   );
 
-  // Between the columns along each wall (the columns are at north + 2.9, 5.9
-  // and 8.6): a poster for each game, and the jackpot board behind the desk.
-  const bays = [north + 1.45, north + 4.4, north + 7.25];
+  // Two columns along each wall, either side of its middle, where the desk
+  // (and its jackpot board) is on the left and the roulette poster facing it
+  // on the right; the other posters in the bays at either end.
+  const columns = [mid - COLUMN_GAP, mid + COLUMN_GAP];
+  const nearBay = north + 1.15;
+  const farBay = south - 1.15;
+  const columnX = (s: number) => doorX + s * (HALF_W - 0.6);
 
   return (
     <>
@@ -462,7 +609,7 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         {/* The marble floor, the red carpet down the middle, door to door, and the inlay halfway. */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[doorX, 0.002, mid]} receiveShadow>
           <planeGeometry args={[HALF_W * 2, depth]} />
-          <meshPhysicalMaterial map={marble} roughness={0.25} clearcoat={0.8} clearcoatRoughness={0.15} />
+          <meshPhysicalMaterial map={marble} bumpMap={marble} bumpScale={0.5} roughness={0.25} clearcoat={0.8} clearcoatRoughness={0.15} />
         </mesh>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[doorX, 0.005, mid + 1.2]} receiveShadow>
           <planeGeometry args={[2.3, depth + 2.4]} />
@@ -479,59 +626,88 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
           <meshPhysicalMaterial map={medallion} roughness={0.25} metalness={0.2} clearcoat={0.8} clearcoatRoughness={0.15} />
         </mesh>
 
-        {/* Side walls with the columns, and the ceiling with gold coffers. */}
+        {/* Side walls with their columns, posters, sconces and benches. */}
         {[-1, 1].map((s) => (
           <group key={s}>
             <mesh position={[doorX + s * HALF_W, H / 2, mid]} rotation={[0, -s * (Math.PI / 2), 0]} receiveShadow>
               <planeGeometry args={[depth, H]} />
-              <meshStandardMaterial map={walls} roughness={0.75} />
+              <meshStandardMaterial map={walls} bumpMap={walls} bumpScale={0.8} roughness={0.75} />
             </mesh>
-            {[north + 2.9, north + 5.9, north + 8.6].map((z) => (
-              <group key={`p${z}`} position={[doorX + s * (HALF_W - 0.6), 0, z]}>
-                <Pillar height={H} />
+            {columns.map((z) => (
+              <group key={`p${z}`}>
+                <group position={[columnX(s), 0, z]}>
+                  <Column height={H} fluting={fluting} />
+                </group>
+                <FloorShadow map={shadow} x={columnX(s)} z={z} rx={0.8} />
               </group>
             ))}
-            {/* A sconce in the stretch of wall by the front windows. */}
-            <group position={[doorX + s * (HALF_W - 0.06), 2.6, south - 0.7]}>
-              <mesh>
-                <boxGeometry args={[0.08, 0.36, 0.18]} />
-                <Gold />
-              </mesh>
-              <mesh position={[-s * 0.08, 0.22, 0]}>
-                <sphereGeometry args={[0.09, 12, 8]} />
-                <meshStandardMaterial color="#fff4d6" emissive="#ffd9a0" emissiveIntensity={2.2} toneMapped={false} />
-              </mesh>
-            </group>
+            {[-1.4, 1.4].map((dz) => (
+              <Sconce key={`sconce${dz}`} side={s as -1 | 1} z={mid + dz} y={s < 0 ? 3.3 : 2.9} />
+            ))}
           </group>
         ))}
-        <Poster game="slots" side={-1} z={bays[0]!} />
-        <Poster game="blackjack" side={-1} z={bays[1]!} />
-        <JackpotBoard side={-1} z={bays[2]!} state={state} />
-        <Poster game="sports" side={1} z={bays[0]!} />
-        <Poster game="roulette" side={1} z={bays[1]!} />
-        <Poster game="poker" side={1} z={bays[2]!} />
-        <Bench side={-1} z={bays[0]!} />
-        <Bench side={1} z={bays[1]!} />
-        <Bench side={1} z={bays[2]!} />
+        <Poster game="slots" side={-1} z={nearBay} />
+        <JackpotBoard side={-1} z={mid} state={state} />
+        <Poster game="blackjack" side={-1} z={farBay} />
+        <Poster game="sports" side={1} z={nearBay} />
+        <Poster game="roulette" side={1} z={mid} />
+        <Poster game="poker" side={1} z={farBay} />
+        {([[-1, nearBay], [1, nearBay], [1, mid - 1.25], [1, mid + 1.25]] as const).map(([side, z]) => (
+          <group key={`bench${side}${z}`}>
+            <Bench side={side} z={z} velvet={velvet} />
+            <FloorShadow map={shadow} x={doorX + side * (HALF_W - 0.45)} z={z} rx={0.42} rz={0.95} />
+          </group>
+        ))}
+
+        {/* The ceiling: deep coffers between cream beams edged in gold, with a gold rose over each chandelier. */}
         <mesh position={[doorX, H, mid]} rotation={[Math.PI / 2, 0, 0]}>
           <planeGeometry args={[HALF_W * 2, depth]} />
           <meshStandardMaterial color="#1c1424" roughness={0.8} />
         </mesh>
         {[-3, -1, 1, 3].map((x) => (
-          <mesh key={`cx${x}`} position={[doorX + x * 1.25, H - 0.04, mid]}>
-            <boxGeometry args={[0.06, 0.08, depth]} />
-            <Gold />
-          </mesh>
+          <group key={`cx${x}`} position={[doorX + x * 1.25, H - 0.09, mid]}>
+            <mesh>
+              <boxGeometry args={[0.14, 0.18, depth]} />
+              <Stone />
+            </mesh>
+            {[-1, 1].map((e) => (
+              <mesh key={e} position={[e * 0.07, -0.085, 0]}>
+                <boxGeometry args={[0.014, 0.014, depth]} />
+                <Gold />
+              </mesh>
+            ))}
+          </group>
         ))}
         {[0.2, 0.4, 0.6, 0.8].map((f) => (
-          <mesh key={`cz${f}`} position={[doorX, H - 0.04, north + depth * f]}>
-            <boxGeometry args={[HALF_W * 2, 0.08, 0.06]} />
-            <Gold />
-          </mesh>
+          <group key={`cz${f}`} position={[doorX, H - 0.09, north + depth * f]}>
+            <mesh>
+              <boxGeometry args={[HALF_W * 2, 0.18, 0.14]} />
+              <Stone />
+            </mesh>
+            {[-1, 1].map((e) => (
+              <mesh key={e} position={[0, -0.085, e * 0.07]}>
+                <boxGeometry args={[HALF_W * 2, 0.014, 0.014]} />
+                <Gold />
+              </mesh>
+            ))}
+          </group>
+        ))}
+        {columns.map((z) => (
+          <group key={`rose${z}`} position={[doorX, H - 0.02, z]}>
+            <mesh>
+              <cylinderGeometry args={[0.34, 0.34, 0.03, 40]} />
+              <Gold />
+            </mesh>
+            <mesh position={[0, -0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
+              <torusGeometry args={[0.24, 0.025, 10, 40]} />
+              <Gold />
+            </mesh>
+          </group>
         ))}
 
-        <Chandelier z={north + 2.9} />
-        <Chandelier z={north + 7.2} />
+        {columns.map((z) => (
+          <Chandelier key={`chandelier${z}`} z={z} />
+        ))}
 
         {/* The far wall, round the casino's doorway (the doors and their gold
             lining are the casino's, CasinoFront.tsx): a CASINO sign, ringed
@@ -573,20 +749,26 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
             ))}
             <Rope x={doorX + s * 1.5} z1={north + 1.3} z2={north + 2.6} />
             <Rope x={doorX + s * 1.5} z1={north + 2.6} z2={north + 3.9} />
+            {[north + 1.3, north + 2.6, north + 3.9].map((z) => (
+              <FloorShadow key={`stanchion-shadow${z}`} map={shadow} x={doorX + s * 1.5} z={z} rx={0.24} />
+            ))}
             <group position={[doorX + s * 2.4, 0, north + 0.7]}>
               <Plant />
             </group>
+            <FloorShadow map={shadow} x={doorX + s * 2.4} z={north + 0.7} rx={0.5} />
           </group>
         ))}
 
-        {/* The front desk, curving out from the wall under the jackpot board. */}
-        <group position={[doorX - HALF_W - 0.4, 0, mid + 1.4]}>
+        {/* The front desk, in the middle of the left wall under the jackpot board. */}
+        <group position={[doorX - HALF_W - 0.4, 0, mid]}>
           <FrontDesk />
         </group>
 
         {/* By the front windows: the giant dice, and a luggage cart. */}
         <Dice x={doorX + 3.7} z={south - 1.4} />
+        <FloorShadow map={shadow} x={doorX + 3.7} z={south - 1.4} rx={0.95} />
         <LuggageCart x={doorX - 4.2} z={south - 0.85} turn={0.25} />
+        <FloorShadow map={shadow} x={doorX - 4.2} z={south - 0.85} rx={0.85} rz={0.5} turn={0.25} />
 
         {/* The building's front: big windows onto the city, the glass doors, and the name above them. */}
         {mirrored(piers).map(([x1, x2]) => (
@@ -609,6 +791,7 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         {[-1, 1].map((s) => (
           <group key={`front-plant${s}`} position={[doorX + s * 2.0, 0, south - 0.8]}>
             <Plant />
+            <FloorShadow map={shadow} x={0} z={0} rx={0.5} />
           </group>
         ))}
 
@@ -627,8 +810,8 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
       </group>
 
       {/* Lights stay in the scene (at zero once hidden), so the floor's shaders never change. */}
-      <pointLight ref={lights[0]} position={[doorX, CHANDELIER_LIGHT_Y, north + 2.9]} color="#ffe2b0" intensity={16} distance={13} decay={2} />
-      <pointLight ref={lights[1]} position={[doorX, CHANDELIER_LIGHT_Y, north + 7.2]} color="#ffe2b0" intensity={16} distance={13} decay={2} />
+      <pointLight ref={lights[0]} position={[doorX, CHANDELIER_LIGHT_Y, mid - COLUMN_GAP]} color="#ffe2b0" intensity={16} distance={13} decay={2} />
+      <pointLight ref={lights[1]} position={[doorX, CHANDELIER_LIGHT_Y, mid + COLUMN_GAP]} color="#ffe2b0" intensity={16} distance={13} decay={2} />
       <pointLight ref={lights[2]} position={[doorX, 3.4, south + 2.4]} color="#ffd9a8" intensity={9} distance={9} decay={2} />
     </>
   );

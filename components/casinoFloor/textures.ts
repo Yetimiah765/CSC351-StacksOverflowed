@@ -78,34 +78,85 @@ export function wallTexture(repeat: [number, number]) {
   return texture(element, repeat);
 }
 
-/** The lobby's floor (SRS-103.12): polished cream marble tiles with grey veins and a gold inlay. Repeats. */
-export function marbleTexture(repeat: [number, number]) {
+/** Lines along the edges of a rectangle: `light` on its top and left, `dark` on its bottom and right — a raised edge catching the light (swap them for a recess). */
+function bevel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, light: string, dark: string, width: number) {
+  ctx.lineWidth = width;
+  ctx.strokeStyle = light;
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x + w, y);
+  ctx.stroke();
+  ctx.strokeStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(x + w, y);
+  ctx.lineTo(x + w, y + h);
+  ctx.lineTo(x, y + h);
+  ctx.stroke();
+}
+
+/** The lobby's floor (SRS-103.12): polished cream marble tiles, clouded and veined, with bevelled edges and a gold inlay — or, with `tiles` false, one plain slab of it. Repeats; also its bump map. */
+export function marbleTexture(repeat: [number, number], tiles = true) {
   const { element, ctx } = canvas(512, 512);
   // Seeded, so the floor looks the same every visit.
   let seed = 7;
   const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
   for (const [x, y, tone] of [[0, 0, '#efe6d6'], [256, 0, '#e6dccb'], [0, 256, '#e6dccb'], [256, 256, '#efe6d6']] as const) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, 256, 256);
+    ctx.clip();
     ctx.fillStyle = tone;
     ctx.fillRect(x, y, 256, 256);
-    // Veins: soft wandering lines.
-    for (let v = 0; v < 5; v++) {
-      ctx.strokeStyle = `rgba(110, 100, 92, ${0.12 + random() * 0.18})`;
-      ctx.lineWidth = 0.6 + random() * 1.8;
+    // Clouding: faint warm and grey patches.
+    for (let c = 0; c < 14; c++) {
+      const cx = x + random() * 256;
+      const cy = y + random() * 256;
+      const r = 30 + random() * 70;
+      const cloud = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      cloud.addColorStop(0, random() < 0.5 ? 'rgba(150, 132, 108, 0.10)' : 'rgba(255, 250, 240, 0.18)');
+      cloud.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = cloud;
+      ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+    // Veins: wandering lines, each with fine threads branching off it.
+    for (let v = 0; v < 9; v++) {
+      ctx.strokeStyle = `rgba(105, 94, 86, ${0.1 + random() * 0.22})`;
+      ctx.lineWidth = 0.5 + random() * 1.8;
       ctx.beginPath();
       let px = x + random() * 256;
       let py = y;
       ctx.moveTo(px, py);
       while (py < y + 256) {
         px += (random() - 0.5) * 40;
-        py += 12 + random() * 22;
-        ctx.lineTo(Math.min(x + 256, Math.max(x, px)), Math.min(y + 256, py));
+        py += 10 + random() * 22;
+        ctx.lineTo(px, py);
+        if (random() < 0.25) {
+          ctx.moveTo(px, py);
+          ctx.lineTo(px + (random() - 0.5) * 50, py + random() * 30);
+          ctx.moveTo(px, py);
+        }
       }
       ctx.stroke();
     }
+    ctx.restore();
+    // Each tile's edges, ground to a slight bevel.
+    if (tiles) bevel(ctx, x + 3, y + 3, 250, 250, 'rgba(255, 255, 255, 0.55)', 'rgba(70, 58, 44, 0.35)', 2);
   }
+  if (!tiles) return texture(element, repeat);
   // Grout and a gold inlay between tiles, and a diamond where four meet.
-  ctx.strokeStyle = '#b8902e';
-  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#6b5a3a';
+  ctx.lineWidth = 5;
+  for (const at of [0, 256, 512]) {
+    ctx.beginPath();
+    ctx.moveTo(at, 0);
+    ctx.lineTo(at, 512);
+    ctx.moveTo(0, at);
+    ctx.lineTo(512, at);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#c9a227';
+  ctx.lineWidth = 2.5;
   for (const at of [0, 256, 512]) {
     ctx.beginPath();
     ctx.moveTo(at, 0);
@@ -116,38 +167,222 @@ export function marbleTexture(repeat: [number, number]) {
   }
   ctx.fillStyle = '#c9a227';
   ctx.beginPath();
-  ctx.moveTo(256, 236);
-  ctx.lineTo(276, 256);
-  ctx.lineTo(256, 276);
-  ctx.lineTo(236, 256);
+  ctx.moveTo(256, 234);
+  ctx.lineTo(278, 256);
+  ctx.lineTo(256, 278);
+  ctx.lineTo(234, 256);
   ctx.closePath();
   ctx.fill();
+  bevel(ctx, 256 - 11, 256 - 11, 22, 22, 'rgba(255, 244, 200, 0.6)', 'rgba(60, 40, 0, 0.45)', 1.5);
   return texture(element, repeat);
 }
 
-/** The lobby's walls: warm cream panelling framed in gold, with a dado rail. Repeats along the wall. */
+/** The lobby's walls: warm cream raised panels with bevelled gold mouldings, a crown moulding, a gold chair rail, and a walnut dado and skirting. Repeats along the wall; also its bump map. */
 export function lobbyWallTexture(repeat: [number, number]) {
-  const { element, ctx } = canvas(256, 512);
-  const gradient = ctx.createLinearGradient(0, 0, 0, 512);
-  gradient.addColorStop(0, '#d8c7a6');
-  gradient.addColorStop(1, '#c4b08a');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 256, 512);
-  // A tall panel above the rail, a short one below.
+  const w = 256;
+  const h = 512;
+  const { element, ctx } = canvas(w, h);
+  let seed = 3;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const field = ctx.createLinearGradient(0, 0, 0, h);
+  field.addColorStop(0, '#e0d0b0');
+  field.addColorStop(0.7, '#c9b48c');
+  ctx.fillStyle = field;
+  ctx.fillRect(0, 0, w, 380);
+  // The crown moulding along the top: stepped bands, each catching the light.
+  for (const [y, band, color] of [[0, 8, '#efe3c8'], [8, 4, '#b8902e'], [12, 6, '#d6c49f'], [18, 3, '#8c7650']] as const) {
+    ctx.fillStyle = color;
+    ctx.fillRect(0, y, w, band);
+  }
+  ctx.fillStyle = 'rgba(40, 28, 10, 0.25)';
+  ctx.fillRect(0, 21, w, 4);
+  // The raised panel: a moulded gold frame round a recessed field.
+  const px = 24;
+  const py = 40;
+  const pw = w - 48;
+  const ph = 318;
+  bevel(ctx, px - 3, py - 3, pw + 6, ph + 6, 'rgba(255, 250, 235, 0.8)', 'rgba(70, 50, 20, 0.5)', 2);
   ctx.strokeStyle = '#b8902e';
   ctx.lineWidth = 5;
-  ctx.strokeRect(28, 30, 200, 330);
-  ctx.strokeStyle = 'rgba(90, 64, 20, 0.35)';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(38, 40, 180, 310);
-  ctx.fillStyle = '#5b3a1e';
-  ctx.fillRect(0, 384, 256, 128);
-  ctx.strokeStyle = '#b8902e';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(28, 404, 200, 88);
+  ctx.strokeRect(px, py, pw, ph);
+  ctx.strokeStyle = '#e8c96a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px - 1.5, py - 1.5, pw + 3, ph + 3);
+  bevel(ctx, px + 6, py + 6, pw - 12, ph - 12, 'rgba(60, 42, 16, 0.45)', 'rgba(255, 248, 230, 0.6)', 3);
+  const inner = ctx.createLinearGradient(0, py, 0, py + ph);
+  inner.addColorStop(0, 'rgba(255, 250, 235, 0.12)');
+  inner.addColorStop(1, 'rgba(90, 70, 40, 0.12)');
+  ctx.fillStyle = inner;
+  ctx.fillRect(px + 8, py + 8, pw - 16, ph - 16);
+  // A fine inner line, with a little diamond at its top and bottom.
+  ctx.strokeStyle = 'rgba(150, 112, 40, 0.55)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(px + 18, py + 18, pw - 36, ph - 36);
+  ctx.fillStyle = '#b8902e';
+  for (const y of [py + 18, py + ph - 18]) {
+    ctx.beginPath();
+    ctx.moveTo(w / 2, y - 6);
+    ctx.lineTo(w / 2 + 6, y);
+    ctx.lineTo(w / 2, y + 6);
+    ctx.lineTo(w / 2 - 6, y);
+    ctx.fill();
+  }
+  // The chair rail: gold, lit along its top, shadowed underneath.
   ctx.fillStyle = '#c9a227';
-  ctx.fillRect(0, 376, 256, 10);
+  ctx.fillRect(0, 372, w, 12);
+  ctx.fillStyle = 'rgba(255, 240, 190, 0.8)';
+  ctx.fillRect(0, 372, w, 2);
+  ctx.fillStyle = 'rgba(60, 40, 0, 0.55)';
+  ctx.fillRect(0, 382, w, 2);
+  // The walnut dado below, with its grain and a raised panel.
+  ctx.fillStyle = '#5b3a1e';
+  ctx.fillRect(0, 384, w, h - 384);
+  for (let g = 0; g < 30; g++) {
+    ctx.strokeStyle = `rgba(30, 16, 6, ${0.12 + random() * 0.2})`;
+    ctx.lineWidth = 0.6 + random();
+    ctx.beginPath();
+    const y = 386 + random() * 100;
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= w; x += 32) ctx.lineTo(x, y + (random() - 0.5) * 3);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.fillRect(0, 384, w, 5);
+  bevel(ctx, 26, 400, w - 52, 78, 'rgba(210, 160, 110, 0.55)', 'rgba(15, 8, 2, 0.6)', 3);
+  ctx.strokeStyle = '#b8902e';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(32, 406, w - 64, 66);
+  // The skirting: dark, with a lit top edge.
+  ctx.fillStyle = '#2a170b';
+  ctx.fillRect(0, 490, w, 22);
+  ctx.fillStyle = 'rgba(210, 160, 110, 0.5)';
+  ctx.fillRect(0, 490, w, 2);
   return texture(element, repeat);
+}
+
+/** A column's fluting: cream marble with rounded grooves all round, flat fillets between them. Also its bump map. */
+export function columnFlutingTexture() {
+  const w = 512;
+  const h = 128;
+  const { element, ctx } = canvas(w, h);
+  let seed = 9;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  ctx.fillStyle = '#efe6d6';
+  ctx.fillRect(0, 0, w, h);
+  const flutes = 20;
+  const f = w / flutes;
+  for (let i = 0; i < flutes; i++) {
+    const x0 = i * f + f * 0.14;
+    const x1 = (i + 1) * f - f * 0.14;
+    const groove = ctx.createLinearGradient(x0, 0, x1, 0);
+    groove.addColorStop(0, '#8a7c66');
+    groove.addColorStop(0.22, '#c4b79f');
+    groove.addColorStop(0.62, '#f8f1e4');
+    groove.addColorStop(1, '#9c8f78');
+    ctx.fillStyle = groove;
+    ctx.fillRect(x0, 0, x1 - x0, h);
+  }
+  // A few faint veins across it.
+  for (let v = 0; v < 6; v++) {
+    ctx.strokeStyle = `rgba(110, 100, 92, ${0.08 + random() * 0.12})`;
+    ctx.lineWidth = 0.6 + random();
+    ctx.beginPath();
+    let y = random() * h;
+    ctx.moveTo(0, y);
+    for (let x = 0; x <= w; x += 24) {
+      y += (random() - 0.5) * 10;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  return texture(element, [1, 1]);
+}
+
+/** Buttoned velvet for the lobby's benches: a diamond of creases between buttons, with a soft sheen. Repeats; also its bump map. */
+export function tuftedVelvetTexture(repeat: [number, number]) {
+  const size = 256;
+  const { element, ctx } = canvas(size, size);
+  ctx.fillStyle = '#6b1235';
+  ctx.fillRect(0, 0, size, size);
+  // Creases run corner to corner every half tile, with a button wherever
+  // they cross (the grid points whose coordinates add up even); between
+  // them each diamond puffs up.
+  const half = size / 4;
+  for (let m = -1; m <= 5; m++) {
+    for (let n = -1; n <= 5; n++) {
+      if ((m + n) % 2 === 0) continue;
+      const cx = m * half;
+      const cy = n * half;
+      const puff = ctx.createRadialGradient(cx - 6, cy - 8, 2, cx, cy, half);
+      puff.addColorStop(0, 'rgba(200, 90, 130, 0.5)');
+      puff.addColorStop(1, 'rgba(40, 0, 15, 0.4)');
+      ctx.fillStyle = puff;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - half);
+      ctx.lineTo(cx + half, cy);
+      ctx.lineTo(cx, cy + half);
+      ctx.lineTo(cx - half, cy);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+  ctx.strokeStyle = 'rgba(30, 2, 12, 0.8)';
+  ctx.lineWidth = 3;
+  for (let k = -4; k <= 8; k++) {
+    ctx.beginPath();
+    ctx.moveTo(k * 2 * half, 0);
+    ctx.lineTo(k * 2 * half + size, size);
+    ctx.moveTo(k * 2 * half, 0);
+    ctx.lineTo(k * 2 * half - size, size);
+    ctx.stroke();
+  }
+  for (let m = 0; m <= 4; m++) {
+    for (let n = 0; n <= 4; n++) {
+      if ((m + n) % 2 !== 0) continue;
+      ctx.fillStyle = '#3a0618';
+      ctx.beginPath();
+      ctx.arc(m * half, n * half, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 210, 150, 0.6)';
+      ctx.beginPath();
+      ctx.arc(m * half - 2, n * half - 2, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  return texture(element, repeat);
+}
+
+/** A soft round shadow, dark in the middle and fading out: laid under things on the lobby's floor. */
+export function softShadowTexture() {
+  const size = 128;
+  const { element, ctx } = canvas(size, size);
+  const shade = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  shade.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+  shade.addColorStop(0.55, 'rgba(0, 0, 0, 0.28)');
+  shade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, size, size);
+  return texture(element);
+}
+
+/**
+ * The soft shadow of a curved desk on the floor: an arc `radius` metres out
+ * from the middle of a square `size` metres across, `span` radians long and
+ * centred on +x (angles towards +y on the canvas, +z in the world).
+ */
+export function arcShadowTexture(radius: number, span: number, size: number) {
+  const px = 512;
+  const { element, ctx } = canvas(px, px);
+  const scale = px / size;
+  ctx.lineCap = 'round';
+  for (const [width, alpha] of [[0.95, 0.05], [0.75, 0.07], [0.58, 0.09], [0.42, 0.12], [0.3, 0.14]] as const) {
+    ctx.strokeStyle = `rgba(0, 0, 0, ${alpha})`;
+    ctx.lineWidth = width * scale;
+    ctx.beginPath();
+    ctx.arc(px / 2, px / 2, radius * scale, -span / 2, span / 2);
+    ctx.stroke();
+  }
+  return texture(element);
 }
 
 /** The city at night, seen through the lobby's windows: a dusky sky, stars, and towers with lit windows. */
@@ -570,6 +805,14 @@ export function flutedWoodTexture(repeat: [number, number]) {
     }
     ctx.stroke();
   }
+  // Shadowed under the top and down by the plinth.
+  const shade = ctx.createLinearGradient(0, 0, 0, size);
+  shade.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+  shade.addColorStop(0.12, 'rgba(0, 0, 0, 0)');
+  shade.addColorStop(0.85, 'rgba(0, 0, 0, 0)');
+  shade.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
+  ctx.fillStyle = shade;
+  ctx.fillRect(0, 0, size, size);
   return texture(element, repeat);
 }
 

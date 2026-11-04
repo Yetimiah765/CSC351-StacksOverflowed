@@ -209,11 +209,19 @@ function planSeating(object: FloorObject, spot: number | null, from: THREE.Vecto
     plan.facing = Math.atan2(toTable.x, toTable.y);
     // The camera ends just above and ahead of the seated player's head (clear
     // of their hair), looking down at the felt in front of them.
-    const look = seatAt.clone().lerp(new THREE.Vector2(cx, cz), 0.55);
-    plan.zoomTo = {
-      position: new THREE.Vector3(seatAt.x + toTable.x * 0.24, 1.62, seatAt.y + toTable.y * 0.24),
-      look: new THREE.Vector3(look.x, 0.82, look.y),
-    };
+    const view = layout.seatedView;
+    if (view) {
+      plan.zoomTo = {
+        position: new THREE.Vector3(seatAt.x + toTable.x * view.ahead, view.y, seatAt.y + toTable.y * view.ahead),
+        look: new THREE.Vector3(seatAt.x + toTable.x * view.lookAhead, view.lookY, seatAt.y + toTable.y * view.lookAhead),
+      };
+    } else {
+      const look = seatAt.clone().lerp(new THREE.Vector2(cx, cz), 0.55);
+      plan.zoomTo = {
+        position: new THREE.Vector3(seatAt.x + toTable.x * 0.24, 1.62, seatAt.y + toTable.y * 0.24),
+        look: new THREE.Vector3(look.x, 0.82, look.y),
+      };
+    }
   } else if (layout.screens?.length) {
     // Right up to the screen, filling the view.
     const screen = layout.screens[spot ?? 0] ?? layout.screens[0]!;

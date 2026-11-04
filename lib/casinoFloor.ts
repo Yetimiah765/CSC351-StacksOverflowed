@@ -209,11 +209,19 @@ export interface PieceLayout {
   dealer?: { x: number; z: number; handsY: number; handsZ: number };
   /** For someone sitting in one of the chairs: how high and how far ahead the table top is. */
   seatedHands?: { y: number; z: number };
+  /**
+   * Where the camera ends up once seated, in metres ahead of the chair and
+   * up, and the point it looks at. Without one it looks down at the table
+   * from just above the player's head.
+   */
+  seatedView?: { ahead: number; y: number; lookAhead: number; lookY: number };
   /** Screens to look at (the middle of each, and its height), for a piece you play by watching. */
   screens?: { x: number; y: number; z: number }[];
 }
 
 const CHAIR_RADIUS = 0.26;
+/** How far a slot stool stands out from the middle of its machine, metres (Furniture.tsx draws it there). */
+export const SLOT_STOOL_OUT = 0.9;
 const PERSON_RADIUS = 0.24;
 
 function withChairsAndDealer(layout: Omit<PieceLayout, 'solid'> & { body: Shape[] }): PieceLayout {
@@ -221,6 +229,7 @@ function withChairsAndDealer(layout: Omit<PieceLayout, 'solid'> & { body: Shape[
     chairs: layout.chairs,
     dealer: layout.dealer,
     seatedHands: layout.seatedHands,
+    seatedView: layout.seatedView,
     screens: layout.screens,
     solid: [
       ...layout.body,
@@ -266,10 +275,11 @@ export function pieceLayout(object: FloorObject): PieceLayout {
         body: [
           { type: 'ellipse', x: 0, z: back, rx: r + 0.16, rz: r + 0.16 },
         ],
-        chairs: [-0.55, 0, 0.55].map((x) => ({
-          x: x * 1.35,
-          z: back + r + 0.5 - Math.abs(x) * 0.35,
-          angle: Math.atan2(x * 1.35, r + 0.5),
+        // Round the curve, about a metre apart, each facing the middle.
+        chairs: [-0.62, 0, 0.62].map((angle) => ({
+          x: Math.sin(angle) * (r + 0.5),
+          z: back + Math.cos(angle) * (r + 0.5),
+          angle,
         })),
         dealer: { x: 0, z: back - 0.24, handsY: 0.84, handsZ: 0.36 },
         seatedHands: { y: 0.86, z: 0.5 },
@@ -285,7 +295,7 @@ export function pieceLayout(object: FloorObject): PieceLayout {
       const back = 0.15 - tableD / 2;
       layout = withChairsAndDealer({
         body: [{ type: 'box', x: 0, z: (front + back) / 2, w: tableW, d: front - back }],
-        chairs: [-0.8, 0.2, 1.1].map((x) => ({ x, z: depth / 2 - 0.2, angle: 0 })),
+        chairs: [-0.75, 0.45, 1.6].map((x) => ({ x, z: depth / 2 - 0.2, angle: 0 })),
         dealer: { x: -tableW / 2 + 1.45, z: back - 0.24, handsY: 0.81, handsZ: 0.36 },
         seatedHands: { y: 0.82, z: 0.32 },
       });
@@ -301,12 +311,15 @@ export function pieceLayout(object: FloorObject): PieceLayout {
       break;
     }
     case 'slots': {
-      // A row of machines at the back, a stool in front of each.
+      // A row of machines at the back, a stool in front of each, far enough
+      // out that a seated player's knees clear the cabinet.
       const spacing = width / 3.2;
       layout = withChairsAndDealer({
         body: [{ type: 'box', x: 0, z: -depth / 2 + 0.35, w: spacing * 2 + 0.8, d: 0.66 }],
-        chairs: [-1, 0, 1].map((i) => ({ x: i * spacing, z: -depth / 2 + 1.1, angle: 0 })),
-        seatedHands: { y: 0.78, z: 0.4 },
+        chairs: [-1, 0, 1].map((i) => ({ x: i * spacing, z: -depth / 2 + 0.35 + SLOT_STOOL_OUT, angle: 0 })),
+        seatedHands: { y: 0.78, z: 0.48 },
+        // Up close in front of the face, looking at the reels.
+        seatedView: { ahead: 0.3, y: 1.22, lookAhead: SLOT_STOOL_OUT - 0.32, lookY: 1.08 },
       });
       break;
     }

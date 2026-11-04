@@ -5,6 +5,7 @@ import { useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { COLS, DOOR, LOBBY, TILE_METRES } from '../../lib/casinoFloor';
 import { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
+import FrontDesk from './FrontDesk';
 import { Pillar, Plant } from './Furniture';
 import {
   cityTexture,
@@ -22,8 +23,8 @@ import {
 // The building's lobby in front of the casino (SRS-103.12), only there for
 // the walk in after logging in: the front of the building (glass doors
 // between big windows onto the city at night), a marble lobby with columns,
-// chandeliers, posters for the games, a jackpot board over the concierge
-// desk, benches, a red carpet over a chip-and-star inlay, giant dice and a
+// chandeliers, posters for the games, a jackpot board over the curved front
+// desk with its check-in kiosks (FrontDesk.tsx), benches, a red carpet over a chip-and-star inlay, giant dice and a
 // luggage cart, and at its far end the casino's big double doors (part of
 // the casino's front, CasinoFront.tsx). Scene.tsx's walk in opens the doors
 // as the player reaches them, shuts them behind the player, then hides the
@@ -509,7 +510,7 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         <Poster game="sports" side={1} z={bays[0]!} />
         <Poster game="roulette" side={1} z={bays[1]!} />
         <Poster game="poker" side={1} z={bays[2]!} />
-        <Bench side={-1} z={bays[1]!} />
+        <Bench side={-1} z={bays[0]!} />
         <Bench side={1} z={bays[1]!} />
         <Bench side={1} z={bays[2]!} />
         <mesh position={[doorX, H, mid]} rotation={[Math.PI / 2, 0, 0]}>
@@ -578,29 +579,14 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
           </group>
         ))}
 
-        {/* The concierge desk, to one side, under the jackpot board. */}
-        <group position={[doorX - HALF_W + 1.6, 0, mid + 1.4]} rotation={[0, Math.PI / 2, 0]}>
-          <mesh position={[0, 0.52, 0]} castShadow>
-            <boxGeometry args={[2.6, 1.04, 0.8]} />
-            <meshStandardMaterial color="#3b1f12" roughness={0.5} />
-          </mesh>
-          <mesh position={[0, 1.07, 0]}>
-            <boxGeometry args={[2.75, 0.06, 0.92]} />
-            <meshPhysicalMaterial color="#efe6d6" roughness={0.2} clearcoat={0.8} />
-          </mesh>
-          <mesh position={[0, 0.55, 0.41]}>
-            <boxGeometry args={[2.3, 0.05, 0.02]} />
-            <Gold />
-          </mesh>
-          <mesh position={[0.8, 1.2, 0]}>
-            <sphereGeometry args={[0.07, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-            <Gold />
-          </mesh>
+        {/* The front desk, curving out from the wall under the jackpot board. */}
+        <group position={[doorX - HALF_W - 0.4, 0, mid + 1.4]}>
+          <FrontDesk />
         </group>
 
         {/* By the front windows: the giant dice, and a luggage cart. */}
         <Dice x={doorX + 3.7} z={south - 1.4} />
-        <LuggageCart x={doorX - 3.9} z={south - 1.7} turn={0.35} />
+        <LuggageCart x={doorX - 4.2} z={south - 0.85} turn={0.25} />
 
         {/* The building's front: big windows onto the city, the glass doors, and the name above them. */}
         {mirrored(piers).map(([x1, x2]) => (

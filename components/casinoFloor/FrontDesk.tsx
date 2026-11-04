@@ -3,6 +3,7 @@
 import { RoundedBox } from '@react-three/drei';
 import { useMemo, type ReactNode } from 'react';
 import * as THREE from 'three';
+import { FRONT_DESK } from '../../lib/casinoFloor';
 import Person from './Person';
 import { arcShadowTexture, flutedWoodTexture, kioskScreenTexture, marbleTexture, medallionTexture } from './textures';
 
@@ -19,13 +20,13 @@ import { arcShadowTexture, flutedWoodTexture, kioskScreenTexture, marbleTexture,
 // radius R, centred on +x and SPAN radians long. An angle `a` along it is
 // measured from +x towards +z.
 
-const R = 2.5;
-const SPAN = 1.66;
+const R = FRONT_DESK.radius;
+const SPAN = FRONT_DESK.span;
 /** The marble top's height, how far in it reaches, and the work surface behind it. */
 const TOP = 1.1;
 const TOP_INNER = R - 0.32;
 const WORK = 0.78;
-const WORK_INNER = R - 0.85;
+const WORK_INNER = FRONT_DESK.inner;
 const PLINTH = 0.12;
 
 /** Where angle `a` at radius `r` is, [x, z]; and the turn that faces something there outwards. */

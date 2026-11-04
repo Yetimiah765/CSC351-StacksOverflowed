@@ -4,6 +4,10 @@ import {
   DOOR,
   FLOOR_OBJECTS,
   FOYER_PLANTS,
+  FOUNTAIN,
+  FOUNTAIN_ROPE,
+  FRONT_DESK,
+  LOBBY_SIZE,
   atCasinoDoors,
   doorStandingSpots,
   exitWalk,
@@ -397,4 +401,62 @@ describe("leaving through the casino's doors (SRS-105.5)", () => {
     }
   });
 });
+
+describe('walking around the lobby (SRS-107.6)', () => {
+  const middle = DOOR.x + DOOR.w / 2;
+  // A lobby position in metres to tiles, as the layout gives them.
+  const tile = (x: number, z: number): Point => ({ x: middle + x / TILE_METRES, y: FRONT_WALL_Y + z / TILE_METRES });
+  const walkFrom = (from: Point, step: Point, frames: number) => {
+    let at = from;
+    for (let i = 0; i < frames; i++) at = moveWithCollisions(at, step);
+    return at;
+  };
+  const pace = 0.05;
+
+  it('lets a guest walk about from the middle of the lobby', () => {
+    expect(isBlocked(Math.floor(LOBBY_MIDDLE.x), Math.floor(LOBBY_MIDDLE.y))).toBe(false);
+    for (const step of [{ x: 0, y: pace }, { x: -pace, y: 0 }, { x: pace, y: 0 }, { x: 0, y: -pace }]) {
+      const at = walkFrom(LOBBY_MIDDLE, step, 20);
+      expect(Math.hypot(at.x - LOBBY_MIDDLE.x, at.y - LOBBY_MIDDLE.y), JSON.stringify(step)).toBeGreaterThan(0.9);
+    }
+  });
+
+  it('keeps them inside its walls: the casino doors, the front doors and the sides', () => {
+    const north = walkFrom(LOBBY_MIDDLE, { x: 0, y: -pace }, 400);
+    expect(north.y).toBeGreaterThan(FRONT_WALL_Y);
+    const south = walkFrom(LOBBY_MIDDLE, { x: 0, y: pace }, 400);
+    expect(south.y).toBeLessThan(FRONT_WALL_Y + LOBBY.depth);
+    const side = walkFrom(tile(0, LOBBY_SIZE.depth - 2.5), { x: -pace, y: 0 }, 400);
+    expect(side.x).toBeGreaterThan(middle - LOBBY.width / 2);
+    // And a player in the casino's foyer can't walk out into the lobby.
+    expect(walkFrom({ x: middle, y: FRONT_WALL_Y - 0.6 }, { x: 0, y: pace }, 200).y).toBeLessThan(FRONT_WALL_Y);
+  });
+
+  it('stops them at the front desk, and never lets them round behind it', () => {
+    const front = tile(FRONT_DESK.x + FRONT_DESK.radius, FRONT_DESK.z);
+    const atDesk = walkFrom(LOBBY_MIDDLE, { x: -pace, y: 0 }, 400);
+    expect(atDesk.x).toBeGreaterThan(front.x);
+    // Close enough to use it, though.
+    expect(atDesk.x - front.x).toBeLessThan(0.8);
+    const behind = tile(FRONT_DESK.x + FRONT_DESK.inner - 0.4, FRONT_DESK.z);
+    expect(findPath(atDeskTile(atDesk), [{ x: Math.floor(behind.x), y: Math.floor(behind.y) }])).toBeNull();
+  });
+
+  it('keeps them out of the roped-off fountain', () => {
+    const atRope = walkFrom(LOBBY_MIDDLE, { x: pace, y: 0 }, 400);
+    expect(atRope.x).toBeLessThan(tile(FOUNTAIN_ROPE[2]!.x, 0).x);
+    const fountain = tile(FOUNTAIN.x, FOUNTAIN.z);
+    expect(findPath({ x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) }, [{ x: Math.floor(fountain.x) - 1, y: Math.floor(fountain.y) }])).toBeNull();
+  });
+
+  it("walks a click about the lobby, but never into the casino", () => {
+    const from = { x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) };
+    expect(findPath(from, [{ x: from.x - 3, y: from.y + 4 }])).not.toBeNull();
+    expect(findPath(from, [START])).toBeNull();
+  });
+});
+
+function atDeskTile(at: Point): Point {
+  return { x: Math.floor(at.x), y: Math.floor(at.y) };
+}
 

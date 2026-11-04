@@ -3,7 +3,23 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
-import { COLS, DOOR, LOBBY, TILE_METRES } from '../../lib/casinoFloor';
+import {
+  BENCH_SIZE,
+  COLS,
+  COLUMN_GAP,
+  COLUMN_INSET,
+  DOOR,
+  DOOR_ROPE,
+  FOUNTAIN,
+  FOUNTAIN_ROPE,
+  FRONT_DESK,
+  LOBBY,
+  LOBBY_BENCHES,
+  LOBBY_DICE,
+  LOBBY_PLANTS,
+  LUGGAGE_CART,
+  TILE_METRES,
+} from '../../lib/casinoFloor';
 import { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
 import Fountain from './Fountain';
 import FrontDesk from './FrontDesk';
@@ -65,8 +81,6 @@ const HALF_W = (LOBBY.width / 2) * M;
 export const LOBBY_HALF_WIDTH = HALF_W;
 export const LOBBY_HEIGHT = 6.5;
 const H = LOBBY_HEIGHT;
-/** How far each column (and the chandelier and ceiling rose in line with it) is from the middle of the lobby's length. */
-const COLUMN_GAP = 2.4;
 /** The building's front doorway. */
 const FRONT_DOOR_HALF = 1.3;
 const FRONT_DOOR_HEIGHT = 3.4;
@@ -371,11 +385,11 @@ function JackpotBoard({ side, z, state }: { side: -1 | 1; z: number; state: Muta
 
 /** A buttoned velvet bench against a side wall, its length along the wall. */
 function Bench({ side, z, velvet }: { side: -1 | 1; z: number; velvet: THREE.Texture }) {
-  const length = 1.4;
+  const { length } = BENCH_SIZE;
   return (
-    <group position={[doorX + side * (HALF_W - 0.45), 0, z]}>
+    <group position={[doorX + side * (HALF_W - BENCH_SIZE.fromWall), 0, z]}>
       <mesh position={[0, 0.33, 0]} castShadow>
-        <boxGeometry args={[0.5, 0.3, length]} />
+        <boxGeometry args={[BENCH_SIZE.depth, 0.3, length]} />
         <meshStandardMaterial map={velvet} bumpMap={velvet} bumpScale={2} roughness={0.85} />
       </mesh>
       {/* Piping along its top edges, a gold band, and gold legs. */}
@@ -487,7 +501,7 @@ function LuggageCart({ x, z, turn }: { x: number; z: number; turn: number }) {
           <Gold />
         </mesh>
       ))}
-      <group position={[1.08, 0, 0]} rotation={[0, -Math.PI / 2, 0]}>
+      <group position={[LUGGAGE_CART.bellhop, 0, 0]} rotation={[0, -Math.PI / 2, 0]}>
         <BellhopUniform>
           <Person who="staff" pose="dealer" hands={{ y: 0.97, z: 0.4 }} idleOffset={1.3} />
         </BellhopUniform>
@@ -688,7 +702,7 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
   const columns = [mid - COLUMN_GAP, mid + COLUMN_GAP];
   const nearBay = north + 1.15;
   const farBay = south - 1.15;
-  const columnX = (s: number) => doorX + s * (HALF_W - 0.6);
+  const columnX = (s: number) => doorX + s * (HALF_W - COLUMN_INSET);
 
   return (
     <>
@@ -755,10 +769,10 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         <Poster game="sports" side={1} z={nearBay} />
         <Poster game="roulette" side={1} z={mid} y={3.75} />
         <Poster game="poker" side={1} z={farBay} />
-        {([[-1, nearBay], [1, nearBay]] as const).map(([side, z]) => (
+        {LOBBY_BENCHES.map(({ side, z }) => (
           <group key={`bench${side}${z}`}>
-            <Bench side={side} z={z} velvet={velvet} />
-            <FloorShadow map={shadow} x={doorX + side * (HALF_W - 0.45)} z={z} rx={0.42} rz={0.95} />
+            <Bench side={side} z={north + z} velvet={velvet} />
+            <FloorShadow map={shadow} x={doorX + side * (HALF_W - BENCH_SIZE.fromWall)} z={north + z} rx={0.42} rz={0.95} />
           </group>
         ))}
 
@@ -851,37 +865,35 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
           <planeGeometry args={[3.2, 0.62]} />
           <meshStandardMaterial map={casinoSign} emissiveMap={casinoSign} emissive="#ffffff" emissiveIntensity={2.4} transparent toneMapped={false} />
         </mesh>
-        {[-1, 1].map((s) => (
-          <group key={`rope${s}`}>
-            {[north + 1.3, north + 2.6, north + 3.9].map((z) => (
-              <Stanchion key={z} x={doorX + s * 1.5} z={z} />
-            ))}
-            <Rope from={[doorX + s * 1.5, north + 1.3]} to={[doorX + s * 1.5, north + 2.6]} />
-            <Rope from={[doorX + s * 1.5, north + 2.6]} to={[doorX + s * 1.5, north + 3.9]} />
-            {[north + 1.3, north + 2.6, north + 3.9].map((z) => (
-              <FloorShadow key={`stanchion-shadow${z}`} map={shadow} x={doorX + s * 1.5} z={z} rx={0.24} />
-            ))}
-            <group position={[doorX + s * 2.4, 0, north + 0.7]}>
-              <Plant />
+        {[-1, 1].map((s) => {
+          const x = doorX + s * DOOR_ROPE.x;
+          return (
+            <group key={`rope${s}`}>
+              {DOOR_ROPE.posts.map((z, i) => (
+                <group key={z}>
+                  <Stanchion x={x} z={north + z} />
+                  <FloorShadow map={shadow} x={x} z={north + z} rx={0.24} />
+                  {i > 0 ? <Rope from={[x, north + DOOR_ROPE.posts[i - 1]!]} to={[x, north + z]} /> : null}
+                </group>
+              ))}
             </group>
-            <FloorShadow map={shadow} x={doorX + s * 2.4} z={north + 0.7} rx={0.5} />
+          );
+        })}
+        {LOBBY_PLANTS.map(({ x, z }) => (
+          <group key={`plant${x}${z}`} position={[doorX + x, 0, north + z]}>
+            <Plant />
+            <FloorShadow map={shadow} x={0} z={0} rx={0.5} />
           </group>
         ))}
 
         {/* The fountain, against the right wall facing the desk, under the
             roulette poster, roped off in an arc from column to column. */}
-        <group position={[doorX + HALF_W - 1.5, 0, mid]}>
+        <group position={[doorX + FOUNTAIN.x, 0, north + FOUNTAIN.z]}>
           <Fountain state={state} />
         </group>
-        <FloorShadow map={shadow} x={doorX + HALF_W - 1.5} z={mid} rx={1.45} />
+        <FloorShadow map={shadow} x={doorX + FOUNTAIN.x} z={north + FOUNTAIN.z} rx={1.45} />
         {(() => {
-          const posts: [number, number][] = [
-            [doorX + HALF_W - 1.3, mid - COLUMN_GAP + 0.65],
-            [doorX + HALF_W - 2.6, mid - 1.4],
-            [doorX + HALF_W - 3.15, mid],
-            [doorX + HALF_W - 2.6, mid + 1.4],
-            [doorX + HALF_W - 1.3, mid + COLUMN_GAP - 0.65],
-          ];
+          const posts = FOUNTAIN_ROPE.map(({ x, z }): [number, number] => [doorX + x, north + z]);
           return posts.map(([x, z], i) => (
             <group key={`fountain-post${i}`}>
               <Stanchion x={x} z={z} />
@@ -892,15 +904,15 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         })()}
 
         {/* The front desk, in the middle of the left wall under the jackpot board. */}
-        <group position={[doorX - HALF_W - 0.4, 0, mid]}>
+        <group position={[doorX + FRONT_DESK.x, 0, north + FRONT_DESK.z]}>
           <FrontDesk />
         </group>
 
         {/* By the front windows: the giant dice, and a luggage cart. */}
-        <Dice x={doorX + 3.7} z={south - 1.4} />
-        <FloorShadow map={shadow} x={doorX + 3.7} z={south - 1.4} rx={0.95} />
-        <LuggageCart x={doorX - 4.2} z={south - 0.85} turn={0.25} />
-        <FloorShadow map={shadow} x={doorX - 4.2} z={south - 0.85} rx={0.85} rz={0.5} turn={0.25} />
+        <Dice x={doorX + LOBBY_DICE.x} z={north + LOBBY_DICE.z} />
+        <FloorShadow map={shadow} x={doorX + LOBBY_DICE.x} z={north + LOBBY_DICE.z} rx={0.95} />
+        <LuggageCart x={doorX + LUGGAGE_CART.x} z={north + LUGGAGE_CART.z} turn={LUGGAGE_CART.turn} />
+        <FloorShadow map={shadow} x={doorX + LUGGAGE_CART.x} z={north + LUGGAGE_CART.z} rx={0.85} rz={0.5} turn={LUGGAGE_CART.turn} />
 
         {/* The building's front: big windows onto the city, the glass doors, and the name above them. */}
         {mirrored(piers).map(([x1, x2]) => (
@@ -920,12 +932,6 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         </mesh>
         {glassDoor(leftGlass, 'glass-left')}
         {glassDoor(rightGlass, 'glass-right')}
-        {[-1, 1].map((s) => (
-          <group key={`front-plant${s}`} position={[doorX + s * 2.0, 0, south - 0.8]}>
-            <Plant />
-            <FloorShadow map={shadow} x={0} z={0} rx={0.5} />
-          </group>
-        ))}
 
         {/* Outside: wet pavement, the carpet out to the kerb, street lamps, and the city at night. */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[doorX, -0.001, south + 7]} receiveShadow>

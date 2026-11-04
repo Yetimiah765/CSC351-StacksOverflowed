@@ -158,6 +158,8 @@ interface Seating {
   zoomTo: { position: THREE.Vector3; look: THREE.Vector3 };
 }
 
+/** How far the following camera keeps off the player when it's up against a wall behind it, metres. */
+const WALL_ROOM = 2;
 const SIT_SECONDS = 1.1;
 const ZOOM_SECONDS = 1.6;
 
@@ -843,26 +845,32 @@ function Player({
       height + Math.sin(pitch) * distance,
       wz + Math.cos(yaw) * Math.cos(pitch) * distance
     );
+    // Walking towards it, up against the wall at the end it's limited by,
+    // it slides along the wall to one side, keeping at least WALL_ROOM metres
+    // off, rather than ending up right overhead.
+    const slideAlong = (limit: number, room: number) => {
+      if (room >= WALL_ROOM) return;
+      const side = position.x >= wx ? 1 : -1;
+      const slide = Math.sqrt(WALL_ROOM ** 2 - Math.max(0, room) ** 2);
+      position.x = wx + side * Math.max(Math.abs(position.x - wx), slide);
+      position.z = limit;
+    };
     if (wz > FRONT_WALL_Z) {
       // In the lobby (a guest): kept inside its walls and under its ceiling.
+      const near = FRONT_WALL_Z + 0.5;
+      const far = LOBBY_SOUTH_Z - 0.4;
+      if (position.z > far) slideAlong(far, far - wz);
+      else if (position.z < near) slideAlong(near, wz - near);
       position.x = THREE.MathUtils.clamp(position.x, -LOBBY_HALF_WIDTH + 0.4, LOBBY_HALF_WIDTH - 0.4);
-      position.z = THREE.MathUtils.clamp(position.z, FRONT_WALL_Z + 0.5, LOBBY_SOUTH_Z - 0.4);
+      position.z = THREE.MathUtils.clamp(position.z, near, far);
       position.y = THREE.MathUtils.clamp(position.y, 0.6, LOBBY_HEIGHT - 0.4);
       return { position, look };
     }
     const halfW = (COLS / 2 - 1.3) * TILE_M;
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = FRONT_WALL_Z - 0.4;
-    // Walking towards it in the foyer, up against the front wall, it slides
-    // along the wall to one side, keeping at least FRONT_ROOM metres off,
-    // rather than ending up right overhead.
-    const FRONT_ROOM = 2;
-    const roomBehind = front - wz;
-    if (position.z > front && roomBehind < FRONT_ROOM) {
-      const side = position.x >= wx ? 1 : -1;
-      const slide = Math.sqrt(FRONT_ROOM ** 2 - Math.max(0, roomBehind) ** 2);
-      position.x = wx + side * Math.max(Math.abs(position.x - wx), slide);
-    }
+    // (In the foyer, against the casino's front wall.)
+    if (position.z > front) slideAlong(front, front - wz);
     position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
     position.z = THREE.MathUtils.clamp(position.z, back, front);
     position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);
@@ -1191,9 +1199,9 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
           it's hidden (its lights at zero) except while a guest is in it or the player walks in or out. */}
       <Lobby state={lobby} />
       <group onClick={handleFloorClick}>
-        {/* What a click lands on: the floor, and the foyer out to the front wall. */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (FRONT_WALL_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
-          <planeGeometry args={[COLS * TILE_M, FRONT_WALL_Z + (ROWS / 2) * TILE_M]} />
+        {/* What a click lands on: the floor, the foyer out to the front wall, and the lobby beyond (SRS-107.6). */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (LOBBY_SOUTH_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
+          <planeGeometry args={[COLS * TILE_M, LOBBY_SOUTH_Z + (ROWS / 2) * TILE_M]} />
         </mesh>
         {FLOOR_OBJECTS.filter((object) => object.interactive).map((object) => {
           const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);

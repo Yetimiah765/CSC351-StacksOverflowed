@@ -4,6 +4,8 @@ import {
   DOOR,
   FLOOR_OBJECTS,
   FOYER_PLANTS,
+  parseSpot,
+  serializeSpot,
   FOUNTAIN,
   FOUNTAIN_ROPE,
   FRONT_DESK,
@@ -444,4 +446,31 @@ describe('walking around the lobby (SRS-107.6)', () => {
 function atDeskTile(at: Point): Point {
   return { x: Math.floor(at.x), y: Math.floor(at.y) };
 }
+
+describe('back where you were (SRS-107.7)', () => {
+  const onFloor = { x: START.x + 0.5, y: START.y + 0.5, heading: 1.2, yaw: -0.4 };
+  const inLobby = { x: LOBBY_MIDDLE.x - 1, y: LOBBY_MIDDLE.y + 1.5, heading: 0.3, yaw: 2.1 };
+
+  it("remembers a logged-in player's spot on the casino floor, and a guest's in the lobby", () => {
+    expect(parseSpot(serializeSpot(onFloor), false)).toEqual(onFloor);
+    expect(parseSpot(serializeSpot(inLobby), true)).toEqual(inLobby);
+  });
+
+  it('puts nobody where they may no longer stand', () => {
+    // A guest now (their session ended) can't be put back on the floor, and
+    // a logged-in player isn't put back in the lobby.
+    expect(parseSpot(serializeSpot(onFloor), true)).toBeNull();
+    expect(parseSpot(serializeSpot(inLobby), false)).toBeNull();
+    // Nor inside anything: a wall, the poker table.
+    expect(parseSpot(serializeSpot({ ...onFloor, x: 0.2 }), false)).toBeNull();
+    const poker = FLOOR_OBJECTS.find((object) => object.id === 'poker')!;
+    expect(parseSpot(serializeSpot({ ...onFloor, x: poker.x + poker.w / 2, y: poker.y + poker.h / 2 }), false)).toBeNull();
+  });
+
+  it('ignores anything that is not a remembered spot', () => {
+    for (const raw of [null, '', 'not json', '{}', '{"x":1,"y":2}', JSON.stringify({ ...onFloor, x: 'left' }), JSON.stringify({ ...onFloor, y: Infinity })]) {
+      expect(parseSpot(raw, false), String(raw)).toBeNull();
+    }
+  });
+});
 

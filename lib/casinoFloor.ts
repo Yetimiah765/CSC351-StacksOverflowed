@@ -719,3 +719,43 @@ export function exitWalk(from: Point): Point[] {
   const points = [from, { x: doorMiddle, y: Math.max(from.y, FRONT_WALL_Y - 1.1) }, { x: doorMiddle, y: FRONT_WALL_Y }, LOBBY_MIDDLE];
   return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
 }
+
+// ---------- back where you were (SRS-107.7) ----------
+// While the player walks about, the home page keeps where they stand in the
+// browser tab (sessionStorage, under SPOT_KEY), so coming back to it puts
+// them there again rather than at the door or outside.
+
+export const SPOT_KEY = 'casino-floor-spot';
+
+/** Where the player stood, in tiles, the way they faced, and the way the camera following them looked. */
+export interface StoodSpot {
+  x: number;
+  y: number;
+  heading: number;
+  yaw: number;
+}
+
+export function serializeSpot(spot: StoodSpot): string {
+  return JSON.stringify(spot);
+}
+
+/**
+ * The remembered spot, if it's still somewhere this player may stand: in
+ * the lobby for a guest, on the casino floor for a logged-in player, and
+ * not inside a wall or anything standing there.
+ */
+export function parseSpot(raw: string | null, guest: boolean): StoodSpot | null {
+  if (!raw) return null;
+  let saved: unknown;
+  try {
+    saved = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const { x, y, heading, yaw } = (saved ?? {}) as Partial<Record<keyof StoodSpot, unknown>>;
+  const numbers = [x, y, heading, yaw];
+  if (!numbers.every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
+  const spot = { x, y, heading, yaw } as StoodSpot;
+  if (guest !== spot.y > FRONT_WALL_Y) return null;
+  return circleBlocked(spot.x, spot.y, PLAYER_RADIUS) ? null : spot;
+}

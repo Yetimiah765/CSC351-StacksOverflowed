@@ -190,7 +190,9 @@ export function serializeTakenSeat(seat: TakenSeat): string {
 export type Shape =
   | { type: 'box'; x: number; z: number; w: number; d: number }
   | { type: 'ellipse'; x: number; z: number; rx: number; rz: number }
-  | { type: 'circle'; x: number; z: number; r: number };
+  | { type: 'circle'; x: number; z: number; r: number }
+  /** A rope between two posts: from (x, z) by (dx, dz), `r` thick. */
+  | { type: 'capsule'; x: number; z: number; dx: number; dz: number; r: number };
 
 export interface Seat {
   x: number;
@@ -341,7 +343,12 @@ export const PLAYER_RADIUS = 0.3;
 // a gate in it in front of the casino's doors, and the foyer beyond it, up to
 // the front wall, is floor too, so the player can walk through the gate to
 // the doors and back.
-const isWall = (x: number, y: number) => x <= 0 || x >= COLS - 1 || y <= 1 || y >= Math.floor(FRONT_WALL_Y);
+const isWall = (x: number, y: number) => {
+  if (y < Math.floor(FRONT_WALL_Y)) return x <= 0 || x >= COLS - 1 || y <= 1;
+  // From the front wall's row on there's only the lobby (its walls are
+  // solids, LOBBY_SOLIDS), and nothing beyond it.
+  return x < doorMiddle - LOBBY.width / 2 - 1 || x >= doorMiddle + LOBBY.width / 2 + 1 || y >= FRONT_WALL_Y + LOBBY.depth + 1;
+};
 
 /** The gate in the rail: how far it reaches each side of the door's middle, in tiles (each of its two leaves is this long). */
 export const GATE_HALF_WIDTH = 2;
@@ -382,8 +389,93 @@ const FRONT_SOLIDS: TileShape[] = [
   ...FOYER_PLANTS.map((plant) => ({ shape: { type: 'circle', x: 0, z: 0, r: 0.3 } as Shape, cx: plant.x, cy: plant.y })),
 ];
 
+// ---------- the lobby's layout (SRS-103.12, SRS-107.6) ----------
+// Where things stand in the lobby, in metres: `x` across from the middle of
+// the casino's doorway, `z` out from the casino's front wall towards the
+// building's front. Lobby.tsx and FrontDesk.tsx draw them here, and
+// LOBBY_SOLIDS keeps a guest walking round the lobby out of them.
+
+/** The lobby inside its walls, metres. */
+export const LOBBY_SIZE = { width: LOBBY.width * TILE_METRES, depth: LOBBY.depth * TILE_METRES };
+const LOBBY_HALF = LOBBY_SIZE.width / 2;
+const LOBBY_MID = LOBBY_SIZE.depth / 2;
+
+/** How far each column (and the chandelier and ceiling rose in line with it) is from the middle of the lobby's length, and its distance in from its wall. */
+export const COLUMN_GAP = 2.4;
+export const COLUMN_INSET = 0.6;
+export const LOBBY_COLUMNS: { x: number; z: number }[] = [-1, 1].flatMap((side) =>
+  [-1, 1].map((end) => ({ x: side * (LOBBY_HALF - COLUMN_INSET), z: LOBBY_MID + end * COLUMN_GAP }))
+);
+
+/** The curved front desk: its centre of curvature, the radius of its front, the angle its front spans (centred on +x, towards the lobby), and the radius its work surface reaches in to. */
+export const FRONT_DESK = { x: -LOBBY_HALF - 0.4, z: LOBBY_MID, radius: 2.5, span: 1.66, inner: 2.5 - 0.85 };
+
+/** The benches against the side walls (`side` -1 the left wall, 1 the right), 1.4 m long. */
+export const LOBBY_BENCHES: { side: -1 | 1; z: number }[] = [
+  { side: -1, z: 1.15 },
+  { side: 1, z: 1.15 },
+];
+export const BENCH_SIZE = { length: 1.4, depth: 0.5, fromWall: 0.45 };
+
+/** The fountain against the right wall, facing the desk, and the posts of the rope round it, from column to column. */
+export const FOUNTAIN = { x: LOBBY_HALF - 1.5, z: LOBBY_MID, radius: 1.12 };
+export const FOUNTAIN_ROPE: { x: number; z: number }[] = [
+  { x: LOBBY_HALF - 1.3, z: LOBBY_MID - COLUMN_GAP + 0.65 },
+  { x: LOBBY_HALF - 2.6, z: LOBBY_MID - 1.4 },
+  { x: LOBBY_HALF - 3.15, z: LOBBY_MID },
+  { x: LOBBY_HALF - 2.6, z: LOBBY_MID + 1.4 },
+  { x: LOBBY_HALF - 1.3, z: LOBBY_MID + COLUMN_GAP - 0.65 },
+];
+
+/** The roped aisle up to the casino's doors: posts either side of the carpet. */
+export const DOOR_ROPE = { x: 1.5, posts: [1.3, 2.6, 3.9] };
+
+/** Plants: either side of the casino's doors, and either side of the building's front doors. */
+export const LOBBY_PLANTS: { x: number; z: number }[] = [
+  ...[-1, 1].map((side) => ({ x: side * 2.4, z: 0.7 })),
+  ...[-1, 1].map((side) => ({ x: side * 2.0, z: LOBBY_SIZE.depth - 0.8 })),
+];
+
+/** The giant dice on their plinth, and the luggage cart (turned by `turn`) with its bellhop at its push bar, `bellhop` metres along it. */
+export const LOBBY_DICE = { x: 3.7, z: LOBBY_SIZE.depth - 1.4, radius: 0.62 };
+export const LUGGAGE_CART = { x: -4.2, z: LOBBY_SIZE.depth - 0.85, turn: 0.25, bellhop: 1.08 };
+
+/** A lobby position in metres to tiles. */
+const lobbyTile = (x: number, z: number) => ({ cx: doorMiddle + x / TILE_METRES, cy: FRONT_WALL_Y + z / TILE_METRES });
+const lobbyCircle = (x: number, z: number, r: number): TileShape => ({ shape: { type: 'circle', x: 0, z: 0, r }, ...lobbyTile(x, z) });
+const lobbyBox = (x: number, z: number, w: number, d: number): TileShape => ({ shape: { type: 'box', x: 0, z: 0, w, d }, ...lobbyTile(x, z) });
+
+const LOBBY_SOLIDS: TileShape[] = [
+  // The casino's front wall, doors and all (a guest can't go in; a
+  // logged-in player leaves through them only by the walk out), the side
+  // walls, and the building's front, its glass doors shut.
+  { shape: { type: 'box', x: 0, z: 0, w: COLS * TILE_METRES, d: 0.4 }, cx: COLS / 2, cy: FRONT_WALL_Y + 0.05 / TILE_METRES },
+  ...[-1, 1].map((side) => lobbyBox(side * (LOBBY_HALF + 0.1), LOBBY_MID, 0.2, LOBBY_SIZE.depth)),
+  lobbyBox(0, LOBBY_SIZE.depth + 0.15, LOBBY_SIZE.width, 0.3),
+  ...LOBBY_COLUMNS.map(({ x, z }) => lobbyBox(x, z, 0.84, 0.84)),
+  // The desk: circles along its curve, and its ends closed off to the wall so nobody walks round behind it.
+  ...Array.from({ length: 7 }, (_, i) => {
+    const angle = -FRONT_DESK.span / 2 + (i * FRONT_DESK.span) / 6;
+    const r = (FRONT_DESK.radius + FRONT_DESK.inner) / 2 + 0.02;
+    return lobbyCircle(FRONT_DESK.x + Math.cos(angle) * r, FRONT_DESK.z + Math.sin(angle) * r, 0.48);
+  }),
+  ...[-1, 1].map((end) => lobbyBox(-LOBBY_HALF + 0.4, FRONT_DESK.z + end * 1.55, 0.9, 0.7)),
+  ...LOBBY_BENCHES.map(({ side, z }) => lobbyBox(side * (LOBBY_HALF - BENCH_SIZE.fromWall), z, BENCH_SIZE.depth, BENCH_SIZE.length)),
+  ...LOBBY_PLANTS.map(({ x, z }) => lobbyCircle(x, z, 0.3)),
+  // The roped aisle up to the casino's doors, and the fountain with the rope round it.
+  ...[-1, 1].map((side) => lobbyBox(side * DOOR_ROPE.x, (DOOR_ROPE.posts[0]! + DOOR_ROPE.posts[2]!) / 2, 0.36, DOOR_ROPE.posts[2]! - DOOR_ROPE.posts[0]! + 0.36)),
+  lobbyCircle(FOUNTAIN.x, FOUNTAIN.z, FOUNTAIN.radius + 0.05),
+  ...FOUNTAIN_ROPE.slice(1).map((to, i) => {
+    const from = FOUNTAIN_ROPE[i]!;
+    return { shape: { type: 'capsule', x: 0, z: 0, dx: to.x - from.x, dz: to.z - from.z, r: 0.18 } as Shape, ...lobbyTile(from.x, from.z) };
+  }),
+  lobbyCircle(LOBBY_DICE.x, LOBBY_DICE.z, LOBBY_DICE.radius),
+  lobbyCircle(LUGGAGE_CART.x, LUGGAGE_CART.z, 0.75),
+  lobbyCircle(LUGGAGE_CART.x + Math.cos(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, LUGGAGE_CART.z - Math.sin(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, 0.3),
+];
+
 /** Everything the player bumps into, besides the walls. */
-const BLOCKING: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS];
+const BLOCKING: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS, ...LOBBY_SOLIDS];
 
 /** How far a point is outside a shape, in tiles (0 or less when inside). */
 function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): number {
@@ -407,6 +499,13 @@ function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): nu
       const scaled = Math.hypot(dx / rx, dy / ry);
       if (scaled === 0) return -Math.min(rx, ry);
       return Math.hypot(dx, dy) * (1 - 1 / scaled);
+    }
+    case 'capsule': {
+      // The distance to the line between its ends, less its thickness.
+      const ex = shape.dx / TILE_METRES;
+      const ey = shape.dz / TILE_METRES;
+      const along = Math.max(0, Math.min(1, (dx * ex + dy * ey) / (ex * ex + ey * ey || 1)));
+      return Math.hypot(dx - ex * along, dy - ey * along) - shape.r / TILE_METRES;
     }
   }
 }

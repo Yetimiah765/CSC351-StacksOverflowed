@@ -3,14 +3,16 @@
 import { RoundedBox } from '@react-three/drei';
 import { useMemo, type ReactNode } from 'react';
 import * as THREE from 'three';
-import { flutedWoodTexture, kioskScreenTexture, marbleTexture, medallionTexture } from './textures';
+import { arcShadowTexture, flutedWoodTexture, kioskScreenTexture, marbleTexture, medallionTexture } from './textures';
 
 // The lobby's front desk (Lobby.tsx places it against a side wall): a
 // curved reception desk bowing out towards the lobby, its fluted walnut front
-// between gold bands over a plinth lit along its foot, the casino's
-// chip-and-star emblem in the middle, a raised marble top with a gold edge,
-// and on it two check-in kiosks (tablets on stands), a service bell and a
-// banker's lamp. A lower work surface runs behind for whoever's on duty.
+// between gold bands, divided into panels by gold beads, over a plinth lit
+// along its foot; the casino's chip-and-star emblem in the middle; a raised
+// marble top with a rounded edge over a gold fillet and a shadow line; and
+// on it two check-in kiosks (tablets on stands), a service bell and a
+// banker's lamp. A lower work surface runs behind for whoever's on duty, and
+// a soft shadow lies round it on the floor.
 //
 // Drawn around the desk's centre of curvature: the front is a circle's arc of
 // radius R, centred on +x and SPAN radians long. An angle `a` along it is
@@ -63,12 +65,20 @@ function Slab({ r1, r2, y, thick, children }: { r1: number; r2: number; y: numbe
   );
 }
 
-/** A thin curved rod along the desk at radius r and height y: gold trim, or a strip of light. */
-function Trim({ r, y, tube = 0.012, glow = false }: { r: number; y: number; tube?: number; glow?: boolean }) {
+/** A thin curved rod along the desk at radius r and height y: gold trim, a strip of light, a shadow line, or the marble top's rounded edge. */
+function Trim({ r, y, tube = 0.012, kind = 'gold', marble }: { r: number; y: number; tube?: number; kind?: 'gold' | 'glow' | 'shadow' | 'marble'; marble?: THREE.Texture }) {
   return (
     <mesh position={[0, y, 0]} rotation={[Math.PI / 2, 0, -SPAN / 2]}>
-      <torusGeometry args={[r, tube, 8, 96, SPAN]} />
-      {glow ? <meshStandardMaterial color="#ffe2a8" emissive="#ffcf7a" emissiveIntensity={2.4} toneMapped={false} /> : <Gold />}
+      <torusGeometry args={[r, tube, 10, 96, SPAN]} />
+      {kind === 'glow' ? (
+        <meshStandardMaterial color="#ffe2a8" emissive="#ffcf7a" emissiveIntensity={2.4} toneMapped={false} />
+      ) : kind === 'shadow' ? (
+        <meshStandardMaterial color="#0d0704" roughness={0.9} />
+      ) : kind === 'marble' ? (
+        <meshPhysicalMaterial map={marble} roughness={0.2} clearcoat={0.8} clearcoatRoughness={0.15} />
+      ) : (
+        <Gold />
+      )}
     </mesh>
   );
 }
@@ -199,8 +209,10 @@ function BankersLamp() {
 }
 
 export default function FrontDesk() {
-  const fluted = useMemo(() => flutedWoodTexture([(R * SPAN) / 0.64, 1.5]), []);
-  const marble = useMemo(() => marbleTexture([0.6, 0.6]), []);
+  const fluted = useMemo(() => flutedWoodTexture([(R * SPAN) / 0.64, 1]), []);
+  const marble = useMemo(() => marbleTexture([0.6, 0.6], false), []);
+  const shadowSize = 2 * (R + 0.7);
+  const shadow = useMemo(() => arcShadowTexture(R - 0.12, SPAN + 0.12, shadowSize), [shadowSize]);
   const emblem = useMemo(() => medallionTexture(), []);
   const screen = useMemo(() => kioskScreenTexture(), []);
   const frontHeight = TOP - 0.05 - PLINTH;
@@ -211,14 +223,30 @@ export default function FrontDesk() {
       <Band r={R - 0.05} y={PLINTH / 2} height={PLINTH}>
         <meshStandardMaterial color="#0b0b0f" roughness={0.4} side={THREE.DoubleSide} />
       </Band>
-      <Trim r={R - 0.03} y={0.022} tube={0.008} glow />
+      <Trim r={R - 0.03} y={0.022} tube={0.008} kind="glow" />
+      <mesh position={[0, 0.003, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[shadowSize, shadowSize]} />
+        <meshBasicMaterial map={shadow} transparent depthWrite={false} />
+      </mesh>
 
       {/* The fluted front between gold bands, and gold-edged ends. */}
       <Band r={R} y={PLINTH + frontHeight / 2} height={frontHeight}>
         <meshStandardMaterial map={fluted} bumpMap={fluted} bumpScale={1.5} roughness={0.55} side={THREE.DoubleSide} />
       </Band>
       <Trim r={R + 0.006} y={PLINTH + 0.02} />
+      <Trim r={R + 0.006} y={PLINTH + 0.045} tube={0.005} />
       <Trim r={R + 0.006} y={TOP - 0.08} />
+      <Trim r={R + 0.006} y={TOP - 0.105} tube={0.005} />
+      {/* Gold beads dividing the front into panels either side of the emblem. */}
+      {[-0.55, 0.55].map((a) => {
+        const [x, z] = along(R + 0.006, a);
+        return (
+          <mesh key={a} position={[x, PLINTH + frontHeight / 2, z]}>
+            <cylinderGeometry args={[0.012, 0.012, frontHeight - 0.14, 10]} />
+            <Gold />
+          </mesh>
+        );
+      })}
       {[-1, 1].map((side) => {
         const a = (side * SPAN) / 2;
         const [x, z] = along((R + WORK_INNER) / 2, a);
@@ -241,7 +269,9 @@ export default function FrontDesk() {
       <Slab r1={TOP_INNER} r2={R + 0.06} y={TOP} thick={0.05}>
         <meshPhysicalMaterial map={marble} roughness={0.2} clearcoat={0.8} clearcoatRoughness={0.15} />
       </Slab>
-      <Trim r={R + 0.06} y={TOP - 0.025} tube={0.016} />
+      <Trim r={R + 0.06} y={TOP - 0.025} tube={0.025} kind="marble" marble={marble} />
+      <Trim r={R + 0.05} y={TOP - 0.058} tube={0.007} />
+      <Trim r={R + 0.012} y={TOP - 0.062} tube={0.01} kind="shadow" />
       <Band r={TOP_INNER} y={(WORK + TOP - 0.05) / 2} height={TOP - 0.05 - WORK}>
         <Walnut />
       </Band>

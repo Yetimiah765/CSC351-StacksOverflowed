@@ -355,6 +355,8 @@ describe("leaving through the casino's doors (SRS-105.5)", () => {
     expect(atCasinoDoors(START)).toBe(false);
     expect(atCasinoDoors({ x: middle, y: DOOR.y + 0.5 })).toBe(false); // by the gate
     expect(atCasinoDoors({ x: middle - GATE_HALF_WIDTH - 1, y: FRONT_WALL_Y - 0.5 })).toBe(false); // off to the side
+    expect(atCasinoDoors(LOBBY_MIDDLE)).toBe(false); // on the lobby's side
+    expect(atCasinoDoors({ x: middle, y: FRONT_WALL_Y + 0.5 })).toBe(false);
   });
 
   it('walks a click on the doors to an open spot in reach of them, through the gate', () => {
@@ -367,7 +369,7 @@ describe("leaving through the casino's doors (SRS-105.5)", () => {
     expect(findPath(START, spots)).not.toBeNull();
   });
 
-  it('walks out through the doors, down the lobby and out of the front door, the walk in backwards', () => {
+  it("walks out through the doors into the middle of the lobby, where a guest's walk in ends", () => {
     for (const spot of doorStandingSpots()) {
       const from = { x: spot.x + 0.5, y: spot.y + 0.5 };
       const walk = exitWalk(from);
@@ -375,10 +377,8 @@ describe("leaving through the casino's doors (SRS-105.5)", () => {
       // After stepping across to the middle, it's straight down it, never back.
       for (const point of walk.slice(1)) expect(point.x).toBe(middle);
       for (let i = 1; i < walk.length; i++) expect(walk[i]!.y).toBeGreaterThanOrEqual(walk[i - 1]!.y);
-      const ys = walk.map((point) => point.y);
-      expect(ys).toContain(FRONT_WALL_Y);
-      expect(ys).toContain(FRONT_WALL_Y + LOBBY.depth);
-      expect(walk[walk.length - 1]!.y).toBeGreaterThan(FRONT_WALL_Y + LOBBY.depth);
+      expect(walk.map((point) => point.y)).toContain(FRONT_WALL_Y);
+      expect(walk[walk.length - 1]).toEqual(LOBBY_MIDDLE);
     }
   });
 });

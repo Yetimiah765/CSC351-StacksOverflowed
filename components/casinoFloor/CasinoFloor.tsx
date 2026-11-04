@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { ENTRANCE_KEY, INTERACTIVE_OBJECTS, SEAT_KEY, VISITED_KEY, parseTakenSeat, serializeTakenSeat, type FloorObject, type TakenSeat } from '../../lib/casinoFloor';
+import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import type { WalkInput } from './Scene';
@@ -24,8 +25,8 @@ import type { WalkInput } from './Scene';
 // or whose browser can't draw 3D (SRS-107.1). The seat taken is remembered
 // for the tab, so back from the game the player is seen getting up from it
 // (SRS-108.6). Through the gate in the rail, at the casino's doors, a
-// logged-in player can leave the same way: they're logged out, seen walking
-// out through the lobby, and then shown the login page (SRS-105.5).
+// logged-in player can log out: they're seen walking out through the doors
+// into the lobby, a guest again, without the page changing (SRS-105.5).
 
 const display = Oswald({ weight: ['500', '700'], subsets: ['latin'], display: 'swap' });
 
@@ -158,32 +159,28 @@ export default function CasinoFloor() {
     if (!object.interactive?.href || playing) return;
     setPlaying(object);
   };
-  // Leaving through the casino's doors (SRS-105.5): the session ends at once,
-  // while the scene walks the player out ('walk'), or straight away when the
-  // device asks for reduced motion ('now'); then the login page.
-  const canLeave = signedIn === true;
+  // Leaving through the casino's doors (SRS-105.5): the session ends at once
+  // (and the nav bar shows a guest once it has), while the scene walks the
+  // player out into the lobby ('walk'), or puts them straight there when the
+  // device asks for reduced motion ('now'). From then on, without changing
+  // page, they're a guest.
+  const [loggedOutHere, setLoggedOutHere] = useState(false);
+  const member = signedIn === true && !loggedOutHere;
+  const guest = signedIn === false || loggedOutHere;
+  const canLeave = member;
   const [nearDoors, setNearDoors] = useState(false);
   const nearDoorsRef = useRef(false);
   const [leaving, setLeaving] = useState<'walk' | 'now' | null>(null);
-  const [fading, setFading] = useState(false);
-  const loggedOut = useRef<Promise<void> | null>(null);
   const leave = useRef<() => void>(() => {});
   leave.current = () => {
     if (!canLeave || leaving || playing) return;
-    loggedOut.current = logOut();
-    if (prefersReducedMotion()) {
-      setLeaving('now');
-      void loggedOut.current.then(() => router.push('/login'));
-    } else {
-      setLeaving('walk');
-    }
+    void logOut().then(notifyBalanceChanged);
+    setLeaving(prefersReducedMotion() ? 'now' : 'walk');
   };
-  // The walk out's all but over: fade out, then the login page once the
-  // session has ended.
   const left = useRef<() => void>(() => {});
   left.current = () => {
-    setFading(true);
-    void Promise.all([loggedOut.current, new Promise((resolve) => setTimeout(resolve, 600))]).then(() => router.push('/login'));
+    setLeaving(null);
+    setLoggedOutHere(true);
   };
 
   // Seated, the camera over the table: open the game — guests go to log in
@@ -195,7 +192,7 @@ export default function CasinoFloor() {
     if (!href) return;
     rememberTakenSeat({ object, spot });
     setOpening(true);
-    router.push(playHref(signedIn, href));
+    router.push(playHref(member, href));
   };
 
   // Load every game's page in the background, so walking up to one and
@@ -203,10 +200,9 @@ export default function CasinoFloor() {
   useEffect(() => {
     if (signedIn === null) return;
     for (const object of INTERACTIVE_OBJECTS) {
-      if (object.interactive?.href) router.prefetch(playHref(signedIn, object.interactive.href));
+      if (object.interactive?.href) router.prefetch(playHref(member, object.interactive.href));
     }
-    if (signedIn) router.prefetch('/login');
-  }, [router, signedIn]);
+  }, [router, signedIn, member]);
 
   // Keys: walk while held; Space or Enter plays the game in reach, or leaves
   // through the casino's doors.
@@ -268,7 +264,7 @@ export default function CasinoFloor() {
         <p className="hidden flex-1 text-center uppercase tracking-[0.15em] text-slate-400 md:block">
           WASD to move · Shift to walk · drag to look · Space to play
         </p>
-        {signedIn === false ? (
+        {guest ? (
           <div className="flex gap-2 uppercase tracking-wider">
             <Link href="/register" className="rounded bg-emerald-400 px-4 py-2 font-bold text-slate-950 transition hover:bg-emerald-300">
               Sign up
@@ -310,9 +306,10 @@ export default function CasinoFloor() {
                 setNearDoors(near);
               }}
               onLeave={() => leave.current()}
-              leaving={leaving === 'walk'}
+              leaving={leaving !== null}
+              leaveAtOnce={leaving === 'now'}
               onLeft={() => left.current()}
-              guest={signedIn === false}
+              guest={guest}
               paused={opening}
             />
           </div>
@@ -346,7 +343,7 @@ export default function CasinoFloor() {
             <span className="mt-2 block text-sm">
               {!ready ? (
                 <span className="text-slate-400">Coming soon</span>
-              ) : signedIn === false ? (
+              ) : guest ? (
                 <>
                   Press <Key>Space</Key> to log in and play
                 </>
@@ -360,19 +357,16 @@ export default function CasinoFloor() {
         ) : null}
 
         {leaving ? (
-          <>
-            <div className={`pointer-events-none absolute inset-0 bg-[#06030a] transition-opacity duration-500 ${fading ? 'opacity-100' : 'opacity-0'}`} />
-            <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
-              <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">Logging out…</span>
-            </div>
-          </>
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
+            <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">Logging out…</span>
+          </div>
         ) : null}
 
         {opening && playing ? (
           // The camera's over the table; a word while the game opens.
           <div className="pointer-events-none absolute inset-x-0 bottom-5 flex justify-center">
             <span className="animate-pulse rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.25em] text-white backdrop-blur-sm">
-              {signedIn === false ? 'To the login…' : `Opening ${playing.interactive?.name ?? ''}…`}
+              {guest ? 'To the login…' : `Opening ${playing.interactive?.name ?? ''}…`}
             </span>
           </div>
         ) : null}
@@ -385,7 +379,7 @@ export default function CasinoFloor() {
           object.interactive?.href ? (
             <Link
               key={object.id}
-              href={playHref(signedIn, object.interactive.href)}
+              href={playHref(member, object.interactive.href)}
               className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
             >
               {object.interactive.name}

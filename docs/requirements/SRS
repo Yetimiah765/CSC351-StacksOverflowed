@@ -926,6 +926,10 @@ flowchart LR
 
 *Traces to: UR-103, UR-107*
 
+**SRS-103.16, JO, Checking in from the page.** For a guest, the home page's Log in button shall show their character walking to the front desk and open a check-in tablet on the login form (SRS-103.13). Its Sign up button, and the navigation bar's profile icon, shall do the same on the sign-up form. In a browser that can show the 3D home page, opening the login or registration page shall do the same for a guest, on that page's form, and shall take a logged-in player to the casino floor. The player shall be able to skip the walk with any key or a click, and it shall not play when the player's device is set to reduce motion.
+
+*Traces to: UR-101, UR-103*
+
 ### UR-104, JO – Account Validation
 
 *User story: As a player, I want the website to validate my registration and login information, so that invalid information is rejected and my account can be securely accessed.*

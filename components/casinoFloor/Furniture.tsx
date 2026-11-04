@@ -3,7 +3,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import type { PieceLayout } from '../../lib/casinoFloor';
+import { SLOT_STOOL_OUT, type PieceLayout } from '../../lib/casinoFloor';
 import Highlight from './Highlight';
 import Person from './Person';
 import {
@@ -451,13 +451,13 @@ function SlotMachine({ x, index, highlighted }: { x: number; index: number; high
         <sphereGeometry args={[0.06, 16, 16]} />
         <meshStandardMaterial color="#dc2626" roughness={0.3} />
       </mesh>
-      {/* A stool in front */}
+      {/* A stool in front, its seat at a chair's height so a seated player sits on it, not in it */}
       <Highlight enabled={highlighted}>
-        <mesh position={[0, 0.34, 0.75]} castShadow>
-          <cylinderGeometry args={[0.04, 0.06, 0.68, 12]} />
+        <mesh position={[0, 0.22, SLOT_STOOL_OUT]} castShadow>
+          <cylinderGeometry args={[0.04, 0.06, 0.44, 12]} />
           <Gold />
         </mesh>
-        <mesh position={[0, 0.7, 0.75]} castShadow>
+        <mesh position={[0, 0.47, SLOT_STOOL_OUT]} castShadow>
           <cylinderGeometry args={[0.2, 0.2, 0.08, 20]} />
           <meshStandardMaterial color="#7f1d1d" roughness={0.5} />
         </mesh>

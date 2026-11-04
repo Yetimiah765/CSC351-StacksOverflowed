@@ -1080,7 +1080,7 @@ flowchart LR
 
 *Traces to: UR-108*
 
-**SRS-108.3, JO, Guest game redirect.** If an unauthenticated guest attempts to enter a game, the system shall redirect the guest to the login/registration page.
+**SRS-108.3, JO, Guest game redirect.** If an unauthenticated guest attempts to enter a game, the system shall ask them to log in or register at a check-in tablet (SRS-108.8), or on the login/registration page where the browser cannot show the 3D home page.
 
 *Traces to: UR-108*
 
@@ -1099,6 +1099,10 @@ flowchart LR
 **SRS-108.7, JO, Back to the previous page.** The back button on each game's main page, the Cosmetic Shop and the player's profile page shall return the player to the page of the website they were on before it, or to the home page when there is no such page.
 
 *Traces to: UR-108*
+
+**SRS-108.8, JO, Checking in to play.** When a guest picks a game or the Cosmetic Shop from the list below the home page's 3D view, or is turned away from a game's page (SRS-108.3), the system shall open a check-in tablet (SRS-103.13) at the front desk straight away, without showing their character walking there. Once they log in, it shall take them straight to what they picked. Closing the tablet without logging in shall leave them at the desk.
+
+*Traces to: UR-103, UR-108*
 
 ### UR-109, JO – View Balance
 

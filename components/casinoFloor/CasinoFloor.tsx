@@ -20,7 +20,7 @@ import {
   type TakenSeat,
 } from '../../lib/casinoFloor';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
-import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm } from '../../lib/checkIn';
+import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm, type HandOver } from '../../lib/checkIn';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import CheckInTablet from './CheckInTablet';
@@ -208,20 +208,23 @@ export default function CasinoFloor() {
   const placed = useRef(false);
   // Handed over by the login or registration page (SRS-103.16): for a guest,
   // the tablet to open once they're placed (a logged-in player just starts
-  // on the floor).
-  const [handedOver, setHandedOver] = useState<CheckInForm | null>(null);
+  // on the floor). Turned away from a game's page, they don't walk in first
+  // (SRS-108.8).
+  const [handedOver, setHandedOver] = useState<HandOver | null>(null);
   useEffect(() => {
     if (sessionOk === null || placed.current) return;
     placed.current = true;
-    const form = takeHandedOverCheckIn();
-    if (!sessionOk) setHandedOver(form);
+    // (Read, and so forgotten, either way.)
+    const handed = takeHandedOverCheckIn();
+    const handOver = sessionOk ? null : handed;
+    setHandedOver(handOver);
     let seat = readTakenSeat();
     if (seat && !sessionOk) {
       forgetTakenSeat();
       seat = null;
     }
     setReturning(seat);
-    const walkIn = wantsEntrance() && !seat;
+    const walkIn = wantsEntrance() && !seat && !handOver?.play;
     if (!walkIn) forgetEntrance();
     setEntering(walkIn);
     setSpot(!walkIn && !seat ? readSpot(!sessionOk) : null);
@@ -280,10 +283,16 @@ export default function CasinoFloor() {
   const [tabletOpen, setTabletOpen] = useState(false);
   // The form the tablet opens on: sign-up, unless they asked to log in.
   const [tabletForm, setTabletForm] = useState<CheckInForm>('signup');
-  const checkIn = useRef<(form?: CheckInForm) => void>(() => {});
-  checkIn.current = (form = 'signup') => {
+  // Checking in to play (SRS-108.8): picked from the game list below the
+  // floor, or turned away from a game's page, the tablet opens straight
+  // away (no walk to the desk, no camera flying in), and once they've
+  // logged in it's straight on to that page.
+  const [playAfter, setPlayAfter] = useState<string | null>(null);
+  const checkIn = useRef<(form?: CheckInForm, play?: string | null) => void>(() => {});
+  checkIn.current = (form = 'signup', play = null) => {
     if (!guest || checkingIn || leaving || playing) return;
     setTabletForm(form);
+    setPlayAfter(play);
     setCheckingIn(true);
   };
   // Checking in from the page (SRS-103.16): the Sign up and Log in buttons,
@@ -305,13 +314,17 @@ export default function CasinoFloor() {
   useEffect(() => {
     if (!handedOver || !guest || !webgl) return;
     setHandedOver(null);
-    checkIn.current(handedOver);
+    checkIn.current(handedOver.form, handedOver.play);
   }, [handedOver, guest, webgl]);
   function checkedIn() {
     setSignedInHere(true);
+    notifyBalanceChanged();
+    if (playAfter) {
+      router.push(playAfter);
+      return;
+    }
     setTabletOpen(false);
     setCheckingIn(false);
-    notifyBalanceChanged();
   }
 
   // Seated, the camera over the table: open the game — guests go to log in
@@ -469,7 +482,7 @@ export default function CasinoFloor() {
                 }}
                 onCheckIn={() => checkIn.current()}
                 checkingIn={checkingIn}
-                checkInAtOnce={prefersReducedMotion()}
+                checkInAtOnce={prefersReducedMotion() || playAfter !== null}
                 onAtKiosk={() => setTabletOpen(true)}
                 paused={opening || tabletOpen}
               />
@@ -567,6 +580,12 @@ export default function CasinoFloor() {
               <Link
                 key={object.id}
                 href={playHref(member, object.interactive.href)}
+                onClick={(event) => {
+                  // A guest checks in to play, with the 3D lobby (SRS-108.8).
+                  if (!guest || !webgl || !object.interactive?.href) return;
+                  event.preventDefault();
+                  checkIn.current('signup', object.interactive.href);
+                }}
                 className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
               >
                 {object.interactive.name}
@@ -588,6 +607,7 @@ export default function CasinoFloor() {
           onClose={() => {
             setTabletOpen(false);
             setCheckingIn(false);
+            setPlayAfter(null);
           }}
           onLoggedIn={checkedIn}
         />

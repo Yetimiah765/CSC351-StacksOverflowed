@@ -1373,6 +1373,8 @@ function Floor({
   useEffect(() => {
     if (checkingIn && !kiosk.current) {
       const atOnce = Boolean(checkInAtOnce);
+      // Straight there, after any walk in, too.
+      if (atOnce && walkIn.current) walkIn.current.skip = true;
       kiosk.current = {
         kiosk: nearKioskRef.current ?? 0,
         stage: nearKioskRef.current === null ? 'walk' : 'in',

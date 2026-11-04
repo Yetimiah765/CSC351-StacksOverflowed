@@ -105,12 +105,15 @@ export const START: Point & { direction: Direction } = { x: 12, y: 13, direction
 /** The door in the bottom wall (two tiles wide), drawn but not walkable. */
 export const DOOR = { x: 12, y: 14, w: 2 };
 
-// ---------- walking in after logging in (SRS-103.12) ----------
-// Logging in leaves this flag in sessionStorage; the floor then starts with
-// the player outside the building, walking in through its front door and
-// lobby, then through the casino's doors onto the floor, and clears it once
-// they're in.
+// ---------- walking in (SRS-103.12) ----------
+// The first time the home page opens in a browser tab, and just after
+// logging in, the player is seen walking in from the street: a guest as far
+// as the middle of the lobby (they can't go into the casino until they've
+// checked in), a logged-in player on through the casino's doors onto the
+// floor. The tab remembers it's been opened under VISITED_KEY; logging in
+// leaves ENTRANCE_KEY, cleared once they're in.
 export const ENTRANCE_KEY = 'casino-floor-entrance';
+export const VISITED_KEY = 'casino-floor-visited';
 
 /** The casino's front wall, with its big doors in line with DOOR, in tiles:
  * past the floor's front rail (DOOR.y, where the gate is), leaving a foyer
@@ -122,21 +125,24 @@ export const FRONT_WALL_Y = DOOR.y + 4.25;
  * `width` tiles wide, centred on the door. It's only there for the walk in. */
 export const LOBBY = { depth: 12.5, width: 15 };
 
+/** The middle of the lobby, in tiles: on the inlay, where a guest's walk in ends. */
+export const LOBBY_MIDDLE: Point = { x: DOOR.x + DOOR.w / 2, y: FRONT_WALL_Y + LOBBY.depth / 2 };
+
 /** The walk in, in tiles, all down the middle of the door: from outside the
- * building, through its front door and the lobby, through the casino's doors
- * and the foyer, through the gate in the rail, to a couple of steps onto the
- * floor, short of the shop counter's reach, so no game's prompt pops up the
- * moment the player takes over. */
-export function entranceWalk(): Point[] {
+ * building through its front door into the lobby, and for a guest no
+ * further than its middle. A logged-in player goes on through the casino's
+ * doors and the foyer, through the gate in the rail, to a couple of steps
+ * onto the floor, short of the shop counter's reach, so no game's prompt
+ * pops up the moment they take over. */
+export function entranceWalk(guest = false): Point[] {
   const doorMiddle = DOOR.x + DOOR.w / 2;
   const front = FRONT_WALL_Y + LOBBY.depth;
-  return [
+  const intoLobby = [
     { x: doorMiddle, y: front + 2.25 },
     { x: doorMiddle, y: front },
-    { x: doorMiddle, y: FRONT_WALL_Y },
-    { x: doorMiddle, y: DOOR.y },
-    { x: doorMiddle, y: DOOR.y - 2.1 },
   ];
+  if (guest) return [...intoLobby, LOBBY_MIDDLE];
+  return [...intoLobby, { x: doorMiddle, y: FRONT_WALL_Y }, { x: doorMiddle, y: DOOR.y }, { x: doorMiddle, y: DOOR.y - 2.1 }];
 }
 
 export const INTERACTIVE_OBJECTS = FLOOR_OBJECTS.filter((object) => object.interactive);

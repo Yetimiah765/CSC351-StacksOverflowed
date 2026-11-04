@@ -537,6 +537,137 @@ export function dieFaceTexture(pips: number) {
   return texture(element);
 }
 
+/** Fluted walnut for the front desk: rounded vertical grooves over a fine grain. Repeats along the desk; also its bump map. */
+export function flutedWoodTexture(repeat: [number, number]) {
+  const size = 256;
+  const { element, ctx } = canvas(size, size);
+  let seed = 5;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  ctx.fillStyle = '#4a2a17';
+  ctx.fillRect(0, 0, size, size);
+  // Eight flutes to the tile, each shaded like a rounded groove.
+  const flute = size / 8;
+  for (let i = 0; i < 8; i++) {
+    const shade = ctx.createLinearGradient(i * flute, 0, (i + 1) * flute, 0);
+    shade.addColorStop(0, '#2a160b');
+    shade.addColorStop(0.18, '#5e3720');
+    shade.addColorStop(0.5, '#7a4a2b');
+    shade.addColorStop(0.82, '#5e3720');
+    shade.addColorStop(1, '#2a160b');
+    ctx.fillStyle = shade;
+    ctx.fillRect(i * flute, 0, flute, size);
+  }
+  // The grain: faint wavy lines running down the wood.
+  for (let g = 0; g < 40; g++) {
+    ctx.strokeStyle = `rgba(30, 14, 6, ${0.08 + random() * 0.12})`;
+    ctx.lineWidth = 0.6 + random();
+    ctx.beginPath();
+    let x = random() * size;
+    ctx.moveTo(x, 0);
+    for (let y = 0; y <= size; y += 16) {
+      x += (random() - 0.5) * 3;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  return texture(element, repeat);
+}
+
+/** A check-in kiosk's screen: a strip of green felt with chips and cards, CHECK IN, and buttons to log in or sign up. */
+export function kioskScreenTexture() {
+  const w = 640;
+  const h = 400;
+  const { element, ctx } = canvas(w, h);
+  const family = '"Arial Black", Arial, sans-serif';
+  const background = ctx.createLinearGradient(0, 0, 0, h);
+  background.addColorStop(0, '#0f172a');
+  background.addColorStop(1, '#020617');
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, w, h);
+  // The felt, like the login page's header.
+  const felt = ctx.createRadialGradient(w / 2, 40, 20, w / 2, 80, 360);
+  felt.addColorStop(0, '#1f8a4c');
+  felt.addColorStop(1, '#0e4a2a');
+  ctx.fillStyle = felt;
+  ctx.fillRect(0, 26, w, 136);
+  ctx.fillStyle = '#b45309';
+  ctx.fillRect(0, 158, w, 6);
+  const chip = (x: number, y: number, color: string) => {
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.ellipse(x, y - i * 7, 22, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.setLineDash([5, 6]);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  };
+  chip(470, 138, '#16a34a');
+  chip(520, 132, '#111827');
+  chip(570, 138, '#dc2626');
+  for (const [x, angle, rank, suit, red] of [[90, -0.18, 'A', '♠', false], [140, 0.14, 'K', '♥', true]] as const) {
+    ctx.save();
+    ctx.translate(x, 150);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#fbf7ee';
+    ctx.beginPath();
+    ctx.roundRect(-28, -96, 56, 84, 7);
+    ctx.fill();
+    ctx.strokeStyle = '#d4af37';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = red ? '#c81e1e' : '#111827';
+    ctx.font = 'bold 22px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText(rank, -14, -72);
+    ctx.font = '36px Georgia';
+    ctx.fillText(suit, 2, -32);
+    ctx.restore();
+  }
+  // A status bar along the top, like a tablet's.
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, w, 26);
+  ctx.fillStyle = '#cbd5e1';
+  ctx.font = '700 15px Arial, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('STACKS OVERFLOWED', 14, 13);
+  ctx.fillRect(w - 44, 7, 26, 12);
+  ctx.fillRect(w - 18, 10, 3, 6);
+  for (let i = 0; i < 3; i++) ctx.fillRect(w - 82 + i * 7, 17 - i * 4, 4, 4 + i * 4);
+  // CHECK IN, and the two buttons.
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `900 ${Math.round(fitText(ctx, 'CHECK IN', '900', 58, w - 120, family))}px ${family}`;
+  ctx.fillText('CHECK IN', w / 2, 212);
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = '600 20px Arial, sans-serif';
+  ctx.fillText('Log in, or sign up if you are new here', w / 2, 252);
+  ctx.fillStyle = '#34d399';
+  ctx.beginPath();
+  ctx.roundRect(110, 290, 200, 56, 12);
+  ctx.fill();
+  ctx.strokeStyle = '#64748b';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.roundRect(330, 290, 200, 56, 12);
+  ctx.stroke();
+  ctx.font = `900 22px ${family}`;
+  ctx.fillStyle = '#020617';
+  ctx.fillText('LOG IN', 210, 319);
+  ctx.fillStyle = '#e2e8f0';
+  ctx.fillText('SIGN UP', 430, 319);
+  // The home bar at the bottom.
+  ctx.fillStyle = 'rgba(226, 232, 240, 0.7)';
+  ctx.beginPath();
+  ctx.roundRect(w / 2 - 60, h - 16, 120, 6, 3);
+  ctx.fill();
+  return texture(element);
+}
+
 /** A neon sign: glowing text on black, for an emissive map. The text shrinks to fit the width. */
 export function neonTexture(text: string, color: string, width = 1024, height = 160) {
   const { element, ctx } = canvas(width, height);

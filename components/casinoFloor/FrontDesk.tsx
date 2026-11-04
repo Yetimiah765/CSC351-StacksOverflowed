@@ -3,6 +3,7 @@
 import { RoundedBox } from '@react-three/drei';
 import { useMemo, type ReactNode } from 'react';
 import * as THREE from 'three';
+import Person from './Person';
 import { arcShadowTexture, flutedWoodTexture, kioskScreenTexture, marbleTexture, medallionTexture } from './textures';
 
 // The lobby's front desk (Lobby.tsx places it against a side wall): a
@@ -11,8 +12,8 @@ import { arcShadowTexture, flutedWoodTexture, kioskScreenTexture, marbleTexture,
 // along its foot; the casino's chip-and-star emblem in the middle; a raised
 // marble top with a rounded edge over a gold fillet and a shadow line; and
 // on it two check-in kiosks (tablets on stands), a service bell and a
-// banker's lamp. A lower work surface runs behind for whoever's on duty, and
-// a soft shadow lies round it on the floor.
+// banker's lamp. A receptionist stands behind it at the lower work surface,
+// and a soft shadow lies round it on the floor.
 //
 // Drawn around the desk's centre of curvature: the front is a circle's arc of
 // radius R, centred on +x and SPAN radians long. An angle `a` along it is
@@ -281,6 +282,16 @@ export default function FrontDesk() {
       <Band r={WORK_INNER} y={(WORK - 0.04) / 2} height={WORK - 0.04}>
         <Walnut />
       </Band>
+
+      {/* The receptionist, between the kiosks, hands on the work surface. */}
+      {(() => {
+        const [x, z] = along(R - 1.12, 0);
+        return (
+          <group position={[x, 0, z]} rotation={[0, facingOut(0), 0]}>
+            <Person who="staff" pose="dealer" hands={{ y: WORK + 0.02, z: 0.38 }} idleOffset={0.7} />
+          </group>
+        );
+      })()}
 
       {/* The casino's emblem in the middle of the front, ringed in gold. */}
       <group position={[R + 0.016, PLINTH + frontHeight / 2, 0]}>

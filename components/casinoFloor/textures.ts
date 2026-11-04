@@ -911,6 +911,111 @@ export function kioskScreenTexture() {
   return texture(element);
 }
 
+/** A soft glow, bright in the middle and fading to nothing: drawn additively, it lights up whatever's behind it. */
+export function glowTexture() {
+  const size = 128;
+  const { element, ctx } = canvas(size, size);
+  const glow = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  glow.addColorStop(0, '#ffffff');
+  glow.addColorStop(0.35, '#7a7a7a');
+  glow.addColorStop(1, '#000000');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+  return texture(element);
+}
+
+/** An uplight's wash on a wall: brightest at the bottom middle, spreading and fading as it rises. Drawn additively. */
+export function washTexture() {
+  const w = 128;
+  const h = 256;
+  const { element, ctx } = canvas(w, h);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, w, h);
+  ctx.save();
+  ctx.translate(w / 2, h);
+  ctx.scale(0.5, 1);
+  const wash = ctx.createRadialGradient(0, 0, 0, 0, 0, h);
+  wash.addColorStop(0, '#ffffff');
+  wash.addColorStop(0.3, '#8a8a8a');
+  wash.addColorStop(1, '#000000');
+  ctx.fillStyle = wash;
+  ctx.fillRect(-w, -h, w * 2, h);
+  ctx.restore();
+  return texture(element);
+}
+
+/** A lit ceiling coffer: a warm glow filling its middle, darker to its edges. Repeats one coffer per tile. */
+export function cofferGlowTexture(repeat: [number, number], offset: [number, number]) {
+  const size = 128;
+  const { element, ctx } = canvas(size, size);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, size, size);
+  const glow = ctx.createRadialGradient(size / 2, size / 2, 4, size / 2, size / 2, size * 0.62);
+  glow.addColorStop(0, '#ffffff');
+  glow.addColorStop(0.55, '#9a9a9a');
+  glow.addColorStop(1, '#000000');
+  ctx.fillStyle = glow;
+  ctx.fillRect(6, 6, size - 12, size - 12);
+  const result = texture(element, repeat);
+  result.offset.set(offset[0], offset[1]);
+  return result;
+}
+
+/** Water seen from above: blue-green with brighter wavering lines of light on it. Turned slowly to shimmer. */
+export function rippleTexture() {
+  const size = 256;
+  const { element, ctx } = canvas(size, size);
+  let seed = 13;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  ctx.fillStyle = '#4fa8c7';
+  ctx.fillRect(0, 0, size, size);
+  for (let i = 0; i < 46; i++) {
+    ctx.strokeStyle = `rgba(230, 250, 255, ${0.15 + random() * 0.35})`;
+    ctx.lineWidth = 1 + random() * 2.5;
+    ctx.beginPath();
+    let x = random() * size;
+    let y = random() * size;
+    ctx.moveTo(x, y);
+    for (let k = 0; k < 5; k++) {
+      x += (random() - 0.5) * 50;
+      y += (random() - 0.5) * 50;
+      ctx.quadraticCurveTo(x + (random() - 0.5) * 30, y + (random() - 0.5) * 30, x, y);
+    }
+    ctx.stroke();
+  }
+  return texture(element);
+}
+
+/** Falling water: thin bright streaks of differing strength on nothing, for a curtain of water scrolling down. */
+export function waterStreakTexture() {
+  const w = 128;
+  const h = 256;
+  const { element, ctx } = canvas(w, h);
+  let seed = 17;
+  const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = 'rgba(200, 235, 250, 0.28)';
+  ctx.fillRect(0, 0, w, h);
+  for (let i = 0; i < 60; i++) {
+    const x = random() * w;
+    const y = random() * h;
+    const length = 40 + random() * 140;
+    const streak = ctx.createLinearGradient(0, y, 0, y + length);
+    const alpha = 0.3 + random() * 0.6;
+    streak.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    streak.addColorStop(0.5, `rgba(255, 255, 255, ${alpha})`);
+    streak.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = streak;
+    ctx.fillRect(x, y, 1 + random() * 2.5, length);
+    // Wrap round the bottom, so it scrolls seamlessly.
+    if (y + length > h) ctx.fillRect(x, y - h, 1 + random() * 2.5, length);
+  }
+  const result = texture(element);
+  result.wrapS = THREE.RepeatWrapping;
+  result.wrapT = THREE.RepeatWrapping;
+  return result;
+}
+
 /** A neon sign: glowing text on black, for an emissive map. The text shrinks to fit the width. */
 export function neonTexture(text: string, color: string, width = 1024, height = 160) {
   const { element, ctx } = canvas(width, height);

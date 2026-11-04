@@ -5,6 +5,7 @@ import {
   FLOOR_OBJECTS,
   FRONT_WALL_Y,
   LOBBY,
+  LOBBY_MIDDLE,
   INTERACTIVE_OBJECTS,
   ROWS,
   START,
@@ -199,7 +200,7 @@ describe('getting up after a game (SRS-108.6)', () => {
   });
 });
 
-describe('walking in after logging in (SRS-103.12)', () => {
+describe('walking in (SRS-103.12)', () => {
   const walk = entranceWalk();
   const [outside, frontDoor, casinoDoors, gate] = walk;
   const inside = walk[walk.length - 1]!;
@@ -232,6 +233,14 @@ describe('walking in after logging in (SRS-103.12)', () => {
 
   it("ends out of every game's reach, so no prompt pops up the moment the player takes over", () => {
     expect(nearbyObjectAt(inside)).toBeNull();
+  });
+
+  it("stops a guest's walk in the middle of the lobby, short of the casino's doors", () => {
+    const guest = entranceWalk(true);
+    expect(guest.slice(0, 2)).toEqual(walk.slice(0, 2));
+    expect(guest[guest.length - 1]).toEqual(LOBBY_MIDDLE);
+    for (const point of guest) expect(point.y).toBeGreaterThan(FRONT_WALL_Y);
+    expect(LOBBY_MIDDLE.y).toBeLessThan(FRONT_WALL_Y + LOBBY.depth);
   });
 
   it('keeps the lobby centred on the door and wider than it', () => {

@@ -5,12 +5,16 @@ import { useMemo, useRef, type MutableRefObject, type ReactNode } from 'react';
 import * as THREE from 'three';
 import { COLS, DOOR, LOBBY, TILE_METRES } from '../../lib/casinoFloor';
 import { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
+import Fountain from './Fountain';
 import FrontDesk from './FrontDesk';
 import { Plant } from './Furniture';
+import Person from './Person';
 import {
   cityTexture,
+  cofferGlowTexture,
   columnFlutingTexture,
   dieFaceTexture,
+  glowTexture,
   jackpotBoard,
   lobbyWallTexture,
   marbleTexture,
@@ -20,6 +24,7 @@ import {
   posterTexture,
   softShadowTexture,
   tuftedVelvetTexture,
+  washTexture,
   type PosterGame,
 } from './textures';
 
@@ -28,7 +33,9 @@ import {
 // log out (SRS-105.5): the front of the building (glass doors
 // between big windows onto the city at night), a marble lobby with columns,
 // chandeliers, posters for the games, a jackpot board over the curved front
-// desk with its check-in kiosks (FrontDesk.tsx), benches, a red carpet over a chip-and-star inlay, giant dice and a
+// desk with its check-in kiosks and receptionist (FrontDesk.tsx), a tiered
+// fountain facing it (Fountain.tsx), uplit columns, glowing ceiling coffers
+// and a cove light round the top of the walls, benches, a red carpet over a chip-and-star inlay, giant dice and a
 // luggage cart, and at its far end the casino's big double doors (part of
 // the casino's front, CasinoFront.tsx). Scene.tsx's walks open the doors as
 // the player reaches them and shut them behind. The lobby is always in the
@@ -209,10 +216,14 @@ function Frame({ w, h }: { w: number; h: number }) {
   );
 }
 
-/** A wall light: a gold back plate and arm holding a glowing shade. */
-function Sconce({ side, z, y }: { side: -1 | 1; z: number; y: number }) {
+/** A wall light: a gold back plate and arm holding a glowing shade, lighting the wall round it. */
+function Sconce({ side, z, y, glow }: { side: -1 | 1; z: number; y: number; glow: THREE.Texture }) {
   return (
     <OnWall side={side} z={z} y={y}>
+      <mesh position={[0, 0.05, 0.012]}>
+        <planeGeometry args={[1.3, 1.3]} />
+        <meshBasicMaterial map={glow} color="#ffb867" transparent opacity={0.55} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+      </mesh>
       <mesh position={[0, 0, 0.03]}>
         <boxGeometry args={[0.15, 0.34, 0.05]} />
         <Gold />
@@ -316,10 +327,10 @@ function Stone() {
 const POSTER_W = 1.3;
 const POSTER_H = (POSTER_W * 720) / 512;
 
-function Poster({ game, side, z }: { game: PosterGame; side: -1 | 1; z: number }) {
+function Poster({ game, side, z, y = 2.75 }: { game: PosterGame; side: -1 | 1; z: number; y?: number }) {
   const map = useMemo(() => posterTexture(game), [game]);
   return (
-    <OnWall side={side} z={z} y={2.75}>
+    <OnWall side={side} z={z} y={y}>
       <Frame w={POSTER_W} h={POSTER_H} />
       <mesh position={[0, 0, PICTURE_Z]}>
         <planeGeometry args={[POSTER_W, POSTER_H]} />
@@ -465,6 +476,22 @@ function LuggageCart({ x, z, turn }: { x: number; z: number; turn: number }) {
           <Gold />
         </mesh>
       ))}
+      {/* A push bar across one end, and the bellhop holding it. */}
+      <mesh position={[0.68, 1.0, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.02, 0.02, 0.64, 10]} />
+        <Gold />
+      </mesh>
+      {[-1, 1].map((sz) => (
+        <mesh key={`bracket${sz}`} position={[0.63, 1.0, sz * 0.28]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.012, 0.012, 0.1, 8]} />
+          <Gold />
+        </mesh>
+      ))}
+      <group position={[1.08, 0, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <BellhopUniform>
+          <Person who="staff" pose="dealer" hands={{ y: 0.97, z: 0.4 }} idleOffset={1.3} />
+        </BellhopUniform>
+      </group>
       {cases.map(({ size, at, color }) => (
         <group key={color} position={at}>
           <mesh castShadow>
@@ -479,6 +506,52 @@ function LuggageCart({ x, z, turn }: { x: number; z: number; turn: number }) {
       ))}
     </group>
   );
+}
+
+/** A pillbox hat, red with a gold band and button. */
+function pillboxHat() {
+  const hat = new THREE.Group();
+  const red = new THREE.MeshStandardMaterial({ color: '#a50f2a', roughness: 0.6 });
+  const gold = new THREE.MeshStandardMaterial({ color: '#c9a227', metalness: 0.9, roughness: 0.25 });
+  const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.072, 0.078, 0.07, 24), red);
+  crown.position.y = 0.035;
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(0.079, 0.079, 0.016, 24), gold);
+  band.position.y = 0.012;
+  const button = new THREE.Mesh(new THREE.SphereGeometry(0.012, 10, 8), gold);
+  button.position.y = 0.074;
+  hat.add(crown, band, button);
+  return hat;
+}
+
+/**
+ * Dresses the staff member inside it as a bellhop once their model has
+ * loaded: their jacket turned red (on a copy of its material, so the other
+ * staff keep theirs) and a pillbox hat on the top of their head.
+ */
+function BellhopUniform({ children }: { children: ReactNode }) {
+  const group = useRef<THREE.Group>(null);
+  const dressed = useRef(false);
+  const hat = useMemo(() => pillboxHat(), []);
+  useFrame(() => {
+    if (dressed.current || !group.current) return;
+    let jacket: THREE.Mesh | null = null;
+    let headTop: THREE.Object3D | null = null;
+    group.current.traverse((object) => {
+      const mesh = object as THREE.Mesh;
+      if (mesh.isMesh && (mesh.material as THREE.Material).name === 'Wolf3D_Outfit_Top') jacket = mesh;
+      if (object.name === 'HeadTop_End') headTop = object;
+    });
+    if (!jacket || !headTop) return;
+    const coat = jacket as THREE.Mesh;
+    const red = (coat.material as THREE.MeshStandardMaterial).clone();
+    red.color.set('#c0283f');
+    coat.material = red;
+    (headTop as THREE.Object3D).add(hat);
+    hat.position.set(0, -0.045, -0.015);
+    hat.rotation.set(-0.12, 0, 0.12);
+    dressed.current = true;
+  });
+  return <group ref={group}>{children}</group>;
 }
 
 /** A brass stanchion. */
@@ -538,6 +611,11 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
   const fluting = useMemo(() => columnFlutingTexture(), []);
   const velvet = useMemo(() => tuftedVelvetTexture([1, 2.8]), []);
   const shadow = useMemo(() => softShadowTexture(), []);
+  const glow = useMemo(() => glowTexture(), []);
+  const wash = useMemo(() => washTexture(), []);
+  // One glow per ceiling coffer: the beams are 2.5 m apart across, either
+  // side of the middle, and 2 m apart along.
+  const coffers = useMemo(() => cofferGlowTexture([(HALF_W * 2) / 2.5, depth / 2], [0.1, 0]), [depth]);
   const walls = useMemo(() => lobbyWallTexture([depth / 1.8, 1]), [depth]);
   const endWalls = useMemo(() => lobbyWallTexture([2, 1]), []);
   const city = useMemo(() => cityTexture(), []);
@@ -549,7 +627,7 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
   const leftGlass = useRef<THREE.Group>(null);
   const rightGlass = useRef<THREE.Group>(null);
   const lights = [useRef<THREE.PointLight>(null), useRef<THREE.PointLight>(null), useRef<THREE.PointLight>(null)];
-  const brightness = [16, 16, 9];
+  const brightness = [30, 30, 10];
 
   useFrame(() => {
     const { front, lit, shown } = state.current;
@@ -642,20 +720,36 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
                   <Column height={H} fluting={fluting} />
                 </group>
                 <FloorShadow map={shadow} x={columnX(s)} z={z} rx={0.8} />
+                {/* An uplight at its foot, washing the wall behind it. */}
+                <mesh position={[columnX(s) - s * 0.52, 0.015, z]}>
+                  <cylinderGeometry args={[0.07, 0.08, 0.03, 20]} />
+                  <meshStandardMaterial color="#fff1d0" emissive="#ffd28a" emissiveIntensity={2.4} toneMapped={false} />
+                </mesh>
+                <OnWall side={s as -1 | 1} z={z} y={2.4}>
+                  <mesh position={[0, 0, 0.015]}>
+                    <planeGeometry args={[1.9, 4.8]} />
+                    <meshBasicMaterial map={wash} color="#ffb867" transparent opacity={0.7} blending={THREE.AdditiveBlending} depthWrite={false} toneMapped={false} />
+                  </mesh>
+                </OnWall>
               </group>
             ))}
             {[-1.4, 1.4].map((dz) => (
-              <Sconce key={`sconce${dz}`} side={s as -1 | 1} z={mid + dz} y={s < 0 ? 3.3 : 2.9} />
+              <Sconce key={`sconce${dz}`} side={s as -1 | 1} z={mid + dz} y={3.3} glow={glow} />
             ))}
+            {/* A cove light running round the top of the wall. */}
+            <mesh position={[doorX + s * (HALF_W - 0.05), H - 0.32, mid]}>
+              <boxGeometry args={[0.03, 0.04, depth]} />
+              <meshStandardMaterial color="#fff1d0" emissive="#ffd28a" emissiveIntensity={2.2} toneMapped={false} />
+            </mesh>
           </group>
         ))}
         <Poster game="slots" side={-1} z={nearBay} />
         <JackpotBoard side={-1} z={mid} state={state} />
         <Poster game="blackjack" side={-1} z={farBay} />
         <Poster game="sports" side={1} z={nearBay} />
-        <Poster game="roulette" side={1} z={mid} />
+        <Poster game="roulette" side={1} z={mid} y={3.75} />
         <Poster game="poker" side={1} z={farBay} />
-        {([[-1, nearBay], [1, nearBay], [1, mid - 1.25], [1, mid + 1.25]] as const).map(([side, z]) => (
+        {([[-1, nearBay], [1, nearBay]] as const).map(([side, z]) => (
           <group key={`bench${side}${z}`}>
             <Bench side={side} z={z} velvet={velvet} />
             <FloorShadow map={shadow} x={doorX + side * (HALF_W - 0.45)} z={z} rx={0.42} rz={0.95} />
@@ -665,8 +759,14 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
         {/* The ceiling: deep coffers between cream beams edged in gold, with a gold rose over each chandelier. */}
         <mesh position={[doorX, H, mid]} rotation={[Math.PI / 2, 0, 0]}>
           <planeGeometry args={[HALF_W * 2, depth]} />
-          <meshStandardMaterial color="#1c1424" roughness={0.8} />
+          <meshStandardMaterial color="#2a2030" emissiveMap={coffers} emissive="#ffdcaa" emissiveIntensity={0.85} roughness={0.8} />
         </mesh>
+        {[north + 0.12, south - 0.12].map((z) => (
+          <mesh key={`cove${z}`} position={[doorX, H - 0.32, z]}>
+            <boxGeometry args={[HALF_W * 2, 0.04, 0.03]} />
+            <meshStandardMaterial color="#fff1d0" emissive="#ffd28a" emissiveIntensity={2.2} toneMapped={false} />
+          </mesh>
+        ))}
         {[-3, -1, 1, 3].map((x) => (
           <group key={`cx${x}`} position={[doorX + x * 1.25, H - 0.09, mid]}>
             <mesh>
@@ -762,6 +862,12 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
           </group>
         ))}
 
+        {/* The fountain, against the right wall facing the desk, under the roulette poster. */}
+        <group position={[doorX + HALF_W - 1.5, 0, mid]}>
+          <Fountain state={state} />
+        </group>
+        <FloorShadow map={shadow} x={doorX + HALF_W - 1.5} z={mid} rx={1.45} />
+
         {/* The front desk, in the middle of the left wall under the jackpot board. */}
         <group position={[doorX - HALF_W - 0.4, 0, mid]}>
           <FrontDesk />
@@ -813,8 +919,8 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
       </group>
 
       {/* Lights stay in the scene (at zero once hidden), so the floor's shaders never change. */}
-      <pointLight ref={lights[0]} position={[doorX, CHANDELIER_LIGHT_Y, mid - COLUMN_GAP]} color="#ffe2b0" intensity={16} distance={13} decay={2} />
-      <pointLight ref={lights[1]} position={[doorX, CHANDELIER_LIGHT_Y, mid + COLUMN_GAP]} color="#ffe2b0" intensity={16} distance={13} decay={2} />
+      <pointLight ref={lights[0]} position={[doorX, CHANDELIER_LIGHT_Y, mid - COLUMN_GAP]} color="#ffe2b0" intensity={30} distance={16} decay={2} />
+      <pointLight ref={lights[1]} position={[doorX, CHANDELIER_LIGHT_Y, mid + COLUMN_GAP]} color="#ffe2b0" intensity={30} distance={16} decay={2} />
       <pointLight ref={lights[2]} position={[doorX, 3.4, south + 2.4]} color="#ffd9a8" intensity={9} distance={9} decay={2} />
     </>
   );

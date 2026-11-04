@@ -22,7 +22,10 @@ import {
   objectAt,
   pieceLayout,
   standingSpots,
+  stepGate,
+  GATE_SHUT,
   type FloorObject,
+  type GateState,
   type Point,
   type TakenSeat,
 } from '../../lib/casinoFloor';
@@ -670,6 +673,16 @@ function Player({
     const halfW = (COLS / 2 - 1.3) * TILE_M;
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = FRONT_WALL_Z - 0.4;
+    // Walking towards it in the foyer, up against the front wall, it slides
+    // along the wall to one side, keeping at least FRONT_ROOM metres off,
+    // rather than ending up right overhead.
+    const FRONT_ROOM = 2;
+    const roomBehind = front - wz;
+    if (position.z > front && roomBehind < FRONT_ROOM) {
+      const side = position.x >= wx ? 1 : -1;
+      const slide = Math.sqrt(FRONT_ROOM ** 2 - Math.max(0, roomBehind) ** 2);
+      position.x = wx + side * Math.max(Math.abs(position.x - wx), slide);
+    }
     position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
     position.z = THREE.MathUtils.clamp(position.z, back, front);
     position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);
@@ -689,6 +702,19 @@ function Player({
     lookAt.current.lerp(pose.look, 1 - Math.exp(-delta * 12));
     view.lookAt(lookAt.current);
   }
+
+  // The gate in the rail (SRS-105.4) swings away from the player as they
+  // walk through it, whichever way; the walk in swings it itself.
+  const gate = useRef<GateState>(GATE_SHUT);
+  const lastAt = useRef<Point | null>(null);
+  useFrame((_, rawDelta) => {
+    const at = position.current;
+    const before = lastAt.current ?? at;
+    lastAt.current = at;
+    if (walkIn.current) return;
+    gate.current = stepGate(gate.current, at, { x: at.x - before.x, y: at.y - before.y }, Math.min(rawDelta, 0.25));
+    lobby.current.gate = gate.current.way * smooth(gate.current.open);
+  });
 
   return (
     <group ref={body}>
@@ -945,8 +971,9 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
       <Room lobbyState={lobby} />
       {entrance || inLobby ? <Lobby state={lobby} /> : null}
       <group onClick={handleFloorClick}>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} visible={false}>
-          <planeGeometry args={[COLS * TILE_M, ROWS * TILE_M]} />
+        {/* What a click lands on: the floor, and the foyer out to the front wall. */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (FRONT_WALL_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
+          <planeGeometry args={[COLS * TILE_M, FRONT_WALL_Z + (ROWS / 2) * TILE_M]} />
         </mesh>
         {FLOOR_OBJECTS.filter((object) => object.interactive).map((object) => {
           const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);

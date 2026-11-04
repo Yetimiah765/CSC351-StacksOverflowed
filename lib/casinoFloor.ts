@@ -350,14 +350,27 @@ export function pieceLayout(object: FloorObject): PieceLayout {
 
 export const PLAYER_RADIUS = 0.3;
 
-const isWall = (x: number, y: number) => x <= 0 || x >= COLS - 1 || y <= 1 || y >= ROWS - 1;
+// The front of the room (SRS-105.4): a rail runs across at y = DOOR.y, with
+// a gate in it in front of the casino's doors, and the foyer beyond it, up to
+// the front wall, is floor too, so the player can walk through the gate to
+// the doors and back.
+const isWall = (x: number, y: number) => x <= 0 || x >= COLS - 1 || y <= 1 || y >= Math.floor(FRONT_WALL_Y);
+
+/** The gate in the rail: how far it reaches each side of the door's middle, in tiles (each of its two leaves is this long). */
+export const GATE_HALF_WIDTH = 2;
+const doorMiddle = DOOR.x + DOOR.w / 2;
+/** The rail's depth, metres (its gold cap). */
+const RAIL_DEPTH = 0.24;
+/** The plants either side of the casino's doors, in the foyer (CasinoFront.tsx draws them), in tiles. */
+export const FOYER_PLANTS: Point[] = [-1, 1].map((side) => ({ x: doorMiddle + side * 3.4, y: FRONT_WALL_Y - 0.7 }));
 
 /** A shape in tiles: centred, measured in the room's tile grid. */
 interface TileShape {
   shape: Shape;
   cx: number;
   cy: number;
-  object: FloorObject;
+  /** The piece it's part of; none for the rail and the foyer's plants. */
+  object?: FloorObject;
 }
 
 const SOLIDS: TileShape[] = FLOOR_OBJECTS.flatMap((object) =>
@@ -368,6 +381,22 @@ const SOLIDS: TileShape[] = FLOOR_OBJECTS.flatMap((object) =>
     object,
   }))
 );
+
+/** The rail either side of its gate, from x1 to x2 along y = DOOR.y. */
+const railPiece = (x1: number, x2: number): TileShape => ({
+  shape: { type: 'box', x: 0, z: 0, w: (x2 - x1) * TILE_METRES, d: RAIL_DEPTH },
+  cx: (x1 + x2) / 2,
+  cy: DOOR.y,
+});
+
+const FRONT_SOLIDS: TileShape[] = [
+  railPiece(1, doorMiddle - GATE_HALF_WIDTH),
+  railPiece(doorMiddle + GATE_HALF_WIDTH, COLS - 1),
+  ...FOYER_PLANTS.map((plant) => ({ shape: { type: 'circle', x: 0, z: 0, r: 0.3 } as Shape, cx: plant.x, cy: plant.y })),
+];
+
+/** Everything the player bumps into, besides the walls. */
+const BLOCKING: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS];
 
 /** How far a point is outside a shape, in tiles (0 or less when inside). */
 function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): number {
@@ -405,7 +434,7 @@ function circleBlocked(x: number, y: number, radius: number): boolean {
       if ((x - nearestX) ** 2 + (y - nearestY) ** 2 < radius * radius) return true;
     }
   }
-  return SOLIDS.some((solid) => distanceOutside(solid, x, y) < radius);
+  return BLOCKING.some((solid) => distanceOutside(solid, x, y) < radius);
 }
 
 /** Whatever's rectangle covers this tile, if anything (what a click on it means). */
@@ -511,6 +540,12 @@ export function standingSpots(object: FloorObject): Point[] {
   return spots;
 }
 
+/** Whether a step from one tile to the next would go through the rail rather than its gate. */
+function throughRail(from: Point, to: Point) {
+  const crossing = Math.min(from.y, to.y) === DOOR.y - 1 && Math.max(from.y, to.y) === DOOR.y;
+  return crossing && (to.x < doorMiddle - GATE_HALF_WIDTH || to.x >= doorMiddle + GATE_HALF_WIDTH);
+}
+
 /**
  * The shortest walk (4 directions, around anything in the way) from `from`
  * to the nearest of `targets`, as the tiles to step onto in order — empty if
@@ -528,7 +563,7 @@ export function findPath(from: Point, targets: Point[]): Point[] | null {
     for (const step of Object.values(STEP)) {
       const next = { x: current.x + step.x, y: current.y + step.y };
       const nextKey = key(next);
-      if (cameFrom.has(nextKey) || isBlocked(next.x, next.y)) continue;
+      if (cameFrom.has(nextKey) || isBlocked(next.x, next.y) || throughRail(current, next)) continue;
       cameFrom.set(nextKey, key(current));
       if (goals.has(nextKey)) {
         const path: Point[] = [];
@@ -541,4 +576,36 @@ export function findPath(from: Point, targets: Point[]): Point[] | null {
     }
   }
   return null;
+}
+
+// ---------- the gate in the rail (SRS-105.4) ----------
+
+/** How far open the gate is, 0 shut to 1 open, and which way it's swung: 1 in onto the floor (towards the back of the room), -1 out into the foyer, 0 while shut. */
+export interface GateState {
+  open: number;
+  way: -1 | 0 | 1;
+}
+
+export const GATE_SHUT: GateState = { open: 0, way: 0 };
+
+/** Seconds the gate takes to swing open, or shut. */
+export const GATE_SWING_SECONDS = 0.35;
+
+/**
+ * The gate `seconds` later, with the player at `at` having just `moved` (in
+ * tiles). It swings open away from a player coming up to it, the way they're
+ * walking, stays open while they're anywhere its leaves could swing through,
+ * and swings shut once they're clear of them.
+ */
+export function stepGate(gate: GateState, at: Point, moved: Point, seconds: number): GateState {
+  const toHinge = (side: number) => Math.hypot(at.x - (doorMiddle + side * GATE_HALF_WIDTH), at.y - DOOR.y);
+  const clear = Math.min(toHinge(-1), toHinge(1)) > GATE_HALF_WIDTH + PLAYER_RADIUS + 0.2;
+  const railAhead = DOOR.y - at.y;
+  const comingUp = Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH + 1 && Math.abs(railAhead) < 2.4 && railAhead * moved.y > 0;
+  let way = gate.way;
+  if (way === 0 && comingUp) way = moved.y > 0 ? -1 : 1;
+  const target = way !== 0 && (comingUp || !clear) ? 1 : 0;
+  const step = seconds / GATE_SWING_SECONDS;
+  const open = target === 1 ? Math.min(1, gate.open + step) : Math.max(0, gate.open - step);
+  return { open, way: open === 0 && target === 0 ? 0 : way };
 }

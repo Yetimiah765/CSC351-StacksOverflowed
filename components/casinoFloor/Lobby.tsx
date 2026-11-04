@@ -43,9 +43,10 @@ import {
 
 /** What the walk in tells the lobby and the casino's front each frame. */
 export interface LobbyState {
-  /** How far open the building's glass doors, the casino's doors and the gate in the floor's rail are, 0 to 1. */
+  /** How far open the building's glass doors and the casino's doors are, 0 to 1. */
   front: number;
   casino: number;
+  /** The gate in the floor's rail: 1 swung open in onto the floor, -1 out into the foyer, 0 shut. */
   gate: number;
   /** How bright the lobby's lights are, 0 to 1: they fade as the casino's doors shut. */
   lit: number;

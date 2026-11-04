@@ -3,17 +3,19 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
-import { COLS, DOOR, FRONT_WALL_Y, ROWS, TILE_METRES } from '../../lib/casinoFloor';
+import { COLS, DOOR, FOYER_PLANTS, FRONT_WALL_Y, GATE_HALF_WIDTH, ROWS, TILE_METRES } from '../../lib/casinoFloor';
 import { Plant } from './Furniture';
 import type { LobbyState } from './Lobby';
 import { carpetTexture, wallTexture } from './textures';
 
-// The front of the casino room (Scene.tsx's Room draws the rest): the low
-// rail where the floor ends, with a gate in it at the door, the foyer beyond
+// The front of the casino room (Scene.tsx's Room draws the rest): a low
+// rail across the floor, with a gate in it at the door that swings open away
+// from the player walking through it either way (SRS-105.4), the foyer beyond
 // it, and the front wall with the casino's big doors. They're always there,
-// so the room is closed in. Only the walk in after logging in (SRS-103.12)
-// opens the doors and the gate, coming from the lobby (Lobby.tsx), and they
-// shut again behind the player.
+// so the room is closed in. The walk in after logging in (SRS-103.12) opens
+// the doors from the lobby (Lobby.tsx), and they shut again behind the player.
+// lib/casinoFloor.ts has where the rail, the gate and the foyer's plants
+// stand, so the player bumps into the same things drawn here.
 
 const M = TILE_METRES;
 const doorX = (DOOR.x + DOOR.w / 2 - COLS / 2) * M;
@@ -21,7 +23,7 @@ const doorX = (DOOR.x + DOOR.w / 2 - COLS / 2) * M;
 export const RAIL_Z = (DOOR.y - ROWS / 2) * M;
 export const FRONT_WALL_Z = (FRONT_WALL_Y - ROWS / 2) * M;
 /** The casino's doorway (and the gate in the rail, as wide). */
-export const CASINO_DOOR_HALF = 1.6;
+export const CASINO_DOOR_HALF = GATE_HALF_WIDTH * M;
 export const CASINO_DOOR_HEIGHT = 4.2;
 /** The doorway's gold lining, round the opening and through the wall. */
 const LINING = 0.16;
@@ -151,7 +153,8 @@ export default function CasinoFront({ state, width, height }: { state: MutableRe
   const rightLeaf = useRef<THREE.Group>(null);
   useFrame(() => {
     // The doors swing out into the lobby, a little past square; the gate's
-    // leaves swing in onto the floor.
+    // leaves swing in onto the floor or out into the foyer, whichever way the
+    // player's walking.
     const swing = state.current.casino * (Math.PI / 2) * 0.92;
     if (leftDoor.current) leftDoor.current.rotation.y = -swing;
     if (rightDoor.current) rightDoor.current.rotation.y = swing;
@@ -197,8 +200,8 @@ export default function CasinoFront({ state, width, height }: { state: MutableRe
         <planeGeometry args={[width, foyerDepth]} />
         <meshStandardMaterial map={foyer} roughness={0.95} />
       </mesh>
-      {[-1, 1].map((s) => (
-        <group key={s} position={[doorX + s * 2.7, 0, FRONT_WALL_Z - 0.55]}>
+      {FOYER_PLANTS.map((plant) => (
+        <group key={plant.x} position={[(plant.x - COLS / 2) * M, 0, (plant.y - ROWS / 2) * M]}>
           <Plant />
         </group>
       ))}

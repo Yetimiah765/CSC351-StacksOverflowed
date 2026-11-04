@@ -575,11 +575,17 @@ function Stanchion({ x, z }: { x: number; z: number }) {
 }
 
 /** A red velvet rope sagging between two stanchions. */
-function Rope({ x, z1, z2 }: { x: number; z1: number; z2: number }) {
+function Rope({ from, to }: { from: [number, number]; to: [number, number] }) {
+  const [x1, z1] = from;
+  const [x2, z2] = to;
   const geometry = useMemo(() => {
-    const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(x, 0.95, z1), new THREE.Vector3(x, 0.62, (z1 + z2) / 2), new THREE.Vector3(x, 0.95, z2));
+    const curve = new THREE.QuadraticBezierCurve3(
+      new THREE.Vector3(x1, 0.95, z1),
+      new THREE.Vector3((x1 + x2) / 2, 0.62, (z1 + z2) / 2),
+      new THREE.Vector3(x2, 0.95, z2)
+    );
     return new THREE.TubeGeometry(curve, 16, 0.025, 8, false);
-  }, [x, z1, z2]);
+  }, [x1, z1, x2, z2]);
   return (
     <mesh geometry={geometry}>
       <meshStandardMaterial color="#9f1239" roughness={0.7} />
@@ -850,8 +856,8 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
             {[north + 1.3, north + 2.6, north + 3.9].map((z) => (
               <Stanchion key={z} x={doorX + s * 1.5} z={z} />
             ))}
-            <Rope x={doorX + s * 1.5} z1={north + 1.3} z2={north + 2.6} />
-            <Rope x={doorX + s * 1.5} z1={north + 2.6} z2={north + 3.9} />
+            <Rope from={[doorX + s * 1.5, north + 1.3]} to={[doorX + s * 1.5, north + 2.6]} />
+            <Rope from={[doorX + s * 1.5, north + 2.6]} to={[doorX + s * 1.5, north + 3.9]} />
             {[north + 1.3, north + 2.6, north + 3.9].map((z) => (
               <FloorShadow key={`stanchion-shadow${z}`} map={shadow} x={doorX + s * 1.5} z={z} rx={0.24} />
             ))}
@@ -862,11 +868,28 @@ export default function Lobby({ state }: { state: MutableRefObject<LobbyState> }
           </group>
         ))}
 
-        {/* The fountain, against the right wall facing the desk, under the roulette poster. */}
+        {/* The fountain, against the right wall facing the desk, under the
+            roulette poster, roped off in an arc from column to column. */}
         <group position={[doorX + HALF_W - 1.5, 0, mid]}>
           <Fountain state={state} />
         </group>
         <FloorShadow map={shadow} x={doorX + HALF_W - 1.5} z={mid} rx={1.45} />
+        {(() => {
+          const posts: [number, number][] = [
+            [doorX + HALF_W - 1.3, mid - COLUMN_GAP + 0.65],
+            [doorX + HALF_W - 2.6, mid - 1.4],
+            [doorX + HALF_W - 3.15, mid],
+            [doorX + HALF_W - 2.6, mid + 1.4],
+            [doorX + HALF_W - 1.3, mid + COLUMN_GAP - 0.65],
+          ];
+          return posts.map(([x, z], i) => (
+            <group key={`fountain-post${i}`}>
+              <Stanchion x={x} z={z} />
+              <FloorShadow map={shadow} x={x} z={z} rx={0.24} />
+              {i > 0 ? <Rope from={posts[i - 1]!} to={[x, z]} /> : null}
+            </group>
+          ));
+        })()}
 
         {/* The front desk, in the middle of the left wall under the jackpot board. */}
         <group position={[doorX - HALF_W - 0.4, 0, mid]}>

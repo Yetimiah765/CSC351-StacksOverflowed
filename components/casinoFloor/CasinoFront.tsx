@@ -1,10 +1,11 @@
 'use client';
 
-import { useFrame } from '@react-three/fiber';
+import { useFrame, type ThreeEvent } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
 import { COLS, DOOR, FOYER_PLANTS, FRONT_WALL_Y, GATE_HALF_WIDTH, ROWS, TILE_METRES } from '../../lib/casinoFloor';
 import { Plant } from './Furniture';
+import Highlight from './Highlight';
 import type { LobbyState } from './Lobby';
 import { carpetTexture, wallTexture } from './textures';
 
@@ -13,7 +14,9 @@ import { carpetTexture, wallTexture } from './textures';
 // from the player walking through it either way (SRS-105.4), the foyer beyond
 // it, and the front wall with the casino's big doors. They're always there,
 // so the room is closed in. The walk in after logging in (SRS-103.12) opens
-// the doors from the lobby (Lobby.tsx), and they shut again behind the player.
+// the doors from the lobby (Lobby.tsx), and they shut again behind the
+// player; in reach of them, the doors are outlined, and a logged-in player
+// can leave through them, logging out (SRS-105.5).
 // lib/casinoFloor.ts has where the rail, the gate and the foyer's plants
 // stand, so the player bumps into the same things drawn here.
 
@@ -146,7 +149,20 @@ function DoorLight() {
   );
 }
 
-export default function CasinoFront({ state, width, height }: { state: MutableRefObject<LobbyState>; width: number; height: number }) {
+export default function CasinoFront({
+  state,
+  width,
+  height,
+  highlight,
+  onDoorsClick,
+}: {
+  state: MutableRefObject<LobbyState>;
+  width: number;
+  height: number;
+  /** Outline the doors: the player's in reach of them and can leave. */
+  highlight: boolean;
+  onDoorsClick: (event: ThreeEvent<MouseEvent>) => void;
+}) {
   const leftDoor = useRef<THREE.Group>(null);
   const rightDoor = useRef<THREE.Group>(null);
   const leftLeaf = useRef<THREE.Group>(null);
@@ -245,8 +261,12 @@ export default function CasinoFront({ state, width, height }: { state: MutableRe
         <boxGeometry args={[(CASINO_DOOR_HALF + LINING) * 2, LINING, 0.5]} />
         <Gold />
       </mesh>
-      <CasinoDoor side={-1} door={leftDoor} />
-      <CasinoDoor side={1} door={rightDoor} />
+      <group onClick={onDoorsClick}>
+        <Highlight enabled={highlight}>
+          <CasinoDoor side={-1} door={leftDoor} />
+          <CasinoDoor side={1} door={rightDoor} />
+        </Highlight>
+      </group>
     </group>
   );
 }

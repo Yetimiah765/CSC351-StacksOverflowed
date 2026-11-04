@@ -12,7 +12,10 @@ import {
   LOBBY_MIDDLE,
   START,
   TILE_METRES,
+  atCasinoDoors,
+  doorStandingSpots,
   entranceWalk,
+  exitWalk,
   findPath,
   isBlocked,
   moveWithCollisions,
@@ -62,7 +65,8 @@ import { carpetTexture, neonTexture, wallTexture } from './textures';
 // they get up beside the chair. Just after logging in (SRS-103.12) the player
 // starts outside the building instead and walks in through its lobby
 // (Lobby.tsx) and the casino's doors (CasinoFront.tsx), which shut behind
-// them.
+// them; through the gate in the rail, at those doors, a logged-in player can
+// leave the same way, walking out to the street as they log out (SRS-105.5).
 
 const TILE_M = TILE_METRES;
 const WALL_HEIGHT = 4.6;
@@ -104,6 +108,17 @@ interface Props {
   guest?: boolean;
   /** The walk in is over (or was skipped). */
   onEntered?: () => void;
+  /** Logged in, so the casino's doors can be left through, logging out (SRS-105.5). */
+  canLeave?: boolean;
+  /** The player came in reach of the casino's doors (true), or went out of it. */
+  onNearDoors?: (near: boolean) => void;
+  /** A click on the casino's doors while in reach of them. */
+  onLeave?: () => void;
+  /** Set by the page once the player has chosen to leave: the scene walks them out, or with `leaveAtOnce` (reduced motion) puts them straight in the lobby. */
+  leaving?: boolean;
+  leaveAtOnce?: boolean;
+  /** The walk out is over (or was skipped): they're a guest in the lobby. */
+  onLeft?: () => void;
   /** Stop drawing (while a game's page loads), so the page isn't held up. */
   paused?: boolean;
 }
@@ -280,8 +295,13 @@ function planEntrance(guest: boolean): WalkIn {
     walked: 0,
     t: 0,
     skip: false,
-    from: new THREE.Vector3(points[0]!.x + 1.7, 2.0, LOBBY_SOUTH_Z - 4.2),
+    from: entranceShot(points[0]!.x),
   };
+}
+
+/** The walk in's first shot: inside the lobby, facing the building's front doors, from beside the carpet down the middle at `x`. */
+function entranceShot(x: number) {
+  return new THREE.Vector3(x + 1.7, 2.0, LOBBY_SOUTH_Z - 4.2);
 }
 
 /** How far open the building's front doors, the casino's doors and the gate are, and how bright the lobby is, `entry.progress` metres in. */
@@ -383,6 +403,108 @@ function alongWalk(points: THREE.Vector2[], walked: number) {
   return { here: points[points.length - 1]!.clone(), heading: Math.PI };
 }
 
+/**
+ * Leaving through the casino's doors (SRS-105.5): the player turns to the
+ * doors as they swing open and walks out through them into the middle of the
+ * lobby, then turns round to watch them shut. The camera swings round behind
+ * them from wherever it was, follows them through the doorway (a little to
+ * one side, inside it), and once they're in the lobby swings round them,
+ * between them and the fountain, to behind them, where it follows from — as
+ * the doors shut. Then they're a guest in the lobby. Any key or a click
+ * skips it, and with reduced motion it starts skipped.
+ */
+interface WalkOut {
+  /** The walk, world metres, and how far along it the casino's doors are. */
+  points: THREE.Vector2[];
+  length: number;
+  doors: number;
+  /** How far into it the camera's moves are, metres: like `walked`, but carrying on past the end for EXIT_SETTLE more. */
+  progress: number;
+  /** How far along it the player is, metres, and seconds since it began. */
+  walked: number;
+  t: number;
+  skip: boolean;
+  /** Where the camera was when it began, around the player: it swings round from there. */
+  start: { yaw: number; across: number; up: number };
+}
+
+/** Seconds turning to the casino's doors as they start to open. */
+const EXIT_WAIT = 0.6;
+/** After they stop in the lobby, how much further (metres, at walking pace) the camera takes to swing round behind them. */
+const EXIT_SETTLE = 4.0;
+/** Behind them as they walk out (towards +z), a little to one side so it goes through the doorway inside it. */
+const EXIT_BEHIND = { x: 0.9, z: -3.0, up: 1.3 };
+
+function planExit(from: Point, camera: THREE.Vector3, atOnce: boolean): WalkOut {
+  const points = exitWalk(from).map((point) => new THREE.Vector2(...toWorld(point.x, point.y)));
+  const legs = points.slice(1).map((point, i) => point.distanceTo(points[i]!));
+  const upTo = (n: number) => legs.slice(0, n).reduce((sum, leg) => sum + leg, 0);
+  const here = points[0]!;
+  return {
+    points,
+    length: upTo(legs.length),
+    doors: upTo(legs.length - 1),
+    progress: 0,
+    walked: 0,
+    t: 0,
+    skip: atOnce,
+    start: {
+      yaw: Math.atan2(camera.x - here.x, camera.z - here.y),
+      across: Math.hypot(camera.x - here.x, camera.z - here.y),
+      up: camera.y - 1.45,
+    },
+  };
+}
+
+/** How far open the casino's doors are, and how bright the lobby is, on the walk out. */
+function walkOutDoors(out: WalkOut) {
+  // The casino's doors open as the player turns to them, letting the lobby's
+  // light in, and shut once they're in the lobby and the camera's clear.
+  const opened = smooth((out.t - 0.15) / 1.3);
+  const shut = 1 - smooth((out.progress - (out.length + 1.6)) / 1.6);
+  return {
+    casino: out.skip ? 0 : opened * shut,
+    lit: out.skip ? 1 : opened,
+    front: 0,
+    shown: true,
+  };
+}
+
+/** Where the camera is on the walk out, with the player `here`, ending where `follow` puts it. */
+function walkOutCamera(out: WalkOut, here: THREE.Vector2, follow: Camera) {
+  const head = 1.45;
+  const behindYaw = Math.atan2(EXIT_BEHIND.x, EXIT_BEHIND.z);
+  const behindAcross = Math.hypot(EXIT_BEHIND.x, EXIT_BEHIND.z);
+  let yaw: number;
+  let across: number;
+  let up: number;
+  if (out.progress <= out.length) {
+    // First it swings round behind them from wherever it was, the shorter way round, then follows.
+    const k = smooth(out.t / 1.6);
+    const turn = Math.atan2(Math.sin(behindYaw - out.start.yaw), Math.cos(behindYaw - out.start.yaw));
+    yaw = out.start.yaw + turn * k;
+    across = THREE.MathUtils.lerp(out.start.across, behindAcross, k);
+    up = THREE.MathUtils.lerp(out.start.up, EXIT_BEHIND.up, k);
+  } else {
+    // In the lobby, it swings round them, coming in closer half way so it
+    // passes between them and the fountain, to behind them as they face the doors.
+    const k = smooth((out.progress - out.length) / EXIT_SETTLE);
+    yaw = THREE.MathUtils.lerp(behindYaw, follow.yaw, k);
+    across = THREE.MathUtils.lerp(behindAcross, Math.cos(follow.pitch) * follow.distance, k) - Math.sin(Math.PI * k);
+    up = THREE.MathUtils.lerp(EXIT_BEHIND.up, Math.sin(follow.pitch) * follow.distance, k);
+  }
+  const position = new THREE.Vector3(here.x + Math.sin(yaw) * across, head + up, here.y + Math.cos(yaw) * across);
+  if (position.z > LOBBY_NORTH_Z) {
+    position.x = THREE.MathUtils.clamp(position.x, -LOBBY_HALF_WIDTH + 0.4, LOBBY_HALF_WIDTH - 0.4);
+    position.y = Math.min(position.y, LOBBY_HEIGHT - 0.4);
+  } else {
+    const halfW = (COLS / 2 - 1.3) * TILE_M;
+    position.x = THREE.MathUtils.clamp(position.x, -halfW, halfW);
+    position.y = THREE.MathUtils.clamp(position.y, 0.6, WALL_HEIGHT - 0.3);
+  }
+  return position;
+}
+
 function Player({
   start,
   input,
@@ -396,6 +518,9 @@ function Player({
   walkIn,
   lobby,
   onEntered,
+  walkOut,
+  onLeft,
+  onNearDoors,
 }: {
   /** Where the player starts, in tiles (the middle of the start tile, if not given). */
   start?: Point;
@@ -412,6 +537,10 @@ function Player({
   walkIn: MutableRefObject<WalkIn | null>;
   lobby: MutableRefObject<LobbyState>;
   onEntered?: () => void;
+  /** The walk out through the casino's doors (SRS-105.5): 'asked' (or 'asked at once', skipped from the start) until Player plans it from where the player is. */
+  walkOut: MutableRefObject<WalkOut | 'asked' | 'asked at once' | null>;
+  onLeft?: () => void;
+  onNearDoors: (near: boolean) => void;
 }) {
   const body = useRef<THREE.Group>(null);
   const motion = useRef<Motion>({ speed: 0 });
@@ -424,6 +553,7 @@ function Player({
   const heading = useRef(Math.PI);
   const lookAt = useRef(new THREE.Vector3());
   const near = useRef<NearSpot>({ object: null, spot: null });
+  const nearDoors = useRef(false);
   const { camera: view } = useThree();
 
   useFrame((_, rawDelta) => {
@@ -474,6 +604,50 @@ function Player({
         walkIn.current = null;
         tile.current = { x: Math.floor(position.current.x), y: Math.floor(position.current.y) };
         onEntered?.();
+      }
+      return;
+    }
+
+    // Leaving through the casino's doors (SRS-105.5): the player isn't
+    // steered, the walk out plays out; a key or a click (see Floor) skips it.
+    let out = walkOut.current;
+    if (out === 'asked' || out === 'asked at once') {
+      // The camera's to end up behind them facing the casino's doors, whichever way it was turned.
+      camera.current.yaw = 0;
+      out = planExit(position.current, view.position, out === 'asked at once');
+      walkOut.current = out;
+      path.current = [];
+    }
+    if (out) {
+      out.t += delta;
+      const end = out.length + EXIT_SETTLE;
+      if (out.skip) out.progress = end;
+      else if (out.t > EXIT_WAIT) out.progress = Math.min(end, out.progress + ENTER_SPEED * delta);
+      out.walked = Math.min(out.length, out.progress);
+      const walking = out.t > EXIT_WAIT && out.walked < out.length;
+      const { here, heading: way } = alongWalk(out.points, out.walked);
+      motion.current.speed = walking ? ENTER_SPEED : 0;
+      if (out.walked < out.length) turnTowards(way, walking ? 10 : 6);
+      // In the lobby, they turn round to watch the doors shut.
+      else if (out.skip) heading.current = Math.PI;
+      else turnTowards(Math.PI, 3);
+      position.current = { x: here.x / TILE_M + COLS / 2, y: here.y / TILE_M + ROWS / 2 };
+      if (body.current) {
+        body.current.position.set(here.x, 0, here.y);
+        body.current.rotation.y = heading.current;
+      }
+      Object.assign(lobby.current, walkOutDoors(out));
+      view.position.copy(walkOutCamera(out, here, camera.current));
+      lookAt.current.set(here.x, 1.45, here.y);
+      view.lookAt(lookAt.current);
+      if (out.progress >= end) {
+        // A guest in the lobby now, facing the doors, with the camera behind them.
+        heading.current = Math.PI;
+        if (body.current) body.current.rotation.y = heading.current;
+        motion.current.speed = 0;
+        walkOut.current = null;
+        tile.current = { x: Math.floor(position.current.x), y: Math.floor(position.current.y) };
+        onLeft?.();
       }
       return;
     }
@@ -650,6 +824,12 @@ function Player({
       near.current = { object, spot };
       onNear(near.current);
     }
+    // In reach of the casino's doors, from the foyer (SRS-105.5).
+    const doors = atCasinoDoors(after);
+    if (doors !== nearDoors.current) {
+      nearDoors.current = doors;
+      onNearDoors(doors);
+    }
 
     followWith(wx, wz, 1.45, delta);
   });
@@ -765,7 +945,15 @@ function CameraControls({ camera }: { camera: MutableRefObject<Camera> }) {
 }
 
 // ---------- the room ----------
-function Room({ lobbyState }: { lobbyState: MutableRefObject<LobbyState> }) {
+function Room({
+  lobbyState,
+  doorsOutlined,
+  onDoorsClick,
+}: {
+  lobbyState: MutableRefObject<LobbyState>;
+  doorsOutlined: boolean;
+  onDoorsClick: (event: ThreeEvent<MouseEvent>) => void;
+}) {
   const width = (COLS - 2) * TILE_M;
   const depth = (ROWS - 3) * TILE_M;
   const [, backZ] = toWorld(0, 2);
@@ -812,7 +1000,7 @@ function Room({ lobbyState }: { lobbyState: MutableRefObject<LobbyState> }) {
           </mesh>
         </group>
       ))}
-      <CasinoFront state={lobbyState} width={width} height={WALL_HEIGHT} />
+      <CasinoFront state={lobbyState} width={width} height={WALL_HEIGHT} highlight={doorsOutlined} onDoorsClick={onDoorsClick} />
     </group>
   );
 }
@@ -878,7 +1066,7 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
   }
 }
 
-function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered, guest = false }: Props) {
+function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, onStood, entering, onEntered, canLeave, onNearDoors, onLeave, leaving, leaveAtOnce, onLeft, guest = false }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
   const [nearSpot, setNearSpot] = useState<number | null>(null);
@@ -906,11 +1094,32 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
   // A guest is in the lobby, whether or not they're seen walking in.
   const inLobby = guest && !rising;
   const lobby = useRef<LobbyState>({ front: 0, casino: 0, gate: 0, lit: 1, shown: entrance !== null || inLobby });
-  // Any key, or pressing anywhere on the floor's view, skips the walk in.
+  // Leaving through the casino's doors (SRS-105.5), once the page says so;
+  // Player plans the walk out from wherever the player is.
+  const walkOut = useRef<WalkOut | 'asked' | 'asked at once' | null>(null);
+  useEffect(() => {
+    if (leaving && !walkOut.current) walkOut.current = leaveAtOnce ? 'asked at once' : 'asked';
+  }, [leaving, leaveAtOnce]);
+  // In reach of the casino's doors: they're outlined (for a player who can leave).
+  const [nearDoors, setNearDoors] = useState(false);
+  const nearDoorsRef = useRef(false);
+  const handleNearDoors = useCallback(
+    (doors: boolean) => {
+      nearDoorsRef.current = doors;
+      setNearDoors(doors);
+      onNearDoors?.(doors);
+    },
+    [onNearDoors]
+  );
+  // Any key, or pressing anywhere on the floor's view, skips the walk in,
+  // or the walk out (but not a held key repeating, like the Space that
+  // started it).
   const { gl } = useThree();
   useEffect(() => {
-    const skip = () => {
+    const skip = (event: Event) => {
       if (walkIn.current) walkIn.current.skip = true;
+      const out = walkOut.current;
+      if (out && typeof out === 'object' && !(event as KeyboardEvent).repeat) out.skip = true;
     };
     const element = gl.domElement;
     element.addEventListener('pointerdown', skip);
@@ -932,8 +1141,17 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
     path.current = findPath(playerTile.current, targets) ?? [];
   };
 
+  // A click on the casino's doors leaves through them when in reach (for a
+  // player who can), or walks up to them.
+  function handleDoorsClick(event: ThreeEvent<MouseEvent>) {
+    if (walkIn.current || walkOut.current || event.delta > 6 || seating.current) return;
+    event.stopPropagation();
+    if (nearDoorsRef.current && canLeave) onLeave?.();
+    else walkTo(doorStandingSpots());
+  }
+
   function handleFloorClick(event: ThreeEvent<MouseEvent>) {
-    if (walkIn.current) return; // the press that skipped the walk in (see above)
+    if (walkIn.current || walkOut.current) return; // the press that skipped the walk in or out (see above)
     if (event.delta > 6 || seating.current) return; // a drag to look around, or already sitting down
     event.stopPropagation();
     const tile = {
@@ -968,8 +1186,10 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
       />
       <pointLight position={[0, 3.2, toWorld(0, 2)[1] + 0.8]} color="#ff3fa4" intensity={12} distance={9} />
 
-      <Room lobbyState={lobby} />
-      {entrance || inLobby ? <Lobby state={lobby} /> : null}
+      <Room lobbyState={lobby} doorsOutlined={nearDoors && Boolean(canLeave) && !leaving} onDoorsClick={handleDoorsClick} />
+      {/* Always there, so walking out shows it without new shaders to build:
+          it's hidden (its lights at zero) except while a guest is in it or the player walks in or out. */}
+      <Lobby state={lobby} />
       <group onClick={handleFloorClick}>
         {/* What a click lands on: the floor, and the foyer out to the front wall. */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (FRONT_WALL_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
@@ -1014,9 +1234,12 @@ function Floor({ onNear, onPlay, nearId, input, playing, onSeated, returning, on
         walkIn={walkIn}
         lobby={lobby}
         onEntered={onEntered}
+        walkOut={walkOut}
+        onLeft={onLeft}
+        onNearDoors={handleNearDoors}
       />
 
-      {near?.interactive && !playing && !walkIn.current ? (
+      {near?.interactive && !playing && !walkIn.current && !leaving ? (
         <Html position={[toWorld(near.x + near.w / 2, 0)[0], near.kind === 'sports-betting' ? 2.75 : 2.2, toWorld(0, near.y + near.h / 2)[1]]} center zIndexRange={[20, 0]}>
           <div className="pointer-events-none whitespace-nowrap rounded-md border border-white/20 bg-black/70 px-3 py-1.5 text-sm font-bold uppercase tracking-[0.18em] text-white shadow-[0_0_24px_rgba(255,255,255,0.25)] backdrop-blur">
             {near.interactive.name}

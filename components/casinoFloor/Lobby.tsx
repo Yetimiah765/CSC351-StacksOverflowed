@@ -28,18 +28,20 @@ import {
   type PosterGame,
 } from './textures';
 
-// The building's lobby in front of the casino (SRS-103.12), only there for
-// the walk in after logging in: the front of the building (glass doors
+// The building's lobby in front of the casino, seen only while the player
+// walks in after logging in (SRS-103.12) or out through the casino's doors to
+// log out (SRS-105.5): the front of the building (glass doors
 // between big windows onto the city at night), a marble lobby with columns,
 // chandeliers, posters for the games, a jackpot board over the curved front
 // desk with its check-in kiosks and receptionist (FrontDesk.tsx), a tiered
 // fountain facing it (Fountain.tsx), uplit columns, glowing ceiling coffers
 // and a cove light round the top of the walls, benches, a red carpet over a chip-and-star inlay, giant dice and a
 // luggage cart, and at its far end the casino's big double doors (part of
-// the casino's front, CasinoFront.tsx). Scene.tsx's walk in opens the doors
-// as the player reaches them, shuts them behind the player, then hides the
-// lobby, keeping its lights at zero rather than removing them, so no shader
-// has to be rebuilt mid-walk.
+// the casino's front, CasinoFront.tsx). Scene.tsx's walks open the doors as
+// the player reaches them and shut them behind. The lobby is always in the
+// scene (so its shaders are built with the floor's), hidden the rest of the
+// time with its lights at zero rather than removed, so none has to be
+// rebuilt when it shows.
 
 /** What the walk in tells the lobby and the casino's front each frame. */
 export interface LobbyState {
@@ -50,7 +52,7 @@ export interface LobbyState {
   gate: number;
   /** How bright the lobby's lights are, 0 to 1: they fade as the casino's doors shut. */
   lit: number;
-  /** False once the casino's doors have shut behind the player: the lobby is hidden. */
+  /** Whether the lobby's showing: only while the player walks in or out. */
   shown: boolean;
 }
 

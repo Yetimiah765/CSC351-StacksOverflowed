@@ -20,6 +20,7 @@ import {
   type TakenSeat,
 } from '../../lib/casinoFloor';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
+import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm } from '../../lib/checkIn';
 import { logOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import CheckInTablet from './CheckInTablet';
@@ -41,6 +42,9 @@ import type { DoorsSide, WalkInput } from './Scene';
 // (SRS-108.6). Through the gate in the rail, at the casino's doors, a
 // logged-in player can log out: they're seen walking out through the doors
 // into the lobby, a guest again, without the page changing (SRS-105.5).
+// Guests sign up or log in at a check-in tablet on the lobby's front desk
+// (SRS-103.13), which the Sign up and Log in buttons, the nav bar's profile
+// icon and the login and registration pages all walk them to (SRS-103.16).
 
 const display = Oswald({ weight: ['500', '700'], subsets: ['latin'], display: 'swap' });
 
@@ -148,15 +152,6 @@ function prefersReducedMotion() {
   }
 }
 
-function canDraw3d() {
-  try {
-    const canvas = document.createElement('canvas');
-    return Boolean(canvas.getContext('webgl2') ?? canvas.getContext('webgl'));
-  } catch {
-    return false;
-  }
-}
-
 export default function CasinoFloor() {
   const router = useRouter();
   const signedIn = useSignedIn();
@@ -211,9 +206,15 @@ export default function CasinoFloor() {
   // they took to open a game, walking in, or back where they last stood. A
   // guest (perhaps because their session ended) gets up from no seat.
   const placed = useRef(false);
+  // Handed over by the login or registration page (SRS-103.16): for a guest,
+  // the tablet to open once they're placed (a logged-in player just starts
+  // on the floor).
+  const [handedOver, setHandedOver] = useState<CheckInForm | null>(null);
   useEffect(() => {
     if (sessionOk === null || placed.current) return;
     placed.current = true;
+    const form = takeHandedOverCheckIn();
+    if (!sessionOk) setHandedOver(form);
     let seat = readTakenSeat();
     if (seat && !sessionOk) {
       forgetTakenSeat();
@@ -277,11 +278,35 @@ export default function CasinoFloor() {
   const nearKioskRef = useRef<number | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
   const [tabletOpen, setTabletOpen] = useState(false);
-  const checkIn = useRef<() => void>(() => {});
-  checkIn.current = () => {
+  // The form the tablet opens on: sign-up, unless they asked to log in.
+  const [tabletForm, setTabletForm] = useState<CheckInForm>('signup');
+  const checkIn = useRef<(form?: CheckInForm) => void>(() => {});
+  checkIn.current = (form = 'signup') => {
     if (!guest || checkingIn || leaving || playing) return;
+    setTabletForm(form);
     setCheckingIn(true);
   };
+  // Checking in from the page (SRS-103.16): the Sign up and Log in buttons,
+  // the nav bar's profile icon (which asks with CHECK_IN_EVENT rather than
+  // opening the sign-up page), and a form handed over by the login or
+  // registration page all walk a guest to the desk, when the 3D lobby's
+  // showing.
+  const askedToCheckIn = useRef<(event: Event) => void>(() => {});
+  askedToCheckIn.current = (event) => {
+    if (!webgl || !guest) return;
+    event.preventDefault();
+    checkIn.current((event as CustomEvent<CheckInForm>).detail);
+  };
+  useEffect(() => {
+    const ask = (event: Event) => askedToCheckIn.current(event);
+    window.addEventListener(CHECK_IN_EVENT, ask);
+    return () => window.removeEventListener(CHECK_IN_EVENT, ask);
+  }, []);
+  useEffect(() => {
+    if (!handedOver || !guest || !webgl) return;
+    setHandedOver(null);
+    checkIn.current(handedOver);
+  }, [handedOver, guest, webgl]);
   function checkedIn() {
     setSignedInHere(true);
     setTabletOpen(false);
@@ -375,10 +400,27 @@ export default function CasinoFloor() {
           </p>
           {guest ? (
             <div className="flex gap-2 uppercase tracking-wider">
-              <Link href="/register" className="rounded bg-emerald-400 px-4 py-2 font-bold text-slate-950 transition hover:bg-emerald-300">
+              {/* With the 3D lobby, to the front desk (SRS-103.16); without it, the plain pages. */}
+              <Link
+                href="/register"
+                onClick={(event) => {
+                  if (!webgl) return;
+                  event.preventDefault();
+                  checkIn.current('signup');
+                }}
+                className="rounded bg-emerald-400 px-4 py-2 font-bold text-slate-950 transition hover:bg-emerald-300"
+              >
                 Sign up
               </Link>
-              <Link href="/login" className="rounded border border-slate-600 bg-slate-900 px-4 py-2 text-slate-100 transition hover:border-emerald-300">
+              <Link
+                href="/login"
+                onClick={(event) => {
+                  if (!webgl) return;
+                  event.preventDefault();
+                  checkIn.current('login');
+                }}
+                className="rounded border border-slate-600 bg-slate-900 px-4 py-2 text-slate-100 transition hover:border-emerald-300"
+              >
                 Log in
               </Link>
             </div>
@@ -542,6 +584,7 @@ export default function CasinoFloor() {
           the website's own font, as on the sign-up and login pages. */}
       {tabletOpen ? (
         <CheckInTablet
+          start={tabletForm}
           onClose={() => {
             setTabletOpen(false);
             setCheckingIn(false);

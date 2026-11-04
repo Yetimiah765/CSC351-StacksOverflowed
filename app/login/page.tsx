@@ -3,10 +3,13 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import LoginScreen from '../../components/auth/LoginScreen';
+import { useCheckInHandOver } from '../../components/auth/useCheckInHandOver';
 import { ENTRANCE_KEY } from '../../lib/casinoFloor';
 
 export default function LoginPage() {
   const router = useRouter();
+  // With the 3D home page, logging in happens at its front desk (SRS-103.16).
+  const showForm = useCheckInHandOver('login');
   // SRS-101.15: coming straight from sign-up, with the new username. The
   // address is tidied so a refresh doesn't say it again.
   const [registered, setRegistered] = useState<string | null>(null);
@@ -28,5 +31,6 @@ export default function LoginPage() {
     router.push('/');
   }
 
+  if (!showForm) return null;
   return <LoginScreen registered={registered} onLoggedIn={goIn} signUp={{ href: '/register' }} />;
 }

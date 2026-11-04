@@ -3,19 +3,21 @@
 import { useEffect, useRef, useState } from 'react';
 import LoginScreen from '../auth/LoginScreen';
 import RegisterScreen from '../auth/RegisterScreen';
+import type { CheckInForm } from '../../lib/checkIn';
 
 // A check-in tablet up close (SRS-103.13): once the camera has flown into
 // one of the front desk's kiosks, its screen fills the window below the nav
 // bar, framed by its bezel, with the website's own sign-up and login
-// screens (and their animations) running on it. Sign-up comes first, and
-// each links to the other; after signing up it's the login screen with the
-// new username filled in (SRS-101.15). Escape, or Step away on the bezel,
+// screens (and their animations) running on it. Sign-up comes first (or
+// login, when that's what the guest asked for, SRS-103.16), and each links
+// to the other; after signing up it's the login screen with the new
+// username filled in (SRS-101.15). Escape, or Step away on the bezel,
 // closes it. The page draws it outside the casino floor's own part, so the
 // screens look exactly as they do on their own pages (not in the floor's
 // font).
 
-export default function CheckInTablet({ onClose, onLoggedIn }: { onClose: () => void; onLoggedIn: () => void }) {
-  const [screen, setScreen] = useState<'signup' | 'login'>('signup');
+export default function CheckInTablet({ start = 'signup', onClose, onLoggedIn }: { start?: CheckInForm; onClose: () => void; onLoggedIn: () => void }) {
+  const [screen, setScreen] = useState<CheckInForm>(start);
   const [registered, setRegistered] = useState<string | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
 

@@ -986,7 +986,7 @@ flowchart LR
 
 *Traces to: UR-105*
 
-**SRS-105.6, JO, Walking out after logging out on the profile.** After a player logs out with the profile page's Log out button (SRS-105.1), the home page shall show their character leaving from where they last were (getting up from the seat they took to open a game, stepping back from a screen, or from where they last stood on the casino floor) and walking out through the casino's doors into the lobby, the doors shutting behind them, where they continue as a guest. Getting up shall play as SRS-108.6 describes; the player shall be able to skip the walk after it with any key or a click, and the walk shall not play when the player's device is set to reduce motion.
+**SRS-105.6, JO, Walking out after logging out on the profile.** After a player logs out with the profile page's Log out button (SRS-105.1), the home page shall show their character leaving from where they last were (getting up from the seat they took to open a game, stepping back from a screen, or from where they last stood on the casino floor) and walking out through the casino's doors into the lobby, the doors shutting behind them, where they continue as a guest. A player who was last in the lobby shall stay where they stood, as a guest. Getting up shall play as SRS-108.6 describes; the player shall be able to skip the walk after it with any key or a click, and the walk shall not play when the player's device is set to reduce motion.
 
 *Note: when account deletion (UR-106) is built, deleting an account shall end the same way.*
 
@@ -1066,7 +1066,7 @@ flowchart LR
 
 *Traces to: UR-107*
 
-**SRS-107.6, JO, Walking around the lobby.** A guest shall be able to walk around the lobby; its walls, furniture and the roped-off fountain shall block the way.
+**SRS-107.6, JO, Walking around the lobby.** A guest or logged-in player shall be able to walk around the lobby; its walls, furniture and the fountain's basin shall block the way.
 
 *Traces to: UR-107*
 

@@ -11,7 +11,6 @@ import {
   DOOR,
   DOOR_ROPE,
   FOUNTAIN,
-  FOUNTAIN_ROPE,
   FRONT_DESK,
   LOBBY,
   LOBBY_BENCHES,
@@ -898,21 +897,11 @@ export default function Lobby({
         ))}
 
         {/* The fountain, against the right wall facing the desk, under the
-            roulette poster, roped off in an arc from column to column. */}
+            roulette poster. */}
         <group position={[doorX + FOUNTAIN.x, 0, north + FOUNTAIN.z]}>
           <Fountain state={state} />
         </group>
         <FloorShadow map={shadow} x={doorX + FOUNTAIN.x} z={north + FOUNTAIN.z} rx={1.45} />
-        {(() => {
-          const posts = FOUNTAIN_ROPE.map(({ x, z }): [number, number] => [doorX + x, north + z]);
-          return posts.map(([x, z], i) => (
-            <group key={`fountain-post${i}`}>
-              <Stanchion x={x} z={z} />
-              <FloorShadow map={shadow} x={x} z={z} rx={0.24} />
-              {i > 0 ? <Rope from={posts[i - 1]!} to={[x, z]} /> : null}
-            </group>
-          ));
-        })()}
 
         {/* The front desk, in the middle of the left wall under the jackpot board. */}
         <group position={[doorX + FRONT_DESK.x, 0, north + FRONT_DESK.z]}>

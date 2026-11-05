@@ -219,9 +219,7 @@ export function serializeTakenSeat(seat: TakenSeat): string {
 export type Shape =
   | { type: 'box'; x: number; z: number; w: number; d: number }
   | { type: 'ellipse'; x: number; z: number; rx: number; rz: number }
-  | { type: 'circle'; x: number; z: number; r: number }
-  /** A rope between two posts: from (x, z) by (dx, dz), `r` thick. */
-  | { type: 'capsule'; x: number; z: number; dx: number; dz: number; r: number };
+  | { type: 'circle'; x: number; z: number; r: number };
 
 export interface Seat {
   x: number;
@@ -507,7 +505,7 @@ const FRONT_SOLIDS: TileShape[] = [
 // Where things stand in the lobby, in metres: `x` across from the middle of
 // the casino's doorway, `z` out from the casino's front wall towards the
 // building's front. Lobby.tsx and FrontDesk.tsx draw them here, and
-// LOBBY_SOLIDS keeps a guest walking round the lobby out of them.
+// LOBBY_SOLIDS keeps the player walking round the lobby out of them.
 
 /** The lobby inside its walls, metres. */
 export const LOBBY_SIZE = { width: LOBBY.width * TILE_METRES, depth: LOBBY.depth * TILE_METRES };
@@ -543,15 +541,8 @@ export const LOBBY_BENCHES: { side: -1 | 1; z: number }[] = [
 ];
 export const BENCH_SIZE = { length: 1.4, depth: 0.5, fromWall: 0.45 };
 
-/** The fountain against the right wall, facing the desk, and the posts of the rope round it, from column to column. */
+/** The fountain against the right wall, facing the desk: its basin's radius. */
 export const FOUNTAIN = { x: LOBBY_HALF - 1.5, z: LOBBY_MID, radius: 1.12 };
-export const FOUNTAIN_ROPE: { x: number; z: number }[] = [
-  { x: LOBBY_HALF - 1.3, z: LOBBY_MID - COLUMN_GAP + 0.65 },
-  { x: LOBBY_HALF - 2.6, z: LOBBY_MID - 1.4 },
-  { x: LOBBY_HALF - 3.15, z: LOBBY_MID },
-  { x: LOBBY_HALF - 2.6, z: LOBBY_MID + 1.4 },
-  { x: LOBBY_HALF - 1.3, z: LOBBY_MID + COLUMN_GAP - 0.65 },
-];
 
 /** The roped aisle up to the casino's doors: posts either side of the carpet. */
 export const DOOR_ROPE = { x: 1.5, posts: [1.3, 2.6, 3.9] };
@@ -588,13 +579,9 @@ const LOBBY_SOLIDS: TileShape[] = [
   ...[-1, 1].map((end) => lobbyBox(-LOBBY_HALF + 0.4, FRONT_DESK.z + end * 1.55, 0.9, 0.7)),
   ...LOBBY_BENCHES.map(({ side, z }) => lobbyBox(side * (LOBBY_HALF - BENCH_SIZE.fromWall), z, BENCH_SIZE.depth, BENCH_SIZE.length)),
   ...LOBBY_PLANTS.map(({ x, z }) => lobbyCircle(x, z, 0.3)),
-  // The roped aisle up to the casino's doors, and the fountain with the rope round it.
+  // The roped aisle up to the casino's doors, and the fountain's basin.
   ...[-1, 1].map((side) => lobbyBox(side * DOOR_ROPE.x, (DOOR_ROPE.posts[0]! + DOOR_ROPE.posts[2]!) / 2, 0.36, DOOR_ROPE.posts[2]! - DOOR_ROPE.posts[0]! + 0.36)),
   lobbyCircle(FOUNTAIN.x, FOUNTAIN.z, FOUNTAIN.radius + 0.05),
-  ...FOUNTAIN_ROPE.slice(1).map((to, i) => {
-    const from = FOUNTAIN_ROPE[i]!;
-    return { shape: { type: 'capsule', x: 0, z: 0, dx: to.x - from.x, dz: to.z - from.z, r: 0.18 } as Shape, ...lobbyTile(from.x, from.z) };
-  }),
   lobbyCircle(LOBBY_DICE.x, LOBBY_DICE.z, LOBBY_DICE.radius),
   lobbyCircle(LUGGAGE_CART.x, LUGGAGE_CART.z, 0.75),
   lobbyCircle(LUGGAGE_CART.x + Math.cos(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, LUGGAGE_CART.z - Math.sin(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, 0.3),
@@ -625,13 +612,6 @@ function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): nu
       const scaled = Math.hypot(dx / rx, dy / ry);
       if (scaled === 0) return -Math.min(rx, ry);
       return Math.hypot(dx, dy) * (1 - 1 / scaled);
-    }
-    case 'capsule': {
-      // The distance to the line between its ends, less its thickness.
-      const ex = shape.dx / TILE_METRES;
-      const ey = shape.dz / TILE_METRES;
-      const along = Math.max(0, Math.min(1, (dx * ex + dy * ey) / (ex * ex + ey * ey || 1)));
-      return Math.hypot(dx - ex * along, dy - ey * along) - shape.r / TILE_METRES;
     }
   }
 }
@@ -883,10 +863,15 @@ export function serializeSpot(spot: StoodSpot): string {
   return JSON.stringify(spot);
 }
 
+/** Whether a spot (in tiles) is in the lobby, rather than on the casino floor or in its foyer. */
+export function isInLobby(at: Point): boolean {
+  return at.y > FRONT_WALL_Y;
+}
+
 /**
  * The remembered spot, if it's still somewhere this player may stand: in
- * the lobby for a guest, on the casino floor for a logged-in player, and
- * not inside a wall or anything standing there.
+ * the lobby for a guest, in the lobby or on the casino floor for a
+ * logged-in player, and not inside a wall or anything standing there.
  */
 export function parseSpot(raw: string | null, guest: boolean): StoodSpot | null {
   if (!raw) return null;
@@ -900,7 +885,7 @@ export function parseSpot(raw: string | null, guest: boolean): StoodSpot | null 
   const numbers = [x, y, heading, yaw];
   if (!numbers.every((value) => typeof value === 'number' && Number.isFinite(value))) return null;
   const spot = { x, y, heading, yaw } as StoodSpot;
-  if (guest !== spot.y > FRONT_WALL_Y) return null;
+  if (guest && !isInLobby(spot)) return null;
   return circleBlocked(spot.x, spot.y, PLAYER_RADIUS) ? null : spot;
 }
 

@@ -1772,6 +1772,10 @@ flowchart LR
 
 *Traces to: UR-109, UR-129*
 
+**SRS-129.2, JO, One wish a day.** The system shall allow each player at most one wish per calendar day, midnight to midnight Eastern time. When a player who has already wished that day walks up to the fountain, the system shall tell them so, and how long until they can wish again.
+
+*Traces to: UR-129*
+
 # JO Non-Functional Requirements
 
 **SRS-NFR-101, JO, Password security.** The system shall store player passwords using salted bcrypt hashing with a cost factor of at least 10. The system shall not store passwords in plaintext or reversibly encrypted form and shall retain zero plaintext password copies in persistent storage or application logs after registration, login, password-change, or password-verification operations.

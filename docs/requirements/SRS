@@ -918,7 +918,7 @@ flowchart LR
 
 *Traces to: UR-101, UR-103*
 
-**SRS-103.14, JO, Into the casino after checking in.** After a guest logs in at a check-in tablet (SRS-103.13), the system shall show their character walking from the front desk through the casino's doors onto the casino floor, the doors shutting behind them. The player shall be able to skip the walk with any key or a click, and it shall not play when the player's device is set to reduce motion.
+**SRS-103.14, JO, Staying in the lobby after checking in.** After a guest logs in at a check-in tablet (SRS-103.13), the system shall close the tablet and return the view to their character at the front desk, where they continue as a logged-in player, unless they were checking in to play (SRS-108.8).
 
 *Traces to: UR-103*
 

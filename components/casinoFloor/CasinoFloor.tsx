@@ -209,14 +209,14 @@ export default function CasinoFloor() {
   const placed = useRef(false);
   // Handed over by the login or registration page (SRS-103.16): for a guest,
   // the tablet to open once they're placed (a logged-in player just starts
-  // on the floor). Turned away from a game's page, they don't walk in first
+  // where they would anyway). Turned away from a game's page, they don't walk in first
   // (SRS-108.8).
   const [handedOver, setHandedOver] = useState<HandOver | null>(null);
   // Logged out on the profile (SRS-105.6): they're shown leaving from where
   // they were (getting up from their seat, or from where they stood on the
   // floor) and walking out into the lobby, a guest from then on; with
-  // reduced motion they're just a guest in the lobby. Last in the lobby,
-  // they stay where they stood, a guest.
+  // reduced motion they're just a guest in the lobby. Last in the lobby (or
+  // nowhere remembered, so where everyone starts), they stay there, a guest.
   const [outAfterProfile, setOutAfterProfile] = useState(false);
   const outAfterProfileRef = useRef(false);
   useEffect(() => {
@@ -228,7 +228,7 @@ export default function CasinoFloor() {
     let seat = readTakenSeat();
     if (walkOut && !seat) {
       const last = readSpot(false);
-      if (last && isInLobby(last)) walkOut = false;
+      if (!last || isInLobby(last)) walkOut = false;
     }
     const handOver = sessionOk || walkOut ? null : handed;
     setHandedOver(handOver);

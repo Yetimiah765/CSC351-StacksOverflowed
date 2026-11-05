@@ -1344,6 +1344,10 @@ flowchart LR
 
 *Traces to: UR-117, UR-126*
 
+**SRS-117.12, JO, Wishing Fountain exclusion.** Coins spent on wishes at the lobby's fountain, or returned by them (UR-129), shall not count as money won or money lost.
+
+*Traces to: UR-117, UR-129*
+
 ### UR-118, JO – View Money Won and Lost by Game
 
 *User story: As a player, I want to view the virtual currency I have won and lost separately for each supported casino game and sports betting, so that I can see where my gains and losses occurred.*

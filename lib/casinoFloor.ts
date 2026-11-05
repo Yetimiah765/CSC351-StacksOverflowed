@@ -154,24 +154,16 @@ export const FRONT_WALL_Y = DOOR.y + 4.25;
  * `width` tiles wide, centred on the door. It's only there for the walk in. */
 export const LOBBY = { depth: 12.5, width: 15 };
 
-/** The middle of the lobby, in tiles: on the inlay, where a guest's walk in ends. */
+/** The middle of the lobby, in tiles: on the inlay, where the walk in ends. */
 export const LOBBY_MIDDLE: Point = { x: DOOR.x + DOOR.w / 2, y: FRONT_WALL_Y + LOBBY.depth / 2 };
 
-/** The walk in, in tiles, all down the middle of the door: from outside the
- * building through its front door into the lobby, and for a guest no
- * further than its middle. A logged-in player goes on through the casino's
- * doors and the foyer, through the gate in the rail, to a couple of steps
- * onto the floor, short of the shop counter's reach, so no game's prompt
- * pops up the moment they take over. */
-export function entranceWalk(guest = false): Point[] {
+/** The walk in (SRS-103.12), in tiles, all down the middle of the door: from
+ * outside the building through its front door to the middle of the lobby,
+ * guest or not. */
+export function entranceWalk(): Point[] {
   const doorMiddle = DOOR.x + DOOR.w / 2;
   const front = FRONT_WALL_Y + LOBBY.depth;
-  const intoLobby = [
-    { x: doorMiddle, y: front + 2.25 },
-    { x: doorMiddle, y: front },
-  ];
-  if (guest) return [...intoLobby, LOBBY_MIDDLE];
-  return [...intoLobby, { x: doorMiddle, y: FRONT_WALL_Y }, { x: doorMiddle, y: DOOR.y }, { x: doorMiddle, y: DOOR.y - 2.1 }];
+  return [{ x: doorMiddle, y: front + 2.25 }, { x: doorMiddle, y: front }, LOBBY_MIDDLE];
 }
 
 export const INTERACTIVE_OBJECTS = FLOOR_OBJECTS.filter((object) => object.interactive);
@@ -962,15 +954,6 @@ export function kioskStandingSpots(kiosk: number): Point[] {
   return spots;
 }
 
-
-// ---------- into the casino after checking in (SRS-103.14) ----------
-
-/** The walk from the front desk onto the casino floor once a guest has logged in at a check-in tablet, from where they stand: a step back from the desk to in front of its middle (clear of the roped aisle's end), across to the middle of the lobby, then on the way the walk in goes, through the casino's doors and the gate. */
-export function checkInWalk(from: Point): Point[] {
-  const offDesk = { x: doorMiddle + (FRONT_DESK.x + FRONT_DESK.radius + 1) / TILE_METRES, y: FRONT_WALL_Y + FRONT_DESK.z / TILE_METRES };
-  const points = [from, offDesk, LOBBY_MIDDLE, ...entranceWalk().slice(2)];
-  return points.filter((point, i) => i === 0 || Math.hypot(point.x - points[i - 1]!.x, point.y - points[i - 1]!.y) > 1e-6);
-}
 
 // ---------- casino doors for guests (SRS-103.15) ----------
 // A guest can't go through the casino's doors (they're solid from the

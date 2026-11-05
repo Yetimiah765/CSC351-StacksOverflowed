@@ -297,9 +297,8 @@ export default function CasinoFloor() {
   // Checking in at a front-desk tablet (SRS-103.13): the camera flies in
   // (straight there with reduced motion), then the tablet's up close, with
   // the scene paused behind it; stepping away flies back out. Once they've
-  // logged in there, the tablet closes the same way and the scene walks them
-  // from the desk onto the casino floor (SRS-103.14), or puts them straight
-  // there with reduced motion; the nav bar shows their balance.
+  // logged in there, the tablet closes the same way, leaving them at the
+  // desk, logged in (SRS-103.14); the nav bar shows their balance.
   const [nearKiosk, setNearKiosk] = useState<number | null>(null);
   const nearKioskRef = useRef<number | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);

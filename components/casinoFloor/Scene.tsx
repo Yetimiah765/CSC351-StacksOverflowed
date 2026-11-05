@@ -18,6 +18,7 @@ import {
   TILE_METRES,
   atCasinoDoors,
   atCasinoDoorsFromLobby,
+  atFountain,
   atKiosk,
   deskWalk,
   doorStandingSpots,
@@ -25,6 +26,7 @@ import {
   entranceWalk,
   exitWalk,
   findPath,
+  fountainStandingSpots,
   isBlocked,
   isInLobby,
   moveWithCollisions,
@@ -146,6 +148,9 @@ interface Props {
   checkingIn?: boolean;
   checkInAtOnce?: boolean;
   onAtKiosk?: () => void;
+  /** Came in reach of the lobby's fountain, or went out of reach; a click on it in reach makes a wish (SRS-129.1). */
+  onNearFountain?: (near: boolean) => void;
+  onWish?: () => void;
   /** Where the player last stood in this tab, to start them there (SRS-107.7). */
   spot?: StoodSpot | null;
   /** Where the player stands now, every so often while they walk about (and as the page closes), to remember. */
@@ -534,6 +539,7 @@ function Player({
   kioskScreens,
   onAtKiosk,
   onNearKiosk,
+  onNearFountain,
   member,
 }: {
   /** Where the player starts, in tiles (the middle of the start tile, if not given), and the way they face (into the room). */
@@ -563,6 +569,7 @@ function Player({
   kioskScreens: MutableRefObject<(THREE.Object3D | null)[]>;
   onAtKiosk?: () => void;
   onNearKiosk: (kiosk: number | null) => void;
+  onNearFountain: (near: boolean) => void;
   /** Logged in: the casino's doors open for them from the lobby (SRS-103.17). */
   member: boolean;
 }) {
@@ -589,6 +596,7 @@ function Player({
   const near = useRef<NearSpot>({ object: null, spot: null });
   const nearDoors = useRef<DoorsSide>(null);
   const nearKiosk = useRef<number | null>(null);
+  const nearFountain = useRef(false);
   // The casino's doors as a logged-in player walks in through them from the
   // lobby (SRS-103.17), 0 shut to 1 open; and whether they've just come in,
   // so they aren't offered the way out until they've stepped away from the
@@ -992,6 +1000,12 @@ function Player({
     if (tablet !== nearKiosk.current) {
       nearKiosk.current = tablet;
       onNearKiosk(tablet);
+    }
+    // In reach of the fountain, in the lobby (SRS-129.1).
+    const fountain = atFountain(after);
+    if (fountain !== nearFountain.current) {
+      nearFountain.current = fountain;
+      onNearFountain(fountain);
     }
 
     // Remembered for coming back to the page (SRS-107.7).
@@ -1416,6 +1430,8 @@ function Floor({
   checkingIn,
   checkInAtOnce,
   onAtKiosk,
+  onNearFountain,
+  onWish,
 }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
@@ -1476,6 +1492,18 @@ function Floor({
       onNearKiosk?.(kiosk);
     },
     [onNearKiosk]
+  );
+  // In reach of the lobby's fountain, which is outlined for a logged-in
+  // player, who can make a wish at it (SRS-129.1).
+  const [nearFountain, setNearFountain] = useState(false);
+  const nearFountainRef = useRef(false);
+  const handleNearFountain = useCallback(
+    (near: boolean) => {
+      nearFountainRef.current = near;
+      setNearFountain(near);
+      onNearFountain?.(near);
+    },
+    [onNearFountain]
   );
   const kioskScreens = useRef<(THREE.Object3D | null)[]>([]);
   const kiosk = useRef<KioskVisit | null>(null);
@@ -1543,6 +1571,15 @@ function Floor({
     else walkTo(kioskStandingSpots(which));
   }
 
+  // A click on the fountain makes a wish when in reach (for a logged-in
+  // player), or walks up to it (SRS-129.1).
+  function handleFountainClick(event: ThreeEvent<MouseEvent>) {
+    if (walkIn.current || walkOut.current || kiosk.current || event.delta > 6 || seating.current) return;
+    event.stopPropagation();
+    if (nearFountainRef.current && !guest) onWish?.();
+    else walkTo(fountainStandingSpots());
+  }
+
   // A click on the casino's doors leaves through them when in reach (for a
   // player who can), or for a guest in the lobby walks them to the front
   // desk to check in (SRS-103.15); otherwise it walks up to them, or for a
@@ -1596,7 +1633,14 @@ function Floor({
       <Room lobbyState={lobby} doorsOutlined={(nearDoors === 'floor' && Boolean(canLeave) && !leaving) || (nearDoors === 'lobby' && guest && !checkingIn)} onDoorsClick={handleDoorsClick} />
       {/* Always there, so walking out shows it without new shaders to build:
           it's hidden (its lights at zero) except while a guest is in it or the player walks in or out. */}
-      <Lobby state={lobby} kioskOutlined={guest && !checkingIn ? nearKiosk : null} kioskScreens={kioskScreens} onKioskClick={handleKioskClick} />
+      <Lobby
+        state={lobby}
+        kioskOutlined={guest && !checkingIn ? nearKiosk : null}
+        kioskScreens={kioskScreens}
+        onKioskClick={handleKioskClick}
+        fountainOutlined={nearFountain && !guest}
+        onFountainClick={handleFountainClick}
+      />
       <group onClick={handleFloorClick}>
         {/* What a click lands on: the floor, the foyer out to the front wall, and the lobby beyond (SRS-107.6). */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (LOBBY_SOUTH_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
@@ -1656,6 +1700,7 @@ function Floor({
         kioskScreens={kioskScreens}
         onAtKiosk={onAtKiosk}
         onNearKiosk={handleNearKiosk}
+        onNearFountain={handleNearFountain}
         member={!guest}
       />
 

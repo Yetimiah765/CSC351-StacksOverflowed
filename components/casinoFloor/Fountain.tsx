@@ -3,6 +3,7 @@
 import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import * as THREE from 'three';
+import Highlight from './Highlight';
 import type { LobbyState } from './Lobby';
 import { rippleTexture, waterStreakTexture } from './textures';
 
@@ -48,7 +49,7 @@ const TOP_WATER = 1.855;
 const JET_TOP = 2.34;
 const DROPS = 16;
 
-export default function Fountain({ state }: { state: MutableRefObject<LobbyState> }) {
+export default function Fountain({ state, outlined = false }: { state: MutableRefObject<LobbyState>; /** Its basin's rim outlined, for a player near enough to make a wish (SRS-129.1). */ outlined?: boolean }) {
   const geometry = useMemo(
     () => ({
       basin: lathe([
@@ -186,7 +187,10 @@ export default function Fountain({ state }: { state: MutableRefObject<LobbyState
         <meshStandardMaterial color="#c8f2ff" emissive="#7dd3fc" emissiveIntensity={2.6} toneMapped={false} />
       </mesh>
       {water(0.965, BASIN_WATER)}
-      <Rim r={1.08} y={0.56} tube={0.018} />
+      {/* (The outline goes round the rim: the basin's an open shape, which an outline would fill in.) */}
+      <Highlight enabled={outlined}>
+        <Rim r={1.08} y={0.56} tube={0.018} />
+      </Highlight>
 
       {/* The pedestal and the bowl it carries; a stem and the top bowl; the finial. */}
       <mesh geometry={geometry.pedestal} castShadow>

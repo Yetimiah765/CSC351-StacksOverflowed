@@ -1762,15 +1762,25 @@ flowchart LR
 
 *Traces to: UR-128*
 
+# Lobby
+
+### UR-129, JO – Wishing Fountain
+
+*User story: As a registered player, I want to toss a coin into the lobby's fountain and make a wish once a day, so that I can try my luck for a small coin reward.*
+
+**SRS-129.1, JO, Making a wish.** When a logged-in player walks up to the fountain in the lobby, the system shall offer to let them make a wish for 1 coin. If the player accepts, the system shall deduct 1 coin from their balance. A player with no coins shall be told they need 1 coin, and nothing shall be deducted. The system shall reject wishes from unauthenticated users or accounts that are not active.
+
+*Traces to: UR-109, UR-129*
+
 # JO Non-Functional Requirements
 
 **SRS-NFR-101, JO, Password security.** The system shall store player passwords using salted bcrypt hashing with a cost factor of at least 10. The system shall not store passwords in plaintext or reversibly encrypted form and shall retain zero plaintext password copies in persistent storage or application logs after registration, login, password-change, or password-verification operations.
 
 *Traces to: UR-101, UR-103, UR-104, UR-106, UR-113*
 
-**SRS-NFR-102, JO, Persistent account-data durability.** After the system confirms that account data has been successfully saved, 100% of the committed account state required by this SRS shall remain stored and available after logout, browser-tab closure, disconnection, and later login unless that state is subsequently changed or deleted by another valid system operation. Persistent account state includes the player's first name, last name, birthday, username, password hash and authentication data, virtual-currency balance, bio, profile photo, total and per-game money-won and money-lost statistics, owned cosmetics, currently equipped cosmetics, Daily Login Box claim history and cooldown state, username-change and username-reservation state, and account-deletion state.
+**SRS-NFR-102, JO, Persistent account-data durability.** After the system confirms that account data has been successfully saved, 100% of the committed account state required by this SRS shall remain stored and available after logout, browser-tab closure, disconnection, and later login unless that state is subsequently changed or deleted by another valid system operation. Persistent account state includes the player's first name, last name, birthday, username, password hash and authentication data, virtual-currency balance, bio, profile photo, total and per-game money-won and money-lost statistics, owned cosmetics, currently equipped cosmetics, Daily Login Box claim history and cooldown state, wishing-fountain wish history, username-change and username-reservation state, and account-deletion state.
 
-*Traces to: UR-101, UR-102, UR-103, UR-104, UR-106, UR-109, UR-110, UR-112, UR-113, UR-114, UR-115, UR-117, UR-118, UR-119, UR-120, UR-128*
+*Traces to: UR-101, UR-102, UR-103, UR-104, UR-106, UR-109, UR-110, UR-112, UR-113, UR-114, UR-115, UR-117, UR-118, UR-119, UR-120, UR-128, UR-129*
 
 **SRS-NFR-103, JO, Blind-box transaction reliability.** For each successfully confirmed blind-box purchase, the system shall persist exactly one purchase-price deduction and exactly one reward outcome, even if the player disconnects or closes the browser tab before viewing the result.
 

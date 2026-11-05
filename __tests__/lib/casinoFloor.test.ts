@@ -10,7 +10,9 @@ import {
   FLOOR_OBJECTS,
   FOYER_PLANTS,
   KIOSKS,
+  atFountain,
   atKiosk,
+  fountainStandingSpots,
   atCasinoDoorsFromLobby,
   clearLine,
   deskWalk,
@@ -658,6 +660,31 @@ describe('casino doors for guests (SRS-103.15)', () => {
         const { points } = walk!;
         for (let i = 1; i < points.length; i++) expect(unblocked(points[i - 1]!, points[i]!), `${x},${y}: ${JSON.stringify(points)}`).toBe(true);
       }
+    }
+  });
+});
+
+describe('the wishing fountain (SRS-129.1)', () => {
+  const lobbyMiddle = { x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) };
+  const centre = (tile: Point) => ({ x: tile.x + 0.5, y: tile.y + 0.5 });
+
+  it('is in reach from where walking at it stops, at its rim', () => {
+    let at = LOBBY_MIDDLE;
+    for (let i = 0; i < 400; i++) at = moveWithCollisions(at, { x: 0.05, y: 0 });
+    expect(atFountain(at)).toBe(true);
+  });
+
+  it('is out of reach from the middle of the lobby, and from the casino floor', () => {
+    expect(atFountain(LOBBY_MIDDLE)).toBe(false);
+    expect(atFountain({ x: START.x + 0.5, y: START.y + 0.5 })).toBe(false);
+  });
+
+  it('has somewhere open to stand round it, each in its reach and reachable from the middle of the lobby', () => {
+    const spots = fountainStandingSpots();
+    expect(spots.length).toBeGreaterThan(3);
+    for (const spot of spots) {
+      expect(atFountain(centre(spot))).toBe(true);
+      expect(findPath(lobbyMiddle, [spot]), JSON.stringify(spot)).not.toBeNull();
     }
   });
 });

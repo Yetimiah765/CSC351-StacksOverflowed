@@ -1776,6 +1776,10 @@ flowchart LR
 
 *Traces to: UR-129*
 
+**SRS-129.3, JO, Wish reward.** For each wish, the server shall choose at random whether to return 2 coins, with a 60% chance, or nothing. Taking the coin, returning any reward and recording the wish shall succeed or fail together; if they fail, the system shall show an error, leave the player's balance as it was, and keep the day's wish available.
+
+*Traces to: UR-110, UR-129*
+
 # JO Non-Functional Requirements
 
 **SRS-NFR-101, JO, Password security.** The system shall store player passwords using salted bcrypt hashing with a cost factor of at least 10. The system shall not store passwords in plaintext or reversibly encrypted form and shall retain zero plaintext password copies in persistent storage or application logs after registration, login, password-change, or password-verification operations.

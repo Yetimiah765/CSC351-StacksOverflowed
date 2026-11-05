@@ -22,6 +22,7 @@ import {
 } from '../../lib/casinoFloor';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm, type HandOver } from '../../lib/checkIn';
+import { formatCountdown } from '../../lib/dailyLoginBox';
 import { logOut, takeWalkOut } from '../../lib/logOut';
 import { playHref, useSignedIn } from '../useSignedIn';
 import CheckInTablet from './CheckInTablet';
@@ -352,19 +353,55 @@ export default function CasinoFloor() {
   // Making a wish at the lobby's fountain (SRS-129.1): in reach of it, a
   // logged-in player is offered a wish for 1 coin. Once it's made (or
   // refused: no coins, or already made today), the help box says so until
-  // they step away; if it couldn't be made, they can try again.
+  // they step away; if it couldn't be made, they can try again. Coming up
+  // to it, the page asks whether they've made today's wish, and if so the
+  // box counts down to the next one (SRS-129.2) instead of offering one.
   const [nearFountain, setNearFountain] = useState(false);
   const nearFountainRef = useRef(false);
   const [makingWish, setMakingWish] = useState(false);
   const [wishNote, setWishNote] = useState<{ text: string; final: boolean } | null>(null);
+  // When the next wish can be made, by this browser's clock (from the
+  // server's msRemaining), while today's has been; and the clock, ticking
+  // while it's shown.
+  const [nextWish, setNextWish] = useState<number | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (!nearFountain || !member) return;
+    let cancelled = false;
+    fetch('/api/wishing-fountain', { headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
+      .then((res) => (res.ok ? (res.json() as Promise<{ wishedToday: boolean; msRemaining: number }>) : null))
+      .then((status) => {
+        if (!cancelled && status) setNextWish(status.wishedToday ? Date.now() + status.msRemaining : null);
+      })
+      // Not known: offer the wish; the server refuses a second one anyway.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [nearFountain, member]);
+  useEffect(() => {
+    if (!nearFountain || nextWish === null) return;
+    setClock(Date.now());
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setClock(now);
+      if (now >= nextWish) {
+        // A new day: they can wish again.
+        setNextWish(null);
+        setWishNote(null);
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [nearFountain, nextWish]);
   const wish = useRef<() => void>(() => {});
   wish.current = () => {
-    if (!member || makingWish || wishNote?.final || checkingIn || leaving || playing) return;
+    if (!member || makingWish || wishNote?.final || nextWish !== null || checkingIn || leaving || playing) return;
     setMakingWish(true);
     setWishNote(null);
     fetch('/api/wishing-fountain', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
       .then(async (res) => {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const body = (await res.json().catch(() => ({}))) as { error?: string; msRemaining?: number };
+        if (typeof body.msRemaining === 'number' && body.msRemaining > 0) setNextWish(Date.now() + body.msRemaining);
         if (res.status === 401) {
           // The session ended elsewhere: a guest now, where they stand.
           localStorage.removeItem('player_token');
@@ -603,14 +640,18 @@ export default function CasinoFloor() {
             <button
               type="button"
               onClick={() => wish.current()}
-              disabled={makingWish || Boolean(wishNote?.final)}
+              disabled={makingWish || Boolean(wishNote?.final) || nextWish !== null}
               className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm disabled:cursor-default sm:left-5 sm:top-5"
             >
               <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Wishing fountain</span>
               <span className="mt-1 block text-sm leading-snug text-slate-200" aria-live="polite">
-                {wishNote?.text ?? 'Toss in a coin and make a wish.'}
+                {wishNote?.text ?? (nextWish !== null ? "You've made today's wish." : 'Toss in a coin and make a wish.')}
               </span>
-              {wishNote?.final ? null : (
+              {nextWish !== null ? (
+                <span className="mt-2 block text-sm text-slate-300">
+                  Your next wish is in <span className="font-mono tabular-nums text-amber-200">{formatCountdown(nextWish - clock)}</span>
+                </span>
+              ) : wishNote?.final ? null : (
                 <span className="mt-2 block text-sm">
                   {makingWish ? (
                     <span className="text-slate-400">Making your wish…</span>

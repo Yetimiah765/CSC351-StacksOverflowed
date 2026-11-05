@@ -33,6 +33,13 @@ vi.mock('../../lib/supabase', () => ({
   })),
 }));
 
+// The roll behind each wish's reward (0-59 gives 2 coins back, SRS-129.3); each test can set it.
+const randomInt = vi.fn(() => 59);
+vi.mock('crypto', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('crypto')>()),
+  randomInt: (...args: unknown[]) => (randomInt as (...a: unknown[]) => number)(...args),
+}));
+
 import { getSupabaseClient } from '../../lib/supabase';
 import { GET, POST } from '../../app/api/wishing-fountain/route';
 
@@ -58,6 +65,8 @@ describe('Wishing fountain API route (UR-129)', () => {
     tables.fountain_wishes.maybeSingleResult = { data: null, error: null };
     tables.fountain_wishes.eq.mockClear();
     rpc.mockReset();
+    randomInt.mockReset();
+    randomInt.mockReturnValue(59);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(NOW));
   });
@@ -102,13 +111,29 @@ describe('Wishing fountain API route (UR-129)', () => {
   });
 
   it("makes the logged-in player's wish for 1 coin in one database call (SRS-129.1)", async () => {
-    rpc.mockResolvedValue({ data: { status: 'wished', reward: 0, balance: 999, next_wish_at: NEXT_WISH_AT }, error: null });
+    rpc.mockResolvedValue({ data: { status: 'wished', reward: 2, balance: 1001, next_wish_at: NEXT_WISH_AT }, error: null });
 
     const response = await POST(req());
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ reward: 0, balance: 999, nextWishAt: NEXT_WISH_AT, msRemaining: UNTIL_MIDNIGHT });
-    expect(rpc).toHaveBeenCalledWith('fn_make_wish', { p_player_id: 1, p_reward: 0 });
+    expect(await response.json()).toEqual({ reward: 2, balance: 1001, nextWishAt: NEXT_WISH_AT, msRemaining: UNTIL_MIDNIGHT });
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it('picks the reward on the server: 2 coins back for rolls 0-59 of 100, nothing for 60-99 (SRS-129.3)', async () => {
+    rpc.mockResolvedValue({ data: { status: 'wished', reward: 0, balance: 999, next_wish_at: NEXT_WISH_AT }, error: null });
+    for (const [roll, reward] of [
+      [0, 2],
+      [59, 2],
+      [60, 0],
+      [99, 0],
+    ]) {
+      randomInt.mockReturnValue(roll!);
+      rpc.mockClear();
+      await POST(req());
+      expect(randomInt).toHaveBeenLastCalledWith(100);
+      expect(rpc, `roll ${roll}`).toHaveBeenCalledWith('fn_make_wish', { p_player_id: 1, p_reward: reward });
+    }
   });
 
   it('tells a player with no coins they need 1 (SRS-129.1)', async () => {
@@ -138,7 +163,7 @@ describe('Wishing fountain API route (UR-129)', () => {
     expect((await POST(req())).status).toBe(404);
   });
 
-  it('returns a 500, with nothing saved, when the database call fails', async () => {
+  it('returns a 500, with nothing saved and the wish still to make, when the database call fails (SRS-129.3)', async () => {
     rpc.mockResolvedValue({ data: null, error: { message: 'connection reset' } });
     vi.spyOn(console, 'error').mockImplementation(() => {});
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { msUntil, nextWishAt, wishDay } from '../../lib/wishingFountain';
+import { WISH_REWARD, WISH_WIN_PERCENT, msUntil, nextWishAt, pickWishReward, wishDay } from '../../lib/wishingFountain';
 
 const at = (iso: string) => Date.parse(iso);
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -31,5 +31,19 @@ describe('one wish a day, midnight to midnight Eastern time (SRS-129.2)', () => 
     expect(msUntil('2026-11-05T05:00:00+00:00', now)).toBe((5 * 60 + 40) * 60 * 1000);
     expect(msUntil(now - 1000, now)).toBe(0);
     expect(msUntil(null, now)).toBe(0);
+  });
+});
+
+describe('the wish reward (SRS-129.3)', () => {
+  it('gives 2 coins back for 60 of the 100 equally likely rolls, and nothing for the other 40', () => {
+    const rewards = Array.from({ length: 100 }, (_, roll) => pickWishReward(roll));
+    expect(rewards.filter((reward) => reward === WISH_REWARD)).toHaveLength(WISH_WIN_PERCENT);
+    expect(rewards.filter((reward) => reward === 0)).toHaveLength(100 - WISH_WIN_PERCENT);
+    expect(WISH_REWARD).toBe(2);
+    expect(WISH_WIN_PERCENT).toBe(60);
+  });
+
+  it('refuses a roll outside 0-99', () => {
+    for (const roll of [-1, 100, 2.5, Number.NaN]) expect(() => pickWishReward(roll)).toThrow(RangeError);
   });
 });

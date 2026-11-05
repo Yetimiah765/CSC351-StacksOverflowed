@@ -1,7 +1,8 @@
+import { randomInt } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../lib/auth';
-import { msUntil, nextWishAt, wishDay } from '../../../lib/wishingFountain';
+import { msUntil, nextWishAt, pickWishReward, wishDay } from '../../../lib/wishingFountain';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -57,10 +58,12 @@ interface WishResult {
   next_wish_at?: string;
 }
 
-// SRS-129.1: makes a wish at the lobby's fountain for 1 coin.
-// fn_make_wish takes the coin and records the wish in one transaction, and
-// refuses a player with no coins, or one who has already wished today
-// (SRS-129.2), saying when they can wish next.
+// SRS-129.1: makes a wish at the lobby's fountain for 1 coin. Whether 2
+// coins come back is picked here with a cryptographically secure random
+// number (SRS-129.3); the client never sends a reward. fn_make_wish then
+// takes the coin, returns the reward and records the wish in one
+// transaction, and refuses a player with no coins, or one who has already
+// wished today (SRS-129.2), saying when they can wish next.
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -68,13 +71,13 @@ export async function POST(request: Request) {
   const { playerId, errorResponse } = await requirePlayerId(request, supabase);
   if (errorResponse) return errorResponse;
 
-  // Nothing comes back for the coin.
+  const reward = pickWishReward(randomInt(100));
   const { data, error } = await supabase.rpc('fn_make_wish', {
     p_player_id: playerId,
-    p_reward: 0,
+    p_reward: reward,
   });
 
-  // Nothing was saved, so the player keeps their coin.
+  // SRS-129.3: nothing was saved, so the player keeps their coin and today's wish.
   if (error) {
     console.error('fn_make_wish failed:', error.message);
     return Response.json({ error: 'Could not make your wish. Please try again.' }, { status: 500 });

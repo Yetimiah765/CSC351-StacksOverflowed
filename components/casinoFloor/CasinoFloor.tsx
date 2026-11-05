@@ -400,7 +400,7 @@ export default function CasinoFloor() {
     setWishNote(null);
     fetch('/api/wishing-fountain', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
       .then(async (res) => {
-        const body = (await res.json().catch(() => ({}))) as { error?: string; msRemaining?: number };
+        const body = (await res.json().catch(() => ({}))) as { error?: string; msRemaining?: number; reward?: number };
         if (typeof body.msRemaining === 'number' && body.msRemaining > 0) setNextWish(Date.now() + body.msRemaining);
         if (res.status === 401) {
           // The session ended elsewhere: a guest now, where they stand.
@@ -410,7 +410,8 @@ export default function CasinoFloor() {
           setWishNote({ text: 'Your session has ended. Log in again to make a wish.', final: true });
         } else if (res.ok) {
           notifyBalanceChanged();
-          setWishNote({ text: 'You tossed a coin into the fountain.', final: true });
+          // SRS-129.3: 2 coins back, or nothing.
+          setWishNote({ text: (body.reward ?? 0) > 0 ? `Your wish came true: ${body.reward} coins back!` : 'No luck this time.', final: true });
         } else {
           setWishNote({ text: body.error ?? 'Could not make your wish. Please try again.', final: res.status !== 500 });
         }

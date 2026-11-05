@@ -1,6 +1,23 @@
 // Wishing fountain rules shared by the API route and the home page (UR-129).
 // Kept free of Node-only imports so the page can use them too.
 
+// SRS-129.3: a wish returns 2 coins with a 60% chance, otherwise nothing.
+// The database accepts only these two rewards.
+export const WISH_REWARD = 2;
+export const WISH_WIN_PERCENT = 60;
+
+/**
+ * Maps a uniformly random whole number from 0 to 99 to a wish's reward, so
+ * the 2 coins come back for exactly WISH_WIN_PERCENT of that range: 0-59
+ * gives 2 coins, 60-99 nothing.
+ */
+export function pickWishReward(roll: number): number {
+  if (!Number.isInteger(roll) || roll < 0 || roll >= 100) {
+    throw new RangeError(`roll must be a whole number from 0 to 99, got ${roll}`);
+  }
+  return roll < WISH_WIN_PERCENT ? WISH_REWARD : 0;
+}
+
 // SRS-129.2: one wish per calendar day, midnight to midnight Eastern time,
 // like the holiday blind boxes. The database enforces this too.
 export const WISH_TIME_ZONE = 'America/New_York';

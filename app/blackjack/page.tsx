@@ -167,7 +167,9 @@ function PlayingCard({ code, index }: { code: string | null; index: number }) {
         <span className="text-sm">{suit}</span>
       </div>
       <div className="absolute inset-0 flex items-center justify-center text-4xl">{suit}</div>
-      <div className="absolute bottom-1 right-1.5 flex rotate-180 flex-col items-center leading-none">
+      {/* Upright, not upside down like a paper card: turned over, a 6 read as
+          a 9 and a heart looked like a spade. */}
+      <div className="absolute bottom-1 right-1.5 flex flex-col-reverse items-center leading-none">
         <span className="text-base font-bold">{rank}</span>
         <span className="text-sm">{suit}</span>
       </div>

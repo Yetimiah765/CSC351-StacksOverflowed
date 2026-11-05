@@ -626,12 +626,17 @@ export default function Lobby({
   kioskOutlined = null,
   kioskScreens,
   onKioskClick,
+  fountainOutlined = false,
+  onFountainClick,
 }: {
   state: MutableRefObject<LobbyState>;
   /** The check-in tablet a guest is near enough to use, outlined; each tablet's screen; a click on one (SRS-103.13). */
   kioskOutlined?: number | null;
   kioskScreens?: MutableRefObject<(THREE.Object3D | null)[]>;
   onKioskClick?: (kiosk: number, event: ThreeEvent<MouseEvent>) => void;
+  /** The fountain, outlined for a player near enough to make a wish at it, and a click on it (SRS-129.1). */
+  fountainOutlined?: boolean;
+  onFountainClick?: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const north = LOBBY_NORTH_Z;
   const south = LOBBY_SOUTH_Z;
@@ -898,8 +903,8 @@ export default function Lobby({
 
         {/* The fountain, against the right wall facing the desk, under the
             roulette poster. */}
-        <group position={[doorX + FOUNTAIN.x, 0, north + FOUNTAIN.z]}>
-          <Fountain state={state} />
+        <group position={[doorX + FOUNTAIN.x, 0, north + FOUNTAIN.z]} onClick={onFountainClick}>
+          <Fountain state={state} outlined={fountainOutlined} />
         </group>
         <FloorShadow map={shadow} x={doorX + FOUNTAIN.x} z={north + FOUNTAIN.z} rx={1.45} />
 

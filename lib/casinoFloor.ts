@@ -954,6 +954,30 @@ export function kioskStandingSpots(kiosk: number): Point[] {
   return spots;
 }
 
+// ---------- the wishing fountain (SRS-129.1) ----------
+
+/** How near the fountain's rim the player must be to toss a coin in, metres. */
+export const FOUNTAIN_REACH = 0.9;
+
+/** Whether the player at `at` (in tiles) is near enough the lobby's fountain to make a wish at it. */
+export function atFountain(at: Point): boolean {
+  if (!isInLobby(at)) return false;
+  const x = (at.x - doorMiddle) * TILE_METRES;
+  const z = (at.y - FRONT_WALL_Y) * TILE_METRES;
+  return Math.hypot(x - FOUNTAIN.x, z - FOUNTAIN.z) - FOUNTAIN.radius < FOUNTAIN_REACH;
+}
+
+/** The open tiles near enough the fountain to make a wish from, where a click on it walks the player to. */
+export function fountainStandingSpots(): Point[] {
+  const spots: Point[] = [];
+  for (let y = Math.ceil(FRONT_WALL_Y); y < FRONT_WALL_Y + LOBBY.depth; y++) {
+    for (let x = Math.floor(doorMiddle - LOBBY.width / 2); x < doorMiddle + LOBBY.width / 2; x++) {
+      if (!isBlocked(x, y) && atFountain({ x: x + 0.5, y: y + 0.5 })) spots.push({ x, y });
+    }
+  }
+  return spots;
+}
+
 
 // ---------- casino doors for guests (SRS-103.15) ----------
 // A guest can't go through the casino's doors (they're solid from the

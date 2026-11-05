@@ -349,6 +349,39 @@ export default function CasinoFloor() {
     setCheckingIn(false);
   }
 
+  // Making a wish at the lobby's fountain (SRS-129.1): in reach of it, a
+  // logged-in player is offered a wish for 1 coin. Once it's made (or
+  // refused: no coins, or already made today), the help box says so until
+  // they step away; if it couldn't be made, they can try again.
+  const [nearFountain, setNearFountain] = useState(false);
+  const nearFountainRef = useRef(false);
+  const [makingWish, setMakingWish] = useState(false);
+  const [wishNote, setWishNote] = useState<{ text: string; final: boolean } | null>(null);
+  const wish = useRef<() => void>(() => {});
+  wish.current = () => {
+    if (!member || makingWish || wishNote?.final || checkingIn || leaving || playing) return;
+    setMakingWish(true);
+    setWishNote(null);
+    fetch('/api/wishing-fountain', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 401) {
+          // The session ended elsewhere: a guest now, where they stand.
+          localStorage.removeItem('player_token');
+          setSignedInHere(false);
+          notifyBalanceChanged();
+          setWishNote({ text: 'Your session has ended. Log in again to make a wish.', final: true });
+        } else if (res.ok) {
+          notifyBalanceChanged();
+          setWishNote({ text: 'You tossed a coin into the fountain.', final: true });
+        } else {
+          setWishNote({ text: body.error ?? 'Could not make your wish. Please try again.', final: res.status !== 500 });
+        }
+      })
+      .catch(() => setWishNote({ text: 'Could not make your wish. Please try again.', final: false }))
+      .finally(() => setMakingWish(false));
+  };
+
   // Seated, the camera over the table: open the game — guests go to log in
   // (SRS-108.3). The scene stops drawing, holding that last frame while the
   // page (already prefetched) loads.
@@ -372,7 +405,7 @@ export default function CasinoFloor() {
 
   // Keys: walk while held; Space or Enter checks in at the tablet in reach
   // (or, for a guest, at the casino's doors), leaves through the casino's
-  // doors, or plays the game in reach.
+  // doors, makes a wish at the fountain, or plays the game in reach.
   useEffect(() => {
     const typing = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -398,6 +431,7 @@ export default function CasinoFloor() {
         event.preventDefault();
         if (nearKioskRef.current !== null || nearDoorsRef.current === 'lobby') checkIn.current();
         else if (nearDoorsRef.current === 'floor') leave.current();
+        else if (nearFountainRef.current) wish.current();
         else if (nearRef.current) play.current(nearRef.current);
       }
     };
@@ -512,6 +546,12 @@ export default function CasinoFloor() {
                 checkingIn={checkingIn}
                 checkInAtOnce={prefersReducedMotion() || playAfter !== null}
                 onAtKiosk={() => setTabletOpen(true)}
+                onNearFountain={(near) => {
+                  nearFountainRef.current = near;
+                  setNearFountain(near);
+                  if (!near) setWishNote(null);
+                }}
+                onWish={() => wish.current()}
                 paused={opening || tabletOpen}
               />
             </div>
@@ -557,6 +597,30 @@ export default function CasinoFloor() {
               <span className="mt-2 block text-sm">
                 Press <Key>Space</Key> to log out
               </span>
+            </button>
+          ) : nearFountain && member && !checkingIn && !playing && !leaving ? (
+            // At the lobby's fountain: a wish for 1 coin (SRS-129.1).
+            <button
+              type="button"
+              onClick={() => wish.current()}
+              disabled={makingWish || Boolean(wishNote?.final)}
+              className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm disabled:cursor-default sm:left-5 sm:top-5"
+            >
+              <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Wishing fountain</span>
+              <span className="mt-1 block text-sm leading-snug text-slate-200" aria-live="polite">
+                {wishNote?.text ?? 'Toss in a coin and make a wish.'}
+              </span>
+              {wishNote?.final ? null : (
+                <span className="mt-2 block text-sm">
+                  {makingWish ? (
+                    <span className="text-slate-400">Making your wish…</span>
+                  ) : (
+                    <>
+                      Press <Key>Space</Key> to make a wish (1 coin)
+                    </>
+                  )}
+                </span>
+              )}
             </button>
           ) : near && label && !playing && !leaving ? (
             // The help box, top left, like an open-world game's prompts.

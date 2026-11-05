@@ -979,6 +979,31 @@ export function fountainStandingSpots(): Point[] {
 }
 
 
+// ---------- the coin toss (SRS-129.4) ----------
+
+/** How far from the fountain's middle a tossed coin lands, metres: in the basin's water, clear of the curtain falling from the bowl above (0.73 m out), and far enough in from the basin's edge (0.97 m) that its wall doesn't hide the coin on the bottom. */
+export const COIN_LANDING_RADIUS = 0.8;
+
+/** The middle of the lobby's fountain, in tiles. */
+export function fountainCentre(): Point {
+  return { x: doorMiddle + FOUNTAIN.x / TILE_METRES, y: FRONT_WALL_Y + FOUNTAIN.z / TILE_METRES };
+}
+
+/**
+ * Where a coin tossed from `from` (tiles; null for no one in particular: the
+ * fountain's front, facing the lobby) lands in the basin on `day`
+ * (YYYY-MM-DD), in metres across and along from the fountain's middle: on
+ * the thrower's side, a little to one side or the other depending on the day.
+ */
+export function coinLanding(from: Point | null, day: string): { x: number; z: number } {
+  const centre = fountainCentre();
+  const towards = from ? Math.atan2(from.y - centre.y, from.x - centre.x) : Math.PI;
+  let hash = 0;
+  for (const character of day) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  const angle = towards + ((hash % 1000) / 1000 - 0.5) * 0.7;
+  return { x: Math.cos(angle) * COIN_LANDING_RADIUS, z: Math.sin(angle) * COIN_LANDING_RADIUS };
+}
+
 // ---------- casino doors for guests (SRS-103.15) ----------
 // A guest can't go through the casino's doors (they're solid from the
 // lobby's side). Using them walks the guest to the front desk instead, to

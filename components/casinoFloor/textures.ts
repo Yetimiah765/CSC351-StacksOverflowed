@@ -940,6 +940,46 @@ export function glowTexture() {
   return texture(element);
 }
 
+/** A glint: a four-pointed star of light with a soft middle, for a coin catching the light. Drawn additively. */
+export function glintTexture() {
+  const size = 128;
+  const { element, ctx } = canvas(size, size);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, size, size);
+  const middle = size / 2;
+  const glow = ctx.createRadialGradient(middle, middle, 0, middle, middle, middle * 0.45);
+  glow.addColorStop(0, '#ffffff');
+  glow.addColorStop(0.4, '#8a7a50');
+  glow.addColorStop(1, '#000000');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = 'lighter';
+  for (const [long, wide] of [
+    [middle, 3.2],
+    [middle * 0.55, 2],
+  ] as const) {
+    for (const turn of long === middle ? [0, Math.PI / 2] : [Math.PI / 4, -Math.PI / 4]) {
+      ctx.save();
+      ctx.translate(middle, middle);
+      ctx.rotate(turn);
+      const ray = ctx.createLinearGradient(-long, 0, long, 0);
+      ray.addColorStop(0, 'rgba(255,255,255,0)');
+      ray.addColorStop(0.5, 'rgba(255,250,225,1)');
+      ray.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = ray;
+      ctx.beginPath();
+      ctx.moveTo(-long, 0);
+      ctx.lineTo(0, -wide);
+      ctx.lineTo(long, 0);
+      ctx.lineTo(0, wide);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+  return texture(element);
+}
+
 /** An uplight's wash on a wall: brightest at the bottom middle, spreading and fading as it rises. Drawn additively. */
 export function washTexture() {
   const w = 128;

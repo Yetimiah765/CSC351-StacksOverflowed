@@ -64,3 +64,24 @@ export function msUntil(at: string | number | null, now: number = Date.now()): n
   if (at === null) return 0;
   return Math.max(0, (typeof at === 'number' ? at : Date.parse(at)) - now);
 }
+
+// SRS-129.4: where today's coin lies in the fountain once tossed, metres from
+// its middle, kept for the browser tab (sessionStorage) as { day, x, z }, so
+// coming back to the home page shows it where it sank.
+export const WISH_COIN_KEY = 'wishing-fountain-coin';
+
+export function serializeCoinSpot(spot: { x: number; z: number }, day: string): string {
+  return JSON.stringify({ day, x: spot.x, z: spot.z });
+}
+
+/** The remembered coin, if it was tossed on `day`. */
+export function parseCoinSpot(raw: string | null, day: string): { x: number; z: number } | null {
+  if (!raw) return null;
+  try {
+    const saved = JSON.parse(raw) as { day?: unknown; x?: unknown; z?: unknown };
+    if (saved.day !== day || typeof saved.x !== 'number' || typeof saved.z !== 'number' || !Number.isFinite(saved.x) || !Number.isFinite(saved.z)) return null;
+    return { x: saved.x, z: saved.z };
+  } catch {
+    return null;
+  }
+}

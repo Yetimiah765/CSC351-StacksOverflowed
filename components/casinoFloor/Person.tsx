@@ -77,6 +77,18 @@ interface PersonProps {
   hands?: { y: number; z: number };
   /** For the player: how far they've sat down (read every frame), and where the table top is from the seat. */
   seat?: MutableRefObject<SeatPose>;
+  /** For the player: tossing a coin into the fountain (read every frame; where the right hand is gets written back). */
+  toss?: MutableRefObject<TossPose>;
+}
+
+/** The right arm throwing a coin (SRS-129.4). */
+export interface TossPose {
+  /** 0 the clips' arm, 1 the throw's; in between blends the two. */
+  amount: number;
+  /** Where the throw has the right wrist, in the body's own space (metres; +x is their left, +z ahead). */
+  hand: THREE.Vector3;
+  /** Where the right hand's fingers are, world space: written every frame, for the coin to sit in. */
+  at: THREE.Vector3;
 }
 
 export interface SeatPose {
@@ -195,7 +207,7 @@ export default function Person(props: PersonProps) {
   );
 }
 
-function Body({ who, motion, idleOffset = 0, pose = 'idle', hands = { y: 0.9, z: 0.36 }, seat }: PersonProps) {
+function Body({ who, motion, idleOffset = 0, pose = 'idle', hands = { y: 0.9, z: 0.36 }, seat, toss }: PersonProps) {
   const { scene } = useGLTF(MODELS[who]);
   const clips = useClips(who);
 
@@ -349,6 +361,30 @@ function Body({ who, motion, idleOffset = 0, pose = 'idle', hands = { y: 0.9, z:
         bone.quaternion.copy(rotation).slerp(seated, k);
         bone.position.copy(position.lerp(bone.position, k));
       }
+    }
+
+    // Tossing a coin: the right arm reaches the wrist to where the throw has
+    // it, blended in by `amount`, the elbow out to the side and down; then
+    // where the fingers are, for the coin.
+    const tossing = toss?.current;
+    const upper = bones.get('RightArm');
+    const fore = bones.get('RightForeArm');
+    const hand = bones.get('RightHand');
+    if (tossing && upper && fore && hand) {
+      if (tossing.amount > 0.001) {
+        const before = [upper, fore, hand].map((bone) => bone.quaternion.clone());
+        body.updateMatrixWorld(true);
+        const facing = body.getWorldQuaternion(new THREE.Quaternion());
+        const target = tossing.hand.clone().divideScalar(SCALE[who]).applyMatrix4(body.matrixWorld);
+        reach(upper, fore, hand, target, new THREE.Vector3(-0.7, -0.35, -0.45).applyQuaternion(facing).normalize());
+        const k = Math.min(1, tossing.amount);
+        [upper, fore, hand].forEach((bone, i) => {
+          const thrown = bone.quaternion.clone();
+          bone.quaternion.copy(before[i]!).slerp(thrown, k);
+        });
+        upper.updateMatrixWorld(true);
+      }
+      (bones.get('RightHandMiddle1') ?? hand).getWorldPosition(tossing.at);
     }
   });
 

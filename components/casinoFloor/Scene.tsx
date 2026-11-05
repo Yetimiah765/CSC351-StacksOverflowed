@@ -25,7 +25,9 @@ import {
   kioskStandingSpots,
   entranceWalk,
   exitWalk,
+  coinLanding,
   findPath,
+  fountainCentre,
   fountainStandingSpots,
   isBlocked,
   isInLobby,
@@ -46,6 +48,7 @@ import {
   type StoodSpot,
   type TakenSeat,
 } from '../../lib/casinoFloor';
+import { wishDay } from '../../lib/wishingFountain';
 import {
   Bar,
   BlackjackTable,
@@ -57,8 +60,10 @@ import {
   SlotMachines,
   SportsBar,
 } from './Furniture';
-import Person, { type Motion, type SeatPose } from './Person';
+import Person, { type Motion, type SeatPose, type TossPose } from './Person';
 import { compileInBackground } from './compile';
+import CoinToss, { noCoin, type CoinFx } from './CoinToss';
+import { BASIN_FLOOR, BASIN_WATER } from './Fountain';
 import Highlight from './Highlight';
 import CasinoFront, { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
 import Lobby, { LOBBY_HALF_WIDTH, LOBBY_HEIGHT, LOBBY_NORTH_Z, LOBBY_SOUTH_Z, type LobbyState } from './Lobby';
@@ -151,6 +156,12 @@ interface Props {
   /** Came in reach of the lobby's fountain, or went out of reach; a click on it in reach makes a wish (SRS-129.1). */
   onNearFountain?: (near: boolean) => void;
   onWish?: () => void;
+  /** Set by the page once a wish is made: the scene plays the coin toss (SRS-129.4), or with `tossAtOnce` (reduced motion) goes straight to its end; then `onTossed`, with where the coin lies (metres from the fountain's middle). */
+  tossing?: boolean;
+  tossAtOnce?: boolean;
+  onTossed?: (spot: { x: number; z: number }) => void;
+  /** Where today's coin lies on the bottom of the fountain (metres from its middle), or null for none. */
+  restingCoin?: { x: number; z: number } | null;
   /** Where the player last stood in this tab, to start them there (SRS-107.7). */
   spot?: StoodSpot | null;
   /** Where the player stands now, every so often while they walk about (and as the page closes), to remember. */
@@ -225,6 +236,94 @@ interface KioskVisit {
 const KIOSK_SECONDS = 1.4;
 /** How far in front of the tablet's screen the camera stops, metres (just past the camera's near plane). */
 const KIOSK_VIEW = 0.15;
+
+/**
+ * Tossing a coin into the fountain after making a wish (SRS-129.4). It runs
+ * on its own clock, `s`, which slows down while the coin's in the air and
+ * splashing: the player turns to the fountain and the camera moves over
+ * their shoulder; they wind up and throw; the camera follows the coin,
+ * close up, flipping through the air into the water; it splashes, then
+ * sinks to the bottom, the camera looking down at it; and the camera slowly
+ * pulls back to behind the player. Any key or a click skips to the end.
+ */
+interface CoinTossPlan {
+  s: number;
+  skip: boolean;
+  /** Where it lands, metres from the fountain's middle, and in the world, on the water and on the bottom. */
+  spot: { x: number; z: number };
+  land: THREE.Vector3;
+  rest: THREE.Vector3;
+  /** Which way the player throws (level), and their right. */
+  ahead: THREE.Vector3;
+  right: THREE.Vector3;
+  /** Where the coin leaves their hand, once it has. */
+  release: THREE.Vector3 | null;
+  /** The camera where the toss began; above the water looking down at the splash; and closer, looking down at the coin on the bottom. */
+  from: CameraPose;
+  splashView: CameraPose;
+  bottomView: CameraPose;
+}
+
+type CameraPose = { position: THREE.Vector3; look: THREE.Vector3 };
+
+/** The toss's moments on its own clock, seconds: the coin leaves the hand, lands, has finished splashing, reaches the bottom; the camera starts back, and is back. */
+const TOSS = { release: 0.8, landed: 1.35, splashed: 1.75, sunk: 3.15, held: 3.6, end: 6.2 };
+/** How fast the toss's clock runs against real time: slowed to a quarter while the coin's in the air, easing back as it splashes. */
+function tossRate(s: number) {
+  if (s < TOSS.release) return 1;
+  if (s < TOSS.release + 0.06) return THREE.MathUtils.lerp(1, 0.25, (s - TOSS.release) / 0.06);
+  if (s < TOSS.landed) return 0.25;
+  if (s < TOSS.splashed) return THREE.MathUtils.lerp(0.25, 1, (s - TOSS.landed) / (TOSS.splashed - TOSS.landed));
+  return 1;
+}
+/** How high over the straight line from the hand to the water the coin goes, metres, and how many times it turns over on the way. */
+const TOSS_ARC = 0.35;
+const TOSS_FLIPS = 3.5;
+
+/** A point `y` metres up, `spot` metres from the fountain's middle, in the world. */
+function fountainPoint(spot: { x: number; z: number }, y: number) {
+  const centre = fountainCentre();
+  const [x, z] = toWorld(centre.x, centre.y);
+  return new THREE.Vector3(x + spot.x, y, z + spot.z);
+}
+
+function planToss(at: Point, from: CameraPose, atOnce: boolean): CoinTossPlan {
+  const spot = coinLanding(at, wishDay());
+  const land = fountainPoint(spot, BASIN_WATER);
+  const [px, pz] = toWorld(at.x, at.y);
+  const ahead = new THREE.Vector3(land.x - px, 0, land.z - pz).normalize();
+  const right = new THREE.Vector3().crossVectors(ahead, new THREE.Vector3(0, 1, 0)).normalize();
+  const rest = fountainPoint(spot, BASIN_FLOOR + 0.004);
+  return {
+    s: 0,
+    skip: atOnce,
+    spot,
+    land,
+    rest,
+    ahead,
+    right,
+    release: null,
+    from: { position: from.position.clone(), look: from.look.clone() },
+    // (Both well above the basin's rim, which would hide the water from lower down.)
+    splashView: { position: land.clone().addScaledVector(ahead, -0.25).addScaledVector(right, 0.18).setY(BASIN_WATER + 0.38), look: land.clone() },
+    bottomView: { position: rest.clone().addScaledVector(ahead, -0.12).addScaledVector(right, 0.08).setY(BASIN_FLOOR + 0.55), look: rest.clone() },
+  };
+}
+
+/** Where the throw has the right wrist, `s` seconds in, in the body's own space: low in front, wound up back over the shoulder, thrown forward and up (it lets go there), then following through. */
+function tossArm(s: number) {
+  const low = new THREE.Vector3(-0.22, 1.0, 0.25);
+  const back = new THREE.Vector3(-0.3, 1.6, -0.1);
+  const out = new THREE.Vector3(-0.1, 1.45, 0.55);
+  const down = new THREE.Vector3(-0.08, 1.15, 0.45);
+  if (s < 0.55) return low.lerp(back, smooth((s - 0.2) / 0.35));
+  if (s < TOSS.release) return back.lerp(out, smooth((s - 0.55) / (TOSS.release - 0.55)));
+  return out.lerp(down, smooth((s - TOSS.release) / 0.3));
+}
+
+function blendPose(a: CameraPose, b: CameraPose, k: number): CameraPose {
+  return { position: a.position.clone().lerp(b.position, k), look: a.look.clone().lerp(b.look, k) };
+}
 
 /** Where the camera stops in front of a tablet's screen, close enough that it fills the view, and the screen's middle. */
 function closeUp(screen: THREE.Object3D) {
@@ -540,6 +639,9 @@ function Player({
   onAtKiosk,
   onNearKiosk,
   onNearFountain,
+  coinToss,
+  coinFx,
+  onTossed,
   member,
 }: {
   /** Where the player starts, in tiles (the middle of the start tile, if not given), and the way they face (into the room). */
@@ -570,12 +672,17 @@ function Player({
   onAtKiosk?: () => void;
   onNearKiosk: (kiosk: number | null) => void;
   onNearFountain: (near: boolean) => void;
+  /** Tossing a coin into the fountain (SRS-129.4): 'asked' (or 'asked at once', skipped from the start) until Player plans it; and the coin it moves. */
+  coinToss: MutableRefObject<CoinTossPlan | 'asked' | 'asked at once' | null>;
+  coinFx: MutableRefObject<CoinFx>;
+  onTossed?: (spot: { x: number; z: number }) => void;
   /** Logged in: the casino's doors open for them from the lobby (SRS-103.17). */
   member: boolean;
 }) {
   const body = useRef<THREE.Group>(null);
   const motion = useRef<Motion>({ speed: 0 });
   const seat = useRef<SeatPose>({ amount: 0, handsY: 0.85, handsZ: 0.4 });
+  const tossPose = useRef<TossPose>({ amount: 0, hand: new THREE.Vector3(), at: new THREE.Vector3() });
   // Position in tiles (the middle of the start tile), and the way they face.
   const position = useRef<Point>(start ?? { x: START.x + 0.5, y: START.y + 0.5 });
   // The camera's put straight into place the first time it follows, rather
@@ -773,6 +880,94 @@ function Player({
       if (body.current) {
         body.current.position.set(wx, 0, wz);
         body.current.rotation.y = heading.current;
+      }
+      return;
+    }
+
+    // Tossing a coin into the fountain (SRS-129.4): the player isn't
+    // steered, the toss plays out; a key or a click (see Floor) skips it.
+    let toss = coinToss.current;
+    if (toss === 'asked' || toss === 'asked at once') {
+      toss = planToss(position.current, { position: view.position, look: lookAt.current }, toss === 'asked at once');
+      coinToss.current = toss;
+      path.current = [];
+      // The camera's to end up behind them, facing the fountain.
+      camera.current.yaw = Math.atan2(-toss.ahead.x, -toss.ahead.z);
+    }
+    if (toss) {
+      toss.s = toss.skip ? TOSS.end : Math.min(TOSS.end, toss.s + delta * tossRate(toss.s));
+      const s = toss.s;
+      const [wx, wz] = toWorld(position.current.x, position.current.y);
+      motion.current.speed = 0;
+      turnTowards(Math.atan2(toss.ahead.x, toss.ahead.z), 8);
+      if (body.current) {
+        body.current.position.set(wx, 0, wz);
+        body.current.rotation.y = heading.current;
+      }
+      // The arm: in from the clips' pose as they wind up, back out after the throw.
+      tossPose.current.amount = smooth((s - 0.15) / 0.15) * (1 - smooth((s - 0.9) / 0.4));
+      tossPose.current.hand.copy(tossArm(s));
+
+      // The coin: in their hand, then through the air, into the water, down to the bottom.
+      const fx = coinFx.current;
+      fx.tilt = 0;
+      if (s < TOSS.release) {
+        fx.shown = s > 0.2;
+        fx.position.copy(tossPose.current.at);
+        fx.spin = 0;
+        fx.under = 0;
+        fx.splashAt = null;
+        fx.resting = false;
+      } else if (s < TOSS.landed) {
+        if (!toss.release) toss.release = tossPose.current.at.clone();
+        const u = (s - TOSS.release) / (TOSS.landed - TOSS.release);
+        fx.shown = true;
+        fx.position.lerpVectors(toss.release, toss.land, u);
+        fx.position.y += 4 * TOSS_ARC * u * (1 - u);
+        fx.spin = u * TOSS_FLIPS * Math.PI * 2;
+      } else {
+        const k = smooth((s - TOSS.landed) / (TOSS.sunk - TOSS.landed));
+        fx.shown = true;
+        fx.splashAt = toss.land;
+        fx.splash = THREE.MathUtils.clamp((s - TOSS.landed) / (TOSS.splashed - TOSS.landed), 0, 1);
+        fx.position.lerpVectors(toss.land, toss.rest, k);
+        fx.spin = TOSS_FLIPS * Math.PI * 2;
+        // Rocking as it sinks, less and less.
+        fx.tilt = 0.45 * (1 - k) * Math.sin(s * 9);
+        fx.under = k;
+        fx.resting = s >= TOSS.sunk;
+      }
+
+      // The camera: over their shoulder, then close up on the coin, then
+      // looking down at it in the water, then slowly back behind them.
+      const follow = followPose(wx, wz, 1.45);
+      const shoulder: CameraPose = {
+        position: new THREE.Vector3(wx, 1.75, wz).addScaledVector(toss.ahead, -1.6).addScaledVector(toss.right, 0.6),
+        look: toss.land.clone().setY(0.75),
+      };
+      const onCoin: CameraPose = {
+        position: fx.position.clone().addScaledVector(toss.ahead, -0.3).addScaledVector(toss.right, 0.32).add(new THREE.Vector3(0, 0.12, 0)),
+        look: fx.position.clone(),
+      };
+      let pose: CameraPose;
+      if (s < TOSS.release) {
+        pose = blendPose(toss.from, shoulder, smooth(s / 0.7));
+      } else if (s < TOSS.landed) {
+        // Onto the coin as it leaves the hand, then, as it comes down, up over the water to see it go in.
+        const u = (s - TOSS.release) / (TOSS.landed - TOSS.release);
+        pose = blendPose(blendPose(shoulder, onCoin, smooth(u / 0.3)), toss.splashView, smooth((u - 0.6) / 0.4));
+      } else {
+        if (s < TOSS.splashed) pose = toss.splashView;
+        else if (s < TOSS.held) pose = blendPose(toss.splashView, { position: toss.bottomView.position, look: fx.position }, smooth((s - TOSS.splashed) / 0.7));
+        else pose = blendPose(toss.bottomView, follow, smooth((s - TOSS.held) / (TOSS.end - TOSS.held)));
+      }
+      view.position.copy(pose.position);
+      lookAt.current.copy(pose.look);
+      view.lookAt(lookAt.current);
+      if (s >= TOSS.end) {
+        coinToss.current = null;
+        tossPose.current.amount = 0;
+        onTossed?.(toss.spot);
       }
       return;
     }
@@ -1106,7 +1301,7 @@ function Player({
 
   return (
     <group ref={body}>
-      <Person who="player" motion={motion} seat={seat} />
+      <Person who="player" motion={motion} seat={seat} toss={tossPose} />
     </group>
   );
 }
@@ -1432,6 +1627,10 @@ function Floor({
   onAtKiosk,
   onNearFountain,
   onWish,
+  tossing,
+  tossAtOnce,
+  onTossed,
+  restingCoin = null,
 }: Props) {
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
@@ -1505,6 +1704,20 @@ function Floor({
     },
     [onNearFountain]
   );
+  // Tossing a coin into the fountain once a wish is made (SRS-129.4):
+  // Player plans and plays it, moving the coin CoinToss draws; once it's
+  // over, today's coin lies on the bottom.
+  const coinToss = useRef<CoinTossPlan | 'asked' | 'asked at once' | null>(null);
+  useEffect(() => {
+    if (tossing && !coinToss.current) coinToss.current = tossAtOnce ? 'asked at once' : 'asked';
+  }, [tossing, tossAtOnce]);
+  const coinFx = useRef<CoinFx>(noCoin());
+  useEffect(() => {
+    if (coinToss.current) return;
+    coinFx.current = restingCoin
+      ? { ...noCoin(), shown: true, position: fountainPoint(restingCoin, BASIN_FLOOR + 0.004), spin: TOSS_FLIPS * Math.PI * 2, under: 1, resting: true }
+      : noCoin();
+  }, [restingCoin]);
   const kioskScreens = useRef<(THREE.Object3D | null)[]>([]);
   const kiosk = useRef<KioskVisit | null>(null);
   useEffect(() => {
@@ -1528,8 +1741,8 @@ function Floor({
     }
   }, [checkingIn, checkInAtOnce]);
   // Any key, or pressing anywhere on the floor's view, skips the walk in,
-  // or the walk out (but not a held key repeating, like the Space that
-  // started it).
+  // the walk out or the coin toss (but not a held key repeating, like the
+  // Space that started it).
   const { gl } = useThree();
   useEffect(() => {
     const skip = (event: Event) => {
@@ -1542,6 +1755,12 @@ function Floor({
       }
       // The walk to the desk, and the camera flying into or out of a check-in tablet, too (not while it's up close: those keys are for its forms).
       if (kiosk.current && kiosk.current.stage !== 'open' && !(event as KeyboardEvent).repeat) kiosk.current.skip = true;
+      // And the coin toss (asked for but not yet planned, it starts skipped).
+      const toss = coinToss.current;
+      if (toss && !(event as KeyboardEvent).repeat) {
+        if (typeof toss === 'object') toss.skip = true;
+        else coinToss.current = 'asked at once';
+      }
     };
     const element = gl.domElement;
     element.addEventListener('pointerdown', skip);
@@ -1565,7 +1784,7 @@ function Floor({
 
   // A click on a check-in tablet uses it when in reach (for a guest), or walks up to it.
   function handleKioskClick(which: number, event: ThreeEvent<MouseEvent>) {
-    if (walkIn.current || walkOut.current || kiosk.current || event.delta > 6 || seating.current) return;
+    if (walkIn.current || walkOut.current || kiosk.current || coinToss.current || event.delta > 6 || seating.current) return;
     event.stopPropagation();
     if (nearKioskRef.current === which && guest) onCheckIn?.();
     else walkTo(kioskStandingSpots(which));
@@ -1574,7 +1793,7 @@ function Floor({
   // A click on the fountain makes a wish when in reach (for a logged-in
   // player), or walks up to it (SRS-129.1).
   function handleFountainClick(event: ThreeEvent<MouseEvent>) {
-    if (walkIn.current || walkOut.current || kiosk.current || event.delta > 6 || seating.current) return;
+    if (walkIn.current || walkOut.current || kiosk.current || coinToss.current || event.delta > 6 || seating.current) return;
     event.stopPropagation();
     if (nearFountainRef.current && !guest) onWish?.();
     else walkTo(fountainStandingSpots());
@@ -1585,7 +1804,7 @@ function Floor({
   // desk to check in (SRS-103.15); otherwise it walks up to them, or for a
   // logged-in player in the lobby, through them (SRS-103.17).
   function handleDoorsClick(event: ThreeEvent<MouseEvent>) {
-    if (walkIn.current || walkOut.current || kiosk.current || event.delta > 6 || seating.current) return;
+    if (walkIn.current || walkOut.current || kiosk.current || coinToss.current || event.delta > 6 || seating.current) return;
     event.stopPropagation();
     if (nearDoorsRef.current === 'floor' && canLeave) onLeave?.();
     else if (nearDoorsRef.current === 'lobby' && guest) onCheckIn?.();
@@ -1594,7 +1813,7 @@ function Floor({
   }
 
   function handleFloorClick(event: ThreeEvent<MouseEvent>) {
-    if (walkIn.current || walkOut.current || kiosk.current) return; // the press that skipped the walk in or out (see above)
+    if (walkIn.current || walkOut.current || kiosk.current || coinToss.current) return; // the press that skipped the walk in or out, or the toss (see above)
     if (event.delta > 6 || seating.current) return; // a drag to look around, or already sitting down
     event.stopPropagation();
     const tile = {
@@ -1638,9 +1857,10 @@ function Floor({
         kioskOutlined={guest && !checkingIn ? nearKiosk : null}
         kioskScreens={kioskScreens}
         onKioskClick={handleKioskClick}
-        fountainOutlined={nearFountain && !guest}
+        fountainOutlined={nearFountain && !guest && !tossing}
         onFountainClick={handleFountainClick}
       />
+      <CoinToss fx={coinFx} />
       <group onClick={handleFloorClick}>
         {/* What a click lands on: the floor, the foyer out to the front wall, and the lobby beyond (SRS-107.6). */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (LOBBY_SOUTH_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
@@ -1701,6 +1921,9 @@ function Floor({
         onAtKiosk={onAtKiosk}
         onNearKiosk={handleNearKiosk}
         onNearFountain={handleNearFountain}
+        coinToss={coinToss}
+        coinFx={coinFx}
+        onTossed={onTossed}
         member={!guest}
       />
 

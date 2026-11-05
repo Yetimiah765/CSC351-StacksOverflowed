@@ -436,6 +436,11 @@ export default function CasinoFloor() {
   };
   const wish = useRef<() => void>(() => {});
   wish.current = () => {
+    // A guest logs in first, at the front desk (SRS-129.5).
+    if (guest) {
+      checkIn.current('login');
+      return;
+    }
     if (!member || makingWish || tossing || wishNote?.final || nextWish !== null || checkingIn || leaving || playing) return;
     setMakingWish(true);
     setWishNote(null);
@@ -680,6 +685,19 @@ export default function CasinoFloor() {
               <span className="mt-1 block text-sm leading-snug text-slate-200">Head back out into the lobby.</span>
               <span className="mt-2 block text-sm">
                 Press <Key>Space</Key> to log out
+              </span>
+            </button>
+          ) : nearFountain && guest && !checkingIn && !playing ? (
+            // At the lobby's fountain as a guest: log in to make a wish (SRS-129.5).
+            <button
+              type="button"
+              onClick={() => wish.current()}
+              className="absolute left-3 top-3 max-w-[min(22rem,calc(100%-1.5rem))] rounded-md bg-black/75 px-4 py-3 text-left text-white shadow-lg backdrop-blur-sm sm:left-5 sm:top-5"
+            >
+              <span className="block text-lg font-bold uppercase tracking-wider text-amber-300">Wishing fountain</span>
+              <span className="mt-1 block text-sm leading-snug text-slate-200">Log in to toss in a coin and make a wish.</span>
+              <span className="mt-2 block text-sm">
+                Press <Key>Space</Key> to log in
               </span>
             </button>
           ) : nearFountain && member && !tossing && !checkingIn && !playing && !leaving ? (

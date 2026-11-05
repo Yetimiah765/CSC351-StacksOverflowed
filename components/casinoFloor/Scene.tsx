@@ -153,7 +153,7 @@ interface Props {
   checkingIn?: boolean;
   checkInAtOnce?: boolean;
   onAtKiosk?: () => void;
-  /** Came in reach of the lobby's fountain, or went out of reach; a click on it in reach makes a wish (SRS-129.1). */
+  /** Came in reach of the lobby's fountain, or went out of reach; a click on it in reach makes a wish (SRS-129.1), or for a guest checks in to (SRS-129.5). */
   onNearFountain?: (near: boolean) => void;
   onWish?: () => void;
   /** Set by the page once a wish is made: the scene plays the coin toss (SRS-129.4), or with `tossAtOnce` (reduced motion) goes straight to its end; then `onTossed`, with where the coin lies (metres from the fountain's middle). */
@@ -1692,8 +1692,8 @@ function Floor({
     },
     [onNearKiosk]
   );
-  // In reach of the lobby's fountain, which is outlined for a logged-in
-  // player, who can make a wish at it (SRS-129.1).
+  // In reach of the lobby's fountain, which is outlined: a logged-in player
+  // can make a wish at it (SRS-129.1), a guest log in to (SRS-129.5).
   const [nearFountain, setNearFountain] = useState(false);
   const nearFountainRef = useRef(false);
   const handleNearFountain = useCallback(
@@ -1790,12 +1790,12 @@ function Floor({
     else walkTo(kioskStandingSpots(which));
   }
 
-  // A click on the fountain makes a wish when in reach (for a logged-in
-  // player), or walks up to it (SRS-129.1).
+  // A click on the fountain makes a wish when in reach (SRS-129.1; for a
+  // guest, logs in first, SRS-129.5), or walks up to it.
   function handleFountainClick(event: ThreeEvent<MouseEvent>) {
     if (walkIn.current || walkOut.current || kiosk.current || coinToss.current || event.delta > 6 || seating.current) return;
     event.stopPropagation();
-    if (nearFountainRef.current && !guest) onWish?.();
+    if (nearFountainRef.current) onWish?.();
     else walkTo(fountainStandingSpots());
   }
 
@@ -1857,7 +1857,7 @@ function Floor({
         kioskOutlined={guest && !checkingIn ? nearKiosk : null}
         kioskScreens={kioskScreens}
         onKioskClick={handleKioskClick}
-        fountainOutlined={nearFountain && !guest && !tossing}
+        fountainOutlined={nearFountain && !tossing && !checkingIn}
         onFountainClick={handleFountainClick}
       />
       <CoinToss fx={coinFx} />

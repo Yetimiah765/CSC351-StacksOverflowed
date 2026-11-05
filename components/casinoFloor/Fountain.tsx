@@ -43,7 +43,9 @@ function Rim({ r, y, tube }: { r: number; y: number; tube: number }) {
 }
 
 /** The heights of the three pools of water, and how far out each bowl's curtain falls from. */
-const BASIN_WATER = 0.48;
+/** How high the basin's water is, and its floor under it, metres (a tossed coin lands on one and sinks to the other, CoinToss.tsx). */
+export const BASIN_WATER = 0.48;
+export const BASIN_FLOOR = 0.3;
 const BOWL_WATER = 1.405;
 const TOP_WATER = 1.855;
 const JET_TOP = 2.34;
@@ -178,7 +180,7 @@ export default function Fountain({ state, outlined = false }: { state: MutableRe
       <mesh geometry={geometry.basin} castShadow receiveShadow>
         <Stone />
       </mesh>
-      <mesh position={[0, 0.3, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, BASIN_FLOOR, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[0.97, 56]} />
         <meshStandardMaterial color="#0d3d4d" roughness={0.6} />
       </mesh>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { WISH_REWARD, WISH_WIN_PERCENT, msUntil, nextWishAt, pickWishReward, wishDay } from '../../lib/wishingFountain';
+import { WISH_REWARD, WISH_WIN_PERCENT, msUntil, nextWishAt, parseCoinSpot, pickWishReward, serializeCoinSpot, wishDay } from '../../lib/wishingFountain';
 
 const at = (iso: string) => Date.parse(iso);
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -45,5 +45,19 @@ describe('the wish reward (SRS-129.3)', () => {
 
   it('refuses a roll outside 0-99', () => {
     for (const roll of [-1, 100, 2.5, Number.NaN]) expect(() => pickWishReward(roll)).toThrow(RangeError);
+  });
+});
+
+describe("today's coin on the bottom of the fountain (SRS-129.4)", () => {
+  it('remembers where it lies, for the day it was tossed only', () => {
+    const raw = serializeCoinSpot({ x: -0.7, z: 0.3 }, '2026-11-04');
+    expect(parseCoinSpot(raw, '2026-11-04')).toEqual({ x: -0.7, z: 0.3 });
+    expect(parseCoinSpot(raw, '2026-11-05')).toBeNull();
+  });
+
+  it('ignores anything that is not a remembered coin', () => {
+    for (const raw of [null, '', 'not json', '{}', '{"day":"2026-11-04","x":"left","z":0}', '{"day":"2026-11-04","x":1}']) {
+      expect(parseCoinSpot(raw, '2026-11-04'), String(raw)).toBeNull();
+    }
   });
 });

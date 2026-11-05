@@ -4,13 +4,14 @@ import { Oswald } from 'next/font/google';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ENTRANCE_KEY,
   INTERACTIVE_OBJECTS,
   SEAT_KEY,
   SPOT_KEY,
   VISITED_KEY,
+  coinLanding,
   isInLobby,
   parseSpot,
   parseTakenSeat,
@@ -24,6 +25,7 @@ import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm, type HandOver } from '../../lib/checkIn';
 import { formatCountdown } from '../../lib/dailyLoginBox';
 import { logOut, takeWalkOut } from '../../lib/logOut';
+import { WISH_COIN_KEY, parseCoinSpot, serializeCoinSpot, wishDay } from '../../lib/wishingFountain';
 import { playHref, useSignedIn } from '../useSignedIn';
 import CheckInTablet from './CheckInTablet';
 import type { DoorsSide, WalkInput } from './Scene';
@@ -356,6 +358,9 @@ export default function CasinoFloor() {
   // they step away; if it couldn't be made, they can try again. Coming up
   // to it, the page asks whether they've made today's wish, and if so the
   // box counts down to the next one (SRS-129.2) instead of offering one.
+  // A wish made, the scene plays the coin toss, and only then does the
+  // result show, with the new balance in the box and the nav bar
+  // (SRS-129.4); today's coin then lies on the fountain's bottom.
   const [nearFountain, setNearFountain] = useState(false);
   const nearFountainRef = useRef(false);
   const [makingWish, setMakingWish] = useState(false);
@@ -365,8 +370,16 @@ export default function CasinoFloor() {
   // while it's shown.
   const [nextWish, setNextWish] = useState<number | null>(null);
   const [clock, setClock] = useState(() => Date.now());
+  // (Asked once they're known to be logged in, for today's coin, and each
+  // time they come up to the fountain.)
+  const wishStatusAsked = useRef(false);
   useEffect(() => {
-    if (!nearFountain || !member) return;
+    if (!member) {
+      setNextWish(null);
+      return;
+    }
+    if (!nearFountain && wishStatusAsked.current) return;
+    wishStatusAsked.current = true;
     let cancelled = false;
     fetch('/api/wishing-fountain', { headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
       .then((res) => (res.ok ? (res.json() as Promise<{ wishedToday: boolean; msRemaining: number }>) : null))
@@ -393,14 +406,42 @@ export default function CasinoFloor() {
     }, 1000);
     return () => clearInterval(timer);
   }, [nearFountain, nextWish]);
+  const [tossing, setTossing] = useState(false);
+  const tossResult = useRef<{ reward: number; balance: number | null } | null>(null);
+  const [coinSpot, setCoinSpot] = useState<{ x: number; z: number } | null>(null);
+  useEffect(() => {
+    try {
+      setCoinSpot(parseCoinSpot(sessionStorage.getItem(WISH_COIN_KEY), wishDay()));
+    } catch {
+      // Not remembered: today's coin lies at the front of the fountain.
+    }
+  }, []);
+  const hasWished = nextWish !== null;
+  const restingCoin = useMemo(() => (!tossing && hasWished ? coinSpot ?? coinLanding(null, wishDay()) : null), [tossing, hasWished, coinSpot]);
+  const tossed = (spot: { x: number; z: number }) => {
+    try {
+      sessionStorage.setItem(WISH_COIN_KEY, serializeCoinSpot(spot, wishDay()));
+    } catch {
+      // Not remembered: next time it lies at the front of the fountain.
+    }
+    setCoinSpot(spot);
+    setTossing(false);
+    const result = tossResult.current;
+    tossResult.current = null;
+    notifyBalanceChanged();
+    if (result) {
+      const outcome = result.reward > 0 ? `Your wish came true: ${result.reward} coins back!` : 'No luck this time.';
+      setWishNote({ text: result.balance === null ? outcome : `${outcome} You have ${result.balance.toLocaleString()} coins.`, final: true });
+    }
+  };
   const wish = useRef<() => void>(() => {});
   wish.current = () => {
-    if (!member || makingWish || wishNote?.final || nextWish !== null || checkingIn || leaving || playing) return;
+    if (!member || makingWish || tossing || wishNote?.final || nextWish !== null || checkingIn || leaving || playing) return;
     setMakingWish(true);
     setWishNote(null);
     fetch('/api/wishing-fountain', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('player_token') ?? ''}` } })
       .then(async (res) => {
-        const body = (await res.json().catch(() => ({}))) as { error?: string; msRemaining?: number; reward?: number };
+        const body = (await res.json().catch(() => ({}))) as { error?: string; msRemaining?: number; reward?: number; balance?: number };
         if (typeof body.msRemaining === 'number' && body.msRemaining > 0) setNextWish(Date.now() + body.msRemaining);
         if (res.status === 401) {
           // The session ended elsewhere: a guest now, where they stand.
@@ -409,9 +450,10 @@ export default function CasinoFloor() {
           notifyBalanceChanged();
           setWishNote({ text: 'Your session has ended. Log in again to make a wish.', final: true });
         } else if (res.ok) {
-          notifyBalanceChanged();
-          // SRS-129.3: 2 coins back, or nothing.
-          setWishNote({ text: (body.reward ?? 0) > 0 ? `Your wish came true: ${body.reward} coins back!` : 'No luck this time.', final: true });
+          // SRS-129.3: 2 coins back, or nothing; it's shown, and the nav bar's
+          // balance updated, once the toss is over (SRS-129.4, SRS-NFR-104).
+          tossResult.current = { reward: body.reward ?? 0, balance: typeof body.balance === 'number' ? body.balance : null };
+          setTossing(true);
         } else {
           setWishNote({ text: body.error ?? 'Could not make your wish. Please try again.', final: res.status !== 500 });
         }
@@ -590,6 +632,10 @@ export default function CasinoFloor() {
                   if (!near) setWishNote(null);
                 }}
                 onWish={() => wish.current()}
+                tossing={tossing}
+                tossAtOnce={prefersReducedMotion()}
+                onTossed={tossed}
+                restingCoin={restingCoin}
                 paused={opening || tabletOpen}
               />
             </div>
@@ -636,7 +682,7 @@ export default function CasinoFloor() {
                 Press <Key>Space</Key> to log out
               </span>
             </button>
-          ) : nearFountain && member && !checkingIn && !playing && !leaving ? (
+          ) : nearFountain && member && !tossing && !checkingIn && !playing && !leaving ? (
             // At the lobby's fountain: a wish for 1 coin (SRS-129.1).
             <button
               type="button"

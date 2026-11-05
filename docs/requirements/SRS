@@ -1780,6 +1780,10 @@ flowchart LR
 
 *Traces to: UR-110, UR-129*
 
+**SRS-129.4, JO, Coin toss.** After a wish is made, the system shall show the player's character tossing a coin into the fountain: the toss shall slow down as the camera follows the coin flipping through the air into the water, a splash shall show where it lands, the coin shall sink to the bottom and stay there, glinting, for the rest of the day, and the camera shall slowly pull back to the player. Then the system shall show the result (2 coins back, or no luck this time) and the player's new balance, which the navigation bar shall show from then on. The player shall be able to skip the animation with any key or a click, and it shall not play when the player's device is set to reduce motion, the result showing straight away.
+
+*Traces to: UR-109, UR-129*
+
 # JO Non-Functional Requirements
 
 **SRS-NFR-101, JO, Password security.** The system shall store player passwords using salted bcrypt hashing with a cost factor of at least 10. The system shall not store passwords in plaintext or reversibly encrypted form and shall retain zero plaintext password copies in persistent storage or application logs after registration, login, password-change, or password-verification operations.
@@ -1796,7 +1800,9 @@ flowchart LR
 
 **SRS-NFR-104, JO, Balance and equipped-cosmetic update latency.** After the system successfully commits a balance or equipped-cosmetic change during an active session, the updated value shall become visible to the player within 2 seconds without requiring a manual page refresh.
 
-*Traces to: UR-109, UR-110, UR-120, UR-124, UR-126, UR-128*
+*Note added on 2026-11-04: the wishing fountain's coin toss (SRS-129.4) shows the new balance when it ends, which can be more than 2 seconds after the wish is saved, so as not to give the result away.*
+
+*Traces to: UR-109, UR-110, UR-120, UR-124, UR-126, UR-128, UR-129*
 
 **SRS-NFR-105, JO, Desktop-browser compatibility.** 100% of web-interface functional requirements defined by this SRS shall operate as specified in the two most recent major desktop versions available at the time of testing of Google Chrome, Mozilla Firefox, Apple Safari, and Microsoft Edge.
 

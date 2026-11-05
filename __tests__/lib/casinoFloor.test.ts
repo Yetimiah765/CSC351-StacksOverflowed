@@ -12,6 +12,9 @@ import {
   KIOSKS,
   atFountain,
   atKiosk,
+  COIN_LANDING_RADIUS,
+  coinLanding,
+  fountainCentre,
   fountainStandingSpots,
   atCasinoDoorsFromLobby,
   clearLine,
@@ -686,6 +689,39 @@ describe('the wishing fountain (SRS-129.1)', () => {
       expect(atFountain(centre(spot))).toBe(true);
       expect(findPath(lobbyMiddle, [spot]), JSON.stringify(spot)).not.toBeNull();
     }
+  });
+});
+
+describe('the coin toss (SRS-129.4)', () => {
+  const centre = fountainCentre();
+  const centreOf = (tile: Point) => ({ x: tile.x + 0.5, y: tile.y + 0.5 });
+
+  it("lands every coin in the basin's water, clear of the bowl's curtain of water and of the basin's edge", () => {
+    expect(COIN_LANDING_RADIUS).toBeGreaterThan(0.73 + 0.03);
+    expect(COIN_LANDING_RADIUS).toBeLessThan(FOUNTAIN.radius - 0.15);
+    for (const spot of fountainStandingSpots()) {
+      const { x, z } = coinLanding(centreOf(spot), '2026-11-04');
+      expect(Math.hypot(x, z)).toBeCloseTo(COIN_LANDING_RADIUS);
+    }
+  });
+
+  it("lands it on the thrower's side, wherever round the fountain they stand", () => {
+    for (const spot of fountainStandingSpots()) {
+      const from = centreOf(spot);
+      const towards = { x: (from.x - centre.x) * TILE_METRES, z: (from.y - centre.y) * TILE_METRES };
+      for (const day of ['2026-11-04', '2026-11-05', '2026-12-25']) {
+        const landing = coinLanding(from, day);
+        const facing = (landing.x * towards.x + landing.z * towards.z) / (COIN_LANDING_RADIUS * Math.hypot(towards.x, towards.z));
+        expect(facing, `${JSON.stringify(spot)} on ${day}`).toBeGreaterThan(Math.cos(0.36));
+      }
+    }
+  });
+
+  it('lands the same way for the same thrower on the same day, and at the front for no one in particular', () => {
+    const from = centreOf(fountainStandingSpots()[0]!);
+    expect(coinLanding(from, '2026-11-04')).toEqual(coinLanding(from, '2026-11-04'));
+    // The fountain's front faces the lobby (towards -x, away from its wall).
+    expect(coinLanding(null, '2026-11-04').x).toBeLessThan(-COIN_LANDING_RADIUS * 0.9);
   });
 });
 

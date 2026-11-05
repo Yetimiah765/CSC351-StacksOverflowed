@@ -1,0 +1,101 @@
+name: Bug report
+description: Report a defect found while testing Stacks Overflowed
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: One bug per report, please. Check the open issues first in case it's already been reported.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences on what's wrong.
+      placeholder: "e.g. After making a wish, the countdown to the next one shows a negative time."
+    validations: { required: true }
+  - type: dropdown
+    id: page
+    attributes:
+      label: Page
+      description: Where the bug happens. Pick "Navigation bar" for the bar across the top of every page.
+      options:
+        - Home page (casino floor and lobby)
+        - Sign up
+        - Log in
+        - Profile
+        - Another player's profile
+        - Cosmetic Shop
+        - Poker lobby
+        - Poker table
+        - Blackjack
+        - Roulette
+        - Slots
+        - Sports Betting
+        - Sports Betting Showdown
+        - Navigation bar
+        - Other (say where below)
+    validations: { required: true }
+  - type: input
+    id: where
+    attributes:
+      label: Where on the page
+      description: Optional. Helps on big pages, and needed if you picked Other.
+      placeholder: "e.g. the wishing fountain in the lobby, the bet panel, the Daily Login Box"
+  - type: input
+    id: srs
+    attributes: { label: SRS requirement, placeholder: "e.g. SRS-129.2" }
+    validations: { required: true }
+  - type: input
+    id: test-case
+    attributes: { label: Test case ID, placeholder: "e.g. JO-T-129.2a" }
+    validations: { required: true }
+  - type: dropdown
+    id: account
+    attributes:
+      label: Logged in?
+      options: ["Yes, as a player", "No, as a guest"]
+    validations: { required: true }
+  - type: textarea
+    id: steps
+    attributes: { label: Steps to reproduce, value: "1. \n2. \n3. " }
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes: { label: Expected result, description: What the SRS says should happen }
+    validations: { required: true }
+  - type: textarea
+    id: actual
+    attributes: { label: Actual result, description: What really happened }
+    validations: { required: true }
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      description: "Critical: crashes, loses coins or data, or blocks the page. Major: breaks a requirement, but there's a way round it. Minor: works, but not quite as the SRS says. Cosmetic: only looks wrong."
+      options: [Critical, Major, Minor, Cosmetic]
+    validations: { required: true }
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options: [Chrome, Firefox, Safari, Edge, Other]
+    validations: { required: true }
+  - type: input
+    id: browser-version
+    attributes:
+      label: Browser version
+      description: "Chrome or Edge: Settings → About. Firefox: Menu → Help → About Firefox. Safari: Safari menu → About Safari."
+      placeholder: "e.g. 130.0.6723.92"
+    validations: { required: true }
+  - type: input
+    id: device
+    attributes:
+      label: Device and operating system
+      placeholder: "e.g. Windows 11 laptop, MacBook Air on macOS 15.1, iPhone 15 on iOS 18"
+    validations: { required: true }
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Drag at least one image here showing the bug. A screen recording works too.
+    validations: { required: true }

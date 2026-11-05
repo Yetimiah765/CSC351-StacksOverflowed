@@ -1,0 +1,49 @@
+# Assigns each bug report to whoever owns the page it's about, from the
+# "Page" answer in the bug report form (.github/ISSUE_TEMPLATE/bug_report.yml).
+# Keep the page names here the same as the form's options.
+
+name: Assign bug reports
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  assign:
+    if: contains(github.event.issue.labels.*.name, 'bug')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owners = {
+              'Home page (casino floor and lobby)': 'JamesOrtizJr',
+              'Sign up': 'JamesOrtizJr',
+              'Log in': 'JamesOrtizJr',
+              'Profile': 'JamesOrtizJr',
+              "Another player's profile": 'JamesOrtizJr',
+              'Cosmetic Shop': 'JamesOrtizJr',
+              'Navigation bar': 'JamesOrtizJr',
+              'Poker lobby': 'Yetimiah765',
+              'Poker table': 'Yetimiah765',
+              'Blackjack': 'hershey111',
+              'Roulette': 'AijinWing',
+              'Slots': 'AijinWing',
+              'Sports Betting': 'Sparkieey',
+              'Sports Betting Showdown': 'Sparkieey',
+            };
+            const page = (context.payload.issue.body ?? '').match(/### Page\s+([^\n]+)/)?.[1]?.trim();
+            const assignee = owners[page];
+            if (!assignee) {
+              core.info(`No owner for page "${page}"; leaving it for someone to triage.`);
+              return;
+            }
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              assignees: [assignee],
+            });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { functionDefinitions, sqlFiles, triggerFunctionsOn, writesGameStats } from '../helpers/sql';
 
 // Coins that don't come from a game or sports-bet result must never reach
-// money won or money lost (SRS-117.8 - SRS-117.11). Those totals are only
+// money won or money lost (SRS-117.8 - SRS-117.12). Those totals are only
 // ever read from player_game_stats, so each check here is that the database
 // code moving those coins never writes to it.
 
@@ -64,6 +64,18 @@ describe('Money won and lost exclusions in the database', () => {
       expect(body, file).toMatch(/SET balance = balance - v_box\.price \+ v_refund/);
       expect(body, file).toMatch(/refund_amount\)\s*VALUES \([^)]*\bv_refund\)/);
       // ...and nowhere else.
+      expect(writesGameStats(body), file).toBe(false);
+    }
+  });
+
+  it("doesn't count wishes at the fountain as money won or lost (SRS-117.12)", () => {
+    const definitions = functionDefinitions('fn_make_wish');
+    expect(definitions.length).toBeGreaterThan(0);
+    for (const { file, body } of definitions) {
+      // It takes the coin and adds any reward in one update to the balance, and records the wish...
+      expect(body, file).toMatch(/SET balance = balance - 1 \+ p_reward/);
+      expect(body, file).toMatch(/INSERT INTO fountain_wishes/);
+      // ...and nothing else.
       expect(writesGameStats(body), file).toBe(false);
     }
   });

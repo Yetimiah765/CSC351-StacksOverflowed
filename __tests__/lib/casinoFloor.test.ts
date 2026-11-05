@@ -49,7 +49,10 @@ import {
   PLAYER_RADIUS,
   pieceLayout,
   standingSpots,
+  stepCasinoDoors,
   stepGate,
+  CASINO_DOORS_PASSABLE,
+  CASINO_DOORS_SWING_SECONDS,
   type GateState,
   type Point,
 } from '../../lib/casinoFloor';
@@ -703,6 +706,72 @@ describe('casino doors for guests (SRS-103.15)', () => {
         for (let i = 1; i < points.length; i++) expect(unblocked(points[i - 1]!, points[i]!), `${x},${y}: ${JSON.stringify(points)}`).toBe(true);
       }
     }
+  });
+});
+
+describe('casino doors for logged-in players (SRS-103.17)', () => {
+  const middle = DOOR.x + DOOR.w / 2;
+  const frame = 1 / 60;
+  const pace = 0.05;
+  // A logged-in player walking by `step` each frame: the doorway's open
+  // while the doors are, and the camera following them is through once
+  // they're 5 tiles (4 m) onto the floor's side (it trails about that far).
+  const walk = (from: Point, step: Point, frames: number, doors = 0) => {
+    let at = from;
+    let open = doors;
+    let widest = doors;
+    for (let i = 0; i < frames; i++) {
+      const after = moveWithCollisions(at, step, PLAYER_RADIUS, open >= CASINO_DOORS_PASSABLE);
+      open = stepCasinoDoors(open, after, { x: after.x - at.x, y: after.y - at.y }, frame, after.y < FRONT_WALL_Y - 5);
+      widest = Math.max(widest, open);
+      at = after;
+    }
+    return { at, open, widest };
+  };
+
+  it('swings them open for a logged-in player walking up to them from the lobby, lets them through onto the floor, and shuts them behind them', () => {
+    for (const x of [middle - 1, middle, middle + 1]) {
+      const { at, open, widest } = walk({ x, y: LOBBY_MIDDLE.y }, { x: 0, y: -pace }, 400);
+      expect(widest, String(x)).toBe(1);
+      expect(at.y, String(x)).toBeLessThan(DOOR.y);
+      expect(open, String(x)).toBe(0);
+    }
+  });
+
+  it('keeps them open while the player is in the doorway, and until the camera behind them is through too', () => {
+    // Walked up into the doorway and stopped there.
+    let { at, open } = walk({ x: middle, y: LOBBY_MIDDLE.y }, { x: 0, y: -pace }, 120);
+    expect(Math.abs(at.y - FRONT_WALL_Y)).toBeLessThan(0.5);
+    ({ open } = walk(at, { x: 0, y: 0 }, 120, open));
+    expect(open).toBe(1);
+    // Just through onto the floor's side, with the camera still in the lobby.
+    at = { x: middle, y: FRONT_WALL_Y - 1 };
+    expect(stepCasinoDoors(1, at, { x: 0, y: 0 }, 1, false)).toBe(1);
+    expect(stepCasinoDoors(1, at, { x: 0, y: 0 }, CASINO_DOORS_SWING_SECONDS / 2, true)).toBe(0.5);
+  });
+
+  it('shuts them again when the player walks away into the lobby instead', () => {
+    const up = walk({ x: middle, y: LOBBY_MIDDLE.y }, { x: 0, y: -pace }, 60);
+    expect(up.open).toBeGreaterThan(0);
+    const away = walk(up.at, { x: 0, y: pace }, 120, up.open);
+    expect(away.at.y).toBeGreaterThan(FRONT_WALL_Y + 3);
+    expect(away.open).toBe(0);
+  });
+
+  it('opens them only from in front of the doorway, and never from the floor (the way out is SRS-105.5)', () => {
+    // Beside the doorway, walking at the wall.
+    expect(walk({ x: middle + GATE_HALF_WIDTH + 1, y: LOBBY_MIDDLE.y }, { x: 0, y: -pace }, 400).widest).toBe(0);
+    // From the foyer, walking at the doors: they stay shut, and the player on the floor's side.
+    const fromFloor = walk({ x: middle, y: FRONT_WALL_Y - 2 }, { x: 0, y: pace }, 200);
+    expect(fromFloor.widest).toBe(0);
+    expect(fromFloor.at.y).toBeLessThan(FRONT_WALL_Y);
+  });
+
+  it('walks a click from the lobby through the doorway for a logged-in player, never for a guest', () => {
+    const lobbyMiddle = { x: Math.floor(LOBBY_MIDDLE.x), y: Math.floor(LOBBY_MIDDLE.y) };
+    expect(findPath(lobbyMiddle, doorStandingSpots(), false, true)).not.toBeNull();
+    expect(findPath(lobbyMiddle, [START], false, true)).not.toBeNull();
+    expect(findPath(lobbyMiddle, doorStandingSpots())).toBeNull();
   });
 });
 

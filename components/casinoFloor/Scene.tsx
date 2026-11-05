@@ -35,7 +35,9 @@ import {
   objectAt,
   pieceLayout,
   standingSpots,
+  stepCasinoDoors,
   stepGate,
+  CASINO_DOORS_PASSABLE,
   GATE_SHUT,
   type FloorObject,
   type GateState,
@@ -57,7 +59,7 @@ import {
 import Person, { type Motion, type SeatPose } from './Person';
 import { compileInBackground } from './compile';
 import Highlight from './Highlight';
-import CasinoFront, { FRONT_WALL_Z } from './CasinoFront';
+import CasinoFront, { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
 import Lobby, { LOBBY_HALF_WIDTH, LOBBY_HEIGHT, LOBBY_NORTH_Z, LOBBY_SOUTH_Z, type LobbyState } from './Lobby';
 import { carpetTexture, neonTexture, wallTexture } from './textures';
 
@@ -629,6 +631,7 @@ function Player({
   kioskScreens,
   onAtKiosk,
   onNearKiosk,
+  member,
 }: {
   /** Where the player starts, in tiles (the middle of the start tile, if not given), and the way they face (into the room). */
   start?: Point;
@@ -657,6 +660,8 @@ function Player({
   kioskScreens: MutableRefObject<(THREE.Object3D | null)[]>;
   onAtKiosk?: () => void;
   onNearKiosk: (kiosk: number | null) => void;
+  /** Logged in: the casino's doors open for them from the lobby (SRS-103.17). */
+  member: boolean;
 }) {
   const body = useRef<THREE.Group>(null);
   const motion = useRef<Motion>({ speed: 0 });
@@ -681,6 +686,12 @@ function Player({
   const near = useRef<NearSpot>({ object: null, spot: null });
   const nearDoors = useRef<DoorsSide>(null);
   const nearKiosk = useRef<number | null>(null);
+  // The casino's doors as a logged-in player walks in through them from the
+  // lobby (SRS-103.17), 0 shut to 1 open; and whether they've just come in,
+  // so they aren't offered the way out until they've stepped away from the
+  // doors and come back to them.
+  const casinoDoors = useRef(0);
+  const justIn = useRef(false);
   const { camera: view } = useThree();
 
   useFrame((_, rawDelta) => {
@@ -1038,16 +1049,27 @@ function Player({
     }
 
     const before = position.current;
-    const after = moveWithCollisions(before, { x: move.x / TILE_M, y: move.y / TILE_M });
+    const after = moveWithCollisions(before, { x: move.x / TILE_M, y: move.y / TILE_M }, undefined, member && casinoDoors.current >= CASINO_DOORS_PASSABLE);
     position.current = after;
     tile.current = { x: Math.floor(after.x), y: Math.floor(after.y) };
     const moved = Math.hypot(after.x - before.x, after.y - before.y) * TILE_M;
     motion.current.speed = moved / Math.max(delta, 1e-6);
+
+    // The casino's doors open for a logged-in player coming up to them from
+    // the lobby, and shut once they and the camera are through (SRS-103.17);
+    // the lobby's lights fade as they shut, and it's hidden once they have.
+    casinoDoors.current = member ? stepCasinoDoors(casinoDoors.current, after, { x: after.x - before.x, y: after.y - before.y }, delta, view.position.z < FRONT_WALL_Z - 0.1) : 0;
+    const opened = smooth(casinoDoors.current);
+    lobby.current.casino = opened;
+    lobby.current.lit = isInLobby(after) ? 1 : opened;
+    lobby.current.shown = isInLobby(after) || opened > 0;
+    const doorsOpening = casinoDoors.current > 0 && casinoDoors.current < 1;
+
     if (moved > 1e-4) {
       // Turn to face the way they walk, smoothly.
       turnTowards(Math.atan2(after.x - before.x, after.y - before.y), 12);
-    } else if (path.current.length > 0 && !(forward || sideways)) {
-      // Stuck on something: give up on the walk.
+    } else if (path.current.length > 0 && !(forward || sideways) && !doorsOpening) {
+      // Stuck on something (not just the casino's doors, still opening): give up on the walk.
       path.current = [];
     }
 
@@ -1064,8 +1086,11 @@ function Player({
       near.current = { object, spot };
       onNear(near.current);
     }
-    // In reach of the casino's doors, from the foyer (SRS-105.5) or the lobby (SRS-103.15).
-    const doors: DoorsSide = atCasinoDoors(after) ? 'floor' : atCasinoDoorsFromLobby(after) ? 'lobby' : null;
+    // In reach of the casino's doors, from the foyer (SRS-105.5) or the lobby
+    // (SRS-103.15); not from the foyer just after walking in through them.
+    if (casinoDoors.current > 0 && !isInLobby(after)) justIn.current = true;
+    else if (!atCasinoDoors(after)) justIn.current = false;
+    const doors: DoorsSide = atCasinoDoors(after) ? (justIn.current ? null : 'floor') : atCasinoDoorsFromLobby(after) ? 'lobby' : null;
     if (doors !== nearDoors.current) {
       nearDoors.current = doors;
       onNearDoors(doors);
@@ -1102,6 +1127,20 @@ function Player({
       height + Math.sin(pitch) * distance,
       wz + Math.cos(yaw) * Math.cos(pitch) * distance
     );
+    const [minX] = toWorld(LEFT_WALL + 0.3, 0);
+    const [maxX] = toWorld(COLS - 1.3, 0);
+    const back = (2 - ROWS / 2) * TILE_M + 0.4;
+    if (casinoDoors.current > 0) {
+      // While the casino's doors are open for them (SRS-103.17), it stays
+      // behind them on either side of the wall, in line with the doorway, so
+      // it follows them through it rather than through the wall (and the
+      // doors shut once it's through).
+      const room = CASINO_DOOR_HALF - 0.35;
+      position.x = THREE.MathUtils.clamp(position.x, LOBBY_X - room, LOBBY_X + room);
+      position.z = THREE.MathUtils.clamp(position.z, back, LOBBY_SOUTH_Z - 0.4);
+      position.y = THREE.MathUtils.clamp(position.y, 0.6, CASINO_DOOR_HEIGHT - 0.4);
+      return { position, look };
+    }
     // Walking towards it, up against the wall at the end it's limited by,
     // it slides along the wall to one side, keeping at least WALL_ROOM metres
     // off, rather than ending up right overhead.
@@ -1113,7 +1152,7 @@ function Player({
       position.z = limit;
     };
     if (wz > FRONT_WALL_Z) {
-      // In the lobby (a guest): kept inside its walls and under its ceiling.
+      // In the lobby: kept inside its walls and under its ceiling.
       const near = FRONT_WALL_Z + 0.5;
       const far = LOBBY_SOUTH_Z - 0.4;
       if (position.z > far) slideAlong(far, far - wz);
@@ -1123,9 +1162,6 @@ function Player({
       position.y = THREE.MathUtils.clamp(position.y, 0.6, LOBBY_HEIGHT - 0.4);
       return { position, look };
     }
-    const [minX] = toWorld(LEFT_WALL + 0.3, 0);
-    const [maxX] = toWorld(COLS - 1.3, 0);
-    const back = (2 - ROWS / 2) * TILE_M + 0.4;
     const front = FRONT_WALL_Z - 0.4;
     // (In the foyer, against the casino's front wall.)
     if (position.z > front) slideAlong(front, front - wz);
@@ -1605,8 +1641,8 @@ function Floor({
   const playerTile = useRef<Point>({ x: START.x, y: START.y });
 
   // The player's tile (kept up to date by Player), for click-to-walk paths.
-  const walkTo = (targets: Point[]) => {
-    path.current = findPath(playerTile.current, targets) ?? [];
+  const walkTo = (targets: Point[], throughDoors = false) => {
+    path.current = findPath(playerTile.current, targets, false, throughDoors) ?? [];
   };
 
   // A click on a check-in tablet uses it when in reach (for a guest), or walks up to it.
@@ -1619,12 +1655,14 @@ function Floor({
 
   // A click on the casino's doors leaves through them when in reach (for a
   // player who can), or for a guest in the lobby walks them to the front
-  // desk to check in (SRS-103.15); otherwise it walks up to them.
+  // desk to check in (SRS-103.15); otherwise it walks up to them, or for a
+  // logged-in player in the lobby, through them (SRS-103.17).
   function handleDoorsClick(event: ThreeEvent<MouseEvent>) {
     if (walkIn.current || walkOut.current || kiosk.current || event.delta > 6 || seating.current) return;
     event.stopPropagation();
     if (nearDoorsRef.current === 'floor' && canLeave) onLeave?.();
     else if (nearDoorsRef.current === 'lobby' && guest) onCheckIn?.();
+    else if (!guest && isInLobby({ x: playerTile.current.x + 0.5, y: playerTile.current.y + 0.5 })) walkTo(doorStandingSpots(), true);
     else walkTo(doorStandingSpots(guest));
   }
 
@@ -1728,6 +1766,7 @@ function Floor({
         kioskScreens={kioskScreens}
         onAtKiosk={onAtKiosk}
         onNearKiosk={handleNearKiosk}
+        member={!guest}
       />
 
       {near?.interactive && !playing && !walkIn.current && !leaving ? (

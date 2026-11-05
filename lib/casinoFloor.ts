@@ -562,11 +562,21 @@ const lobbyTile = (x: number, z: number) => ({ cx: doorMiddle + x / TILE_METRES,
 const lobbyCircle = (x: number, z: number, r: number): TileShape => ({ shape: { type: 'circle', x: 0, z: 0, r }, ...lobbyTile(x, z) });
 const lobbyBox = (x: number, z: number, w: number, d: number): TileShape => ({ shape: { type: 'box', x: 0, z: 0, w, d }, ...lobbyTile(x, z) });
 
+/** A piece of the casino's front wall, from x1 to x2 in tiles. */
+const frontWall = (x1: number, x2: number): TileShape => ({
+  shape: { type: 'box', x: 0, z: 0, w: (x2 - x1) * TILE_METRES, d: 0.4 },
+  cx: (x1 + x2) / 2,
+  cy: FRONT_WALL_Y + 0.05 / TILE_METRES,
+});
+
+/** The casino's doorway, closed by its doors: open only while they are, for a logged-in player walking in from the lobby (SRS-103.17). */
+const CASINO_DOORWAY = frontWall(doorMiddle - GATE_HALF_WIDTH, doorMiddle + GATE_HALF_WIDTH);
+
 const LOBBY_SOLIDS: TileShape[] = [
-  // The casino's front wall, doors and all (a guest can't go in; a
-  // logged-in player leaves through them only by the walk out), the side
-  // walls, and the building's front, its glass doors shut.
-  { shape: { type: 'box', x: 0, z: 0, w: COLS * TILE_METRES, d: 0.4 }, cx: COLS / 2, cy: FRONT_WALL_Y + 0.05 / TILE_METRES },
+  // The casino's front wall either side of its doorway, the side walls, and
+  // the building's front, its glass doors shut.
+  frontWall(0, doorMiddle - GATE_HALF_WIDTH),
+  frontWall(doorMiddle + GATE_HALF_WIDTH, COLS),
   ...[-1, 1].map((side) => lobbyBox(side * (LOBBY_HALF + 0.1), LOBBY_MID, 0.2, LOBBY_SIZE.depth)),
   lobbyBox(0, LOBBY_SIZE.depth + 0.15, LOBBY_SIZE.width, 0.3),
   ...LOBBY_COLUMNS.map(({ x, z }) => lobbyBox(x, z, 0.84, 0.84)),
@@ -587,8 +597,9 @@ const LOBBY_SOLIDS: TileShape[] = [
   lobbyCircle(LUGGAGE_CART.x + Math.cos(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, LUGGAGE_CART.z - Math.sin(LUGGAGE_CART.turn) * LUGGAGE_CART.bellhop, 0.3),
 ];
 
-/** Everything the player bumps into, besides the walls. */
-const BLOCKING: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS, ...LOBBY_SOLIDS];
+/** Everything the player bumps into, besides the walls, with the casino's doors shut, and with them open. */
+const BLOCKING: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS, ...LOBBY_SOLIDS, CASINO_DOORWAY];
+const BLOCKING_DOORS_OPEN: TileShape[] = [...SOLIDS, ...FRONT_SOLIDS, ...LOBBY_SOLIDS];
 
 /** How far a point is outside a shape, in tiles (0 or less when inside). */
 function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): number {
@@ -616,8 +627,8 @@ function distanceOutside({ shape, cx, cy }: TileShape, x: number, y: number): nu
   }
 }
 
-/** Whether a circle at (x, y) overlaps a wall or anything standing on the floor. */
-function circleBlocked(x: number, y: number, radius: number): boolean {
+/** Whether a circle at (x, y) overlaps a wall or anything standing on the floor (or the casino's doors, unless they're open). */
+function circleBlocked(x: number, y: number, radius: number, doorsOpen = false): boolean {
   for (let ty = Math.floor(y - radius); ty <= Math.floor(y + radius); ty++) {
     for (let tx = Math.floor(x - radius); tx <= Math.floor(x + radius); tx++) {
       if (!isWall(tx, ty)) continue;
@@ -626,7 +637,7 @@ function circleBlocked(x: number, y: number, radius: number): boolean {
       if ((x - nearestX) ** 2 + (y - nearestY) ** 2 < radius * radius) return true;
     }
   }
-  return BLOCKING.some((solid) => distanceOutside(solid, x, y) < radius);
+  return (doorsOpen ? BLOCKING_DOORS_OPEN : BLOCKING).some((solid) => distanceOutside(solid, x, y) < radius);
 }
 
 /** Whatever's rectangle covers this tile, if anything (what a click on it means). */
@@ -634,20 +645,21 @@ export function objectAt(x: number, y: number): FloorObject | undefined {
   return FLOOR_OBJECTS.find((object) => x >= object.x && x < object.x + object.w && y >= object.y && y < object.y + object.h);
 }
 
-/** Whether the player can't stand in the middle of this tile: a wall, or too close to something. */
-export function isBlocked(x: number, y: number): boolean {
-  return isWall(x, y) || circleBlocked(x + 0.5, y + 0.5, PLAYER_RADIUS);
+/** Whether the player can't stand in the middle of this tile: a wall, or too close to something (the casino's doors too, unless they're open). */
+export function isBlocked(x: number, y: number, doorsOpen = false): boolean {
+  return isWall(x, y) || circleBlocked(x + 0.5, y + 0.5, PLAYER_RADIUS, doorsOpen);
 }
 
 /**
  * Moves from `position` by `delta`, stopping at walls and furniture but
  * sliding along them (each axis is tried on its own), like walking into a
- * table at an angle.
+ * table at an angle. The casino's doorway is open only while its doors are
+ * (`doorsOpen`).
  */
-export function moveWithCollisions(position: Point, delta: Point, radius = PLAYER_RADIUS): Point {
+export function moveWithCollisions(position: Point, delta: Point, radius = PLAYER_RADIUS, doorsOpen = false): Point {
   let { x, y } = position;
-  if (!circleBlocked(x + delta.x, y, radius)) x += delta.x;
-  if (!circleBlocked(x, y + delta.y, radius)) y += delta.y;
+  if (!circleBlocked(x + delta.x, y, radius, doorsOpen)) x += delta.x;
+  if (!circleBlocked(x, y + delta.y, radius, doorsOpen)) y += delta.y;
   return { x, y };
 }
 
@@ -744,8 +756,10 @@ function throughRail(from: Point, to: Point) {
  * already there, null if none can be reached. `strict` takes a step only if
  * the player can walk straight from one tile's middle to the next's (an open
  * tile can still have a chair's edge between it and the next).
+ * `throughDoors` goes through the casino's doorway, as a logged-in player in
+ * the lobby can (the doors open as they come, SRS-103.17).
  */
-export function findPath(from: Point, targets: Point[], strict = false): Point[] | null {
+export function findPath(from: Point, targets: Point[], strict = false, throughDoors = false): Point[] | null {
   const key = (point: Point) => point.y * COLS + point.x;
   const goals = new Set(targets.map(key));
   if (goals.has(key(from))) return [];
@@ -757,7 +771,7 @@ export function findPath(from: Point, targets: Point[], strict = false): Point[]
     for (const step of Object.values(STEP)) {
       const next = { x: current.x + step.x, y: current.y + step.y };
       const nextKey = key(next);
-      if (cameFrom.has(nextKey) || isBlocked(next.x, next.y) || throughRail(current, next)) continue;
+      if (cameFrom.has(nextKey) || isBlocked(next.x, next.y, throughDoors) || throughRail(current, next)) continue;
       if (strict && !canStep(current, next)) continue;
       cameFrom.set(nextKey, key(current));
       if (goals.has(nextKey)) {
@@ -815,6 +829,34 @@ export function stepGate(gate: GateState, at: Point, moved: Point, seconds: numb
   const step = seconds / GATE_SWING_SECONDS;
   const open = target === 1 ? Math.min(1, gate.open + step) : Math.max(0, gate.open - step);
   return { open, way: open === 0 && target === 0 ? 0 : way };
+}
+
+// ---------- the casino's doors for a logged-in player (SRS-103.17) ----------
+
+/** Seconds the casino's doors take to swing open, or shut, for a logged-in player walking in. */
+export const CASINO_DOORS_SWING_SECONDS = 0.5;
+/** How far open the casino's doors must be for the player to walk through the doorway. */
+export const CASINO_DOORS_PASSABLE = 0.5;
+
+/**
+ * How far open the casino's doors are a moment later (0 shut to 1, swung
+ * out into the lobby), for a logged-in player at `at` who has just moved by
+ * `moved` (both in tiles). They swing open as the player comes up to them
+ * from the lobby, in front of the doorway; stay open while the player's in
+ * the doorway or where the doors would swing shut through them; and shut
+ * behind them once they're through onto the floor and `cameraThrough` (the
+ * camera following them is too), or once they've walked away into the
+ * lobby. From the floor they never open: the walk out (SRS-105.5) swings
+ * them itself.
+ */
+export function stepCasinoDoors(open: number, at: Point, moved: Point, seconds: number, cameraThrough: boolean): number {
+  const fromWall = at.y - FRONT_WALL_Y;
+  const comingUp = Math.abs(at.x - doorMiddle) < GATE_HALF_WIDTH && fromWall > 0 && fromWall < 4 && moved.y < 0;
+  const toHinge = (side: number) => Math.hypot(at.x - (doorMiddle + side * GATE_HALF_WIDTH), fromWall);
+  const clear = fromWall < -PLAYER_RADIUS ? cameraThrough : fromWall > 0 && Math.min(toHinge(-1), toHinge(1)) > GATE_HALF_WIDTH + PLAYER_RADIUS + 0.2;
+  const target = comingUp || (open > 0 && !clear) ? 1 : 0;
+  const step = seconds / CASINO_DOORS_SWING_SECONDS;
+  return target === 1 ? Math.min(1, open + step) : Math.max(0, open - step);
 }
 
 // ---------- leaving through the casino's doors (SRS-105.5) ----------

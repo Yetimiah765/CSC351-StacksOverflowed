@@ -229,7 +229,7 @@ export default function CasinoFront({
       </mesh>
       <mesh position={[0, height - 0.25, FRONT_WALL_Z - 0.15]}>
         <boxGeometry args={[width, 0.05, 0.04]} />
-        <meshStandardMaterial color="#22d3ee" emissive="#22d3ee" emissiveIntensity={3} toneMapped={false} />
+        <meshStandardMaterial color="#34d399" emissive="#34d399" emissiveIntensity={1.6} toneMapped={false} />
       </mesh>
       {[-1, 1].map((s) => (
         <group key={`neon${s}`}>

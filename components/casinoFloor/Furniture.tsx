@@ -4,19 +4,33 @@ import { useFrame } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { kickoffLabel, showdownForTv, showdownTvGames, type TvGame } from '../../lib/barTvs';
-import { BAR, BAR_ALCOVE, BAR_STOOLS, SLOT_STOOL_OUT, TILE_METRES, barLength, type PieceLayout } from '../../lib/casinoFloor';
+import {
+  BAR,
+  BAR_ALCOVE,
+  BAR_STOOLS,
+  CAGE,
+  CAGE_WINDOWS,
+  SHOP_ALCOVE,
+  SLOT_STOOL_OUT,
+  TILE_METRES,
+  barLength,
+  cageLength,
+  type PieceLayout,
+} from '../../lib/casinoFloor';
 import type { Showdown } from '../../lib/sports/showdown';
 import Highlight from './Highlight';
 import Person from './Person';
 import {
   barTvScreen,
   blackjackFeltTexture,
+  cardBackTexture,
   cardTexture,
   feltBumpTexture,
   neonTexture,
   pokerFeltTexture,
   paintBarTv,
   paintSportsScreen,
+  priceTagTexture,
   rouletteLayoutTexture,
   rouletteWheelTexture,
   slotReelTexture,
@@ -534,46 +548,389 @@ export function SportsBar({ width, depth, highlight = null }: { width: number; d
   );
 }
 
-// ---------- The shop ----------
-export function ShopCounter({ width, depth, layout }: PieceProps) {
-  const sign = useMemo(() => neonTexture('SHOP', '#a855f7', 512, 160), []);
+// ---------- The shop: a cashier's cage ----------
+// Set into the right wall, the mirror of the bar: the alcove's back wall is
+// at +width / 2 (local +x), the room's wall line SHOP_ALCOVE.w tiles in front
+// of it, and the cage runs along z. The alcove itself (its walls, ceiling and
+// the header with the sign) is part of the room, in Scene.tsx. Behind brass
+// bars and teller windows, a shopkeeper keeps the cosmetics on shelves along
+// the back like an old adventure game's shop, each with its price.
+
+const BOX_COLORS: [string, string][] = [
+  ['#16a34a', '#fde68a'],
+  ['#f59e0b', '#7c2d12'],
+  ['#2563eb', '#e0f2fe'],
+  ['#be123c', '#fde68a'],
+  ['#7c3aed', '#f5d0fe'],
+  ['#0f766e', '#fde68a'],
+];
+const CARD_BACKS: [string, string][] = [
+  ['#991b1b', '#fca5a5'],
+  ['#1e3a8a', '#93c5fd'],
+  ['#14532d', '#86efac'],
+  ['#4c1d95', '#c4b5fd'],
+  ['#111827', '#fcd34d'],
+  ['#7c2d12', '#fdba74'],
+];
+const RING_COLORS = ['#c9a227', '#94a3b8', '#e11d48'];
+
+/** Things on the cage's shelves are spaced along it like this, metres. */
+function shelfSpots(length: number, count: number): number[] {
+  const span = length - 0.7;
+  return Array.from({ length: count }, (_, i) => -span / 2 + (span * i) / (count - 1));
+}
+
+/** A price tag on the shelf's front edge, facing the room. */
+function PriceTag({ position, price }: { position: [number, number, number]; price: string }) {
+  const map = useMemo(() => priceTagTexture(price), [price]);
+  return (
+    <mesh position={position} rotation={[0, -Math.PI / 2, 0]}>
+      <planeGeometry args={[0.1, 0.05]} />
+      <meshStandardMaterial map={map} roughness={0.7} />
+    </mesh>
+  );
+}
+
+/** A blind box: a wrapped box with a ribbon round it and a bow. */
+function GiftBox({ position, color, ribbon }: { position: [number, number, number]; color: string; ribbon: string }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.1, 0]} castShadow>
+        <boxGeometry args={[0.2, 0.2, 0.2]} />
+        <meshStandardMaterial color={color} roughness={0.5} />
+      </mesh>
+      <mesh position={[0, 0.1, 0]}>
+        <boxGeometry args={[0.205, 0.205, 0.04]} />
+        <meshStandardMaterial color={ribbon} roughness={0.35} metalness={0.3} />
+      </mesh>
+      <mesh position={[0, 0.1, 0]}>
+        <boxGeometry args={[0.04, 0.205, 0.205]} />
+        <meshStandardMaterial color={ribbon} roughness={0.35} metalness={0.3} />
+      </mesh>
+      {[-1, 1].map((side) => (
+        <mesh key={side} position={[0, 0.215, side * 0.03]} rotation={[side * 0.6, 0, 0]}>
+          <torusGeometry args={[0.028, 0.009, 6, 14]} />
+          <meshStandardMaterial color={ribbon} roughness={0.35} metalness={0.3} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** A card back standing on a little easel, leaning back, facing the room. */
+function DisplayCard({ position, color, accent }: { position: [number, number, number]; color: string; accent: string }) {
+  const map = useMemo(() => cardBackTexture(color, accent), [color, accent]);
+  return (
+    <group position={position} rotation={[0, -Math.PI / 2, 0]}>
+      <mesh position={[0, 0.095, 0]} rotation={[-0.2, 0, 0]} castShadow>
+        <planeGeometry args={[0.13, 0.18]} />
+        <meshStandardMaterial map={map} roughness={0.5} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 0.06, -0.04]} rotation={[0.5, 0, 0]}>
+        <boxGeometry args={[0.012, 0.13, 0.012]} />
+        <Gold />
+      </mesh>
+    </group>
+  );
+}
+
+/** A profile outline on show: a ring on a small stand, facing the room; the holographic one shimmers. */
+function DisplayRing({ position, color, holographic = false }: { position: [number, number, number]; color: string; holographic?: boolean }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.03, 0]}>
+        <cylinderGeometry args={[0.035, 0.045, 0.03, 16]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, 0.13, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
+        <torusGeometry args={[0.085, 0.016, 12, 36]} />
+        {holographic ? <meshNormalMaterial /> : <meshStandardMaterial color={color} roughness={0.25} metalness={0.85} />}
+      </mesh>
+    </group>
+  );
+}
+
+/** The Daily Login Box: a treasure chest, its lid a little open and gold light spilling out. */
+function TreasureChest({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position} rotation={[0, -Math.PI / 2, 0]}>
+      <mesh position={[0, 0.12, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.5, 0.24, 0.32]} />
+        <meshStandardMaterial color="#6b3a17" roughness={0.6} />
+      </mesh>
+      {[-0.18, 0.18].map((x) => (
+        <mesh key={x} position={[x, 0.12, 0]}>
+          <boxGeometry args={[0.04, 0.245, 0.325]} />
+          <Gold />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.12, 0.163]}>
+        <boxGeometry args={[0.07, 0.08, 0.01]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, 0.235, 0.02]}>
+        <boxGeometry args={[0.46, 0.012, 0.28]} />
+        <meshStandardMaterial color="#ffd27a" emissive="#ffb703" emissiveIntensity={2.5} toneMapped={false} />
+      </mesh>
+      {/* The lid, hinged at the back and lifted a little */}
+      <group position={[0, 0.24, -0.16]} rotation={[-0.5, 0, 0]}>
+        <mesh position={[0, 0.05, 0.16]} castShadow>
+          <cylinderGeometry args={[0.16, 0.16, 0.5, 20, 1, false, 0, Math.PI]} />
+          <meshStandardMaterial color="#7a4320" roughness={0.6} side={THREE.DoubleSide} />
+        </mesh>
+      </group>
+    </group>
+  );
+}
+
+/** A green-shaded banker's lamp on the counter, inside the cage. */
+function BankersLamp({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.01, 0]}>
+        <cylinderGeometry args={[0.05, 0.06, 0.02, 16]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, 0.12, 0]}>
+        <cylinderGeometry args={[0.008, 0.008, 0.22, 8]} />
+        <Gold />
+      </mesh>
+      <mesh position={[0, 0.25, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[1, 1, 0.7]}>
+        <cylinderGeometry args={[0.045, 0.045, 0.2, 16]} />
+        <meshStandardMaterial color="#065f46" emissive="#10b981" emissiveIntensity={0.7} roughness={0.25} />
+      </mesh>
+    </group>
+  );
+}
+
+/** A hanging lantern inside the cage. */
+function Lantern({ position }: { position: [number, number, number] }) {
+  return (
+    <group position={position}>
+      <mesh position={[0, 0.35, 0]}>
+        <cylinderGeometry args={[0.004, 0.004, 0.6, 6]} />
+        <meshStandardMaterial color="#111827" />
+      </mesh>
+      <mesh>
+        <boxGeometry args={[0.12, 0.16, 0.12]} />
+        <meshStandardMaterial color="#ffe3a3" emissive="#ffb347" emissiveIntensity={2.4} toneMapped={false} transparent opacity={0.9} />
+      </mesh>
+      {[-1, 1].map((y) => (
+        <mesh key={y} position={[0, y * 0.085, 0]}>
+          <boxGeometry args={[0.15, 0.02, 0.15]} />
+          <Gold />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** A clay pot on the cage's floor. */
+function Pot({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) {
+  return (
+    <group position={position} scale={scale}>
+      <mesh position={[0, 0.16, 0]} castShadow>
+        <sphereGeometry args={[0.16, 16, 12]} />
+        <meshStandardMaterial color="#9a3412" roughness={0.85} />
+      </mesh>
+      <mesh position={[0, 0.31, 0]}>
+        <cylinderGeometry args={[0.07, 0.09, 0.07, 14]} />
+        <meshStandardMaterial color="#7c2d12" roughness={0.85} />
+      </mesh>
+    </group>
+  );
+}
+
+/**
+ * The shop as a cashier's cage: the counter on the wall line with brass bars
+ * above it and a teller window per CAGE_WINDOWS (`highlight` outlines one,
+ * the one the camera would fly up to), the shopkeeper behind, and the
+ * cosmetics on the shelves at the back.
+ */
+export function ShopCage({ width, depth, layout, highlight = null }: PieceProps) {
+  const wall = width / 2;
+  const wallLine = wall - SHOP_ALCOVE.w * TILE_METRES;
+  const length = cageLength(depth);
+  const sign = useMemo(() => neonTexture('SHOP', '#fbbf24', 512, 160), []);
+  const plaque = useMemo(() => neonTexture('COSMETICS · CAGE', '#fbbf24', 1024, 120), []);
+  const counterFront = CAGE.counterX - CAGE.counterDepth / 2;
+  const counterBack = CAGE.counterX + CAGE.counterDepth / 2;
+  const bodyHeight = CAGE.counterTop - 0.06;
+  const shelfX = wall - CAGE.backDepth / 2;
+  const shelves = [1.3, 1.72, 2.14];
+
+  // The bars: every 10 cm along the cage, but not across a window.
+  const bars = useMemo(() => {
+    const spots: number[] = [];
+    for (let z = -length / 2 + 0.05; z <= length / 2 - 0.05; z += 0.1) {
+      if (CAGE_WINDOWS.every((w) => Math.abs(z - w) > 0.42)) spots.push(z);
+    }
+    return spots;
+  }, [length]);
+  const barMesh = useRef<THREE.InstancedMesh>(null);
+  const barHeight = CAGE.barsTop - CAGE.counterTop;
+  useEffect(() => {
+    const mesh = barMesh.current;
+    if (!mesh) return;
+    const matrix = new THREE.Matrix4();
+    bars.forEach((z, i) => mesh.setMatrixAt(i, matrix.makeTranslation(wallLine + 0.02, CAGE.counterTop + barHeight / 2, z)));
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [bars, wallLine, barHeight]);
+
+  const boxes = shelfSpots(length, BOX_COLORS.length);
+  const cards = shelfSpots(length, CARD_BACKS.length);
+  const top = shelfSpots(length, 6);
+
   return (
     <group>
       <Dealer layout={layout} offset={4} />
-      <mesh position={[0, 0.5, 0.15]} castShadow receiveShadow>
-        <boxGeometry args={[width - 0.4, 1.0, 0.6]} />
+
+      {/* The back: a low cabinet, a warm wood panel and three shelves, with gold edges */}
+      <mesh position={[shelfX, 0.48, 0]} castShadow receiveShadow>
+        <boxGeometry args={[CAGE.backDepth, 0.96, length]} />
         <Wood />
       </mesh>
-      <mesh position={[0, 0.9, 0.46]}>
-        <boxGeometry args={[width - 0.38, 0.04, 0.02]} />
-        <Gold />
+      <mesh position={[shelfX - 0.01, 0.98, 0]} receiveShadow>
+        <boxGeometry args={[CAGE.backDepth + 0.02, 0.04, length]} />
+        <Marble />
       </mesh>
-      <mesh position={[0, 1.02, 0.15]}>
-        <boxGeometry args={[width - 0.3, 0.04, 0.7]} />
-        <meshPhysicalMaterial color="#cbd5e1" roughness={0.05} clearcoat={1} transparent opacity={0.4} depthWrite={false} />
+      <mesh position={[wall - 0.012, 1.8, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[length - 0.1, 1.5]} />
+        <meshStandardMaterial color="#3a1f0e" emissive="#7a4a1c" emissiveIntensity={0.7} roughness={0.7} />
       </mesh>
-      {[['#7c3aed', -1.6], ['#db2777', -1.1], ['#0ea5e9', 1.1], ['#f59e0b', 1.6]].map(([color, x]) => (
-        <group key={String(x)} position={[Number(x), 1.17, 0.15]}>
-          <mesh castShadow>
-            <boxGeometry args={[0.28, 0.26, 0.28]} />
-            <meshStandardMaterial color={String(color)} roughness={0.5} />
+      {shelves.map((y) => (
+        <group key={y}>
+          <mesh position={[wall - 0.2, y - 0.02, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.38, 0.04, length - 0.2]} />
+            <Wood />
           </mesh>
-          <mesh>
-            <boxGeometry args={[0.06, 0.265, 0.285]} />
+          <mesh position={[wall - 0.39, y - 0.02, 0]}>
+            <boxGeometry args={[0.012, 0.045, length - 0.2]} />
             <Gold />
           </mesh>
-          <mesh>
-            <boxGeometry args={[0.285, 0.265, 0.06]} />
-            <Gold />
+          {/* A warm strip light under the shelf's front, lighting the one below */}
+          <mesh position={[wall - 0.36, y - 0.045, 0]}>
+            <boxGeometry args={[0.015, 0.01, length - 0.2]} />
+            <meshStandardMaterial color="#ffd27a" emissive="#ffc35c" emissiveIntensity={2.2} toneMapped={false} />
           </mesh>
         </group>
       ))}
-      <mesh position={[0.45, 1.16, 0.1]} castShadow>
-        <boxGeometry args={[0.36, 0.24, 0.3]} />
-        <meshStandardMaterial color="#374151" roughness={0.4} metalness={0.4} />
+      {[-1, -0.33, 0.33, 1].map((k) => (
+        <mesh key={k} position={[wall - 0.2, 1.75, (k * (length - 0.24)) / 2]} castShadow>
+          <boxGeometry args={[0.38, 1.0, 0.04]} />
+          <Wood />
+        </mesh>
+      ))}
+
+      {/* On the shelves: blind boxes, card backs, chip sets and profile outlines, each with its price */}
+      {boxes.map((z, i) => (
+        <group key={`box-${i}`}>
+          <GiftBox position={[shelfX - 0.02, shelves[0]!, z]} color={BOX_COLORS[i]![0]} ribbon={BOX_COLORS[i]![1]} />
+          <PriceTag position={[wall - 0.4, shelves[0]! - 0.05, z]} price={i < 4 ? '350' : i === 4 ? '500' : '625'} />
+        </group>
+      ))}
+      {cards.map((z, i) => (
+        <group key={`card-${i}`}>
+          <DisplayCard position={[shelfX - 0.02, shelves[1]!, z]} color={CARD_BACKS[i]![0]} accent={CARD_BACKS[i]![1]} />
+          <PriceTag position={[wall - 0.4, shelves[1]! - 0.05, z]} price="?" />
+        </group>
+      ))}
+      {top.map((z, i) => (
+        <group key={`top-${i}`}>
+          {i % 2 === 0 ? (
+            <group position={[shelfX - 0.03, shelves[2]!, z]}>
+              <ChipStack position={[0, 0, -0.04]} count={6} color={CHIP_COLORS[i % CHIP_COLORS.length]!} />
+              <ChipStack position={[0, 0, 0.04]} count={4} color={CHIP_COLORS[(i + 1) % CHIP_COLORS.length]!} />
+            </group>
+          ) : (
+            <DisplayRing position={[shelfX - 0.03, shelves[2]!, z]} color={RING_COLORS[(i - 1) / 2]!} holographic={i === 5} />
+          )}
+          <PriceTag position={[wall - 0.4, shelves[2]! - 0.05, z]} price={i === 5 ? '★' : '?'} />
+        </group>
+      ))}
+      {/* The Daily Login Box, free once a day, on the cabinet behind the shopkeeper */}
+      <TreasureChest position={[shelfX - 0.02, 1.0, 1.0]} />
+      <PriceTag position={[wall - 0.43, 0.9, 1.0]} price="FREE" />
+      {[-1, 1].map((end) => (
+        <group key={end}>
+          <Pot position={[0.42, 0, end * (length / 2 - 0.3)]} />
+          <Pot position={[0.7, 0, end * (length / 2 - 0.55)]} scale={0.75} />
+        </group>
+      ))}
+      {CAGE_WINDOWS.map((z) => (
+        <Lantern key={z} position={[0.45, 2.85, z + 0.6]} />
+      ))}
+
+      {/* The counter: a wood body, a padded leather front with gold trim, and a black marble top */}
+      <mesh position={[CAGE.counterX, bodyHeight / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[CAGE.counterDepth, bodyHeight, length]} />
+        <Wood />
       </mesh>
-      <mesh position={[0, 2.35, -depth / 2 + 0.05]}>
-        <planeGeometry args={[1.6, 0.5]} />
+      <mesh position={[counterFront - 0.02, 0.55, 0]} castShadow>
+        <boxGeometry args={[0.04, 0.8, length - 0.04]} />
+        <Leather />
+      </mesh>
+      {[0.14, 0.96].map((y) => (
+        <mesh key={y} position={[counterFront - 0.045, y, 0]}>
+          <boxGeometry args={[0.012, 0.025, length - 0.04]} />
+          <Gold />
+        </mesh>
+      ))}
+      <mesh position={[(counterFront - 0.08 + counterBack + 0.02) / 2, CAGE.counterTop - 0.03, 0]} castShadow receiveShadow>
+        <boxGeometry args={[counterBack + 0.02 - (counterFront - 0.08), 0.06, length + 0.04]} />
+        <Marble />
+      </mesh>
+
+      {/* The brass bars, with rails along the bottom and the top, and a panel above them */}
+      <instancedMesh ref={barMesh} args={[undefined, undefined, bars.length]} castShadow>
+        <cylinderGeometry args={[0.008, 0.008, barHeight, 8]} />
+        <Gold />
+      </instancedMesh>
+      {[CAGE.counterTop + 0.02, 1.98, CAGE.barsTop].map((y) => (
+        <mesh key={y} position={[wallLine + 0.02, y, 0]}>
+          <boxGeometry args={[0.035, 0.035, length]} />
+          <Gold />
+        </mesh>
+      ))}
+      <mesh position={[wallLine + 0.03, (CAGE.barsTop + CAGE.ceiling) / 2, 0]} castShadow>
+        <boxGeometry args={[0.06, CAGE.ceiling - CAGE.barsTop, length]} />
+        <meshStandardMaterial color="#0b1120" roughness={0.6} />
+      </mesh>
+      <mesh position={[wallLine - 0.005, (CAGE.barsTop + CAGE.ceiling) / 2, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[3.2, 0.38]} />
+        <meshStandardMaterial map={plaque} emissiveMap={plaque} emissive="#ffffff" emissiveIntensity={1.6} transparent toneMapped={false} />
+      </mesh>
+
+      {/* The teller windows: a brass frame and arch, a dip in the counter to pass things through, a lamp inside */}
+      {CAGE_WINDOWS.map((z, i) => (
+        <group key={z} position={[0, 0, z]}>
+          <Highlight enabled={highlight === i}>
+            <group>
+              {[-1, 1].map((side) => (
+                <mesh key={side} position={[wallLine + 0.02, (CAGE.counterTop + 1.98) / 2, side * 0.41]}>
+                  <boxGeometry args={[0.05, 1.98 - CAGE.counterTop, 0.04]} />
+                  <Gold />
+                </mesh>
+              ))}
+              <mesh position={[wallLine + 0.02, 1.98, 0]} rotation={[0, Math.PI / 2, 0]}>
+                <torusGeometry args={[0.41, 0.02, 8, 32, Math.PI]} />
+                <Gold />
+              </mesh>
+              <mesh position={[CAGE.counterX - 0.08, CAGE.counterTop + 0.003, 0]}>
+                <boxGeometry args={[0.34, 0.012, 0.36]} />
+                <Gold />
+              </mesh>
+            </group>
+          </Highlight>
+          {/* Beside the window, not in it */}
+          <BankersLamp position={[counterBack - 0.08, CAGE.counterTop, 0.62]} />
+        </group>
+      ))}
+
+      {/* The sign, on the header over the alcove's mouth */}
+      <mesh position={[wallLine - 0.02, CAGE.ceiling + 0.55, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        <planeGeometry args={[1.8, 0.56]} />
         <meshStandardMaterial map={sign} emissiveMap={sign} emissive="#ffffff" emissiveIntensity={2.2} transparent toneMapped={false} />
       </mesh>
     </group>

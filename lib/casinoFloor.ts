@@ -13,7 +13,7 @@
 
 import { GAMES } from './games';
 
-export const COLS = 30;
+export const COLS = 32;
 export const ROWS = 15;
 /**
  * The first column of the room proper: the left wall's face is on its left
@@ -22,6 +22,13 @@ export const ROWS = 15;
 export const LEFT_WALL = 3;
 /** Where the bar is set into the left wall, in tiles: the columns behind the wall line, and the rows it spans. */
 export const BAR_ALCOVE = { x: 1, y: 5, w: LEFT_WALL - 1, h: 8 };
+/**
+ * The first column past the room on the right: the right wall's face is on
+ * its left edge. Only the shop's cage (SHOP_ALCOVE) goes further, into the wall.
+ */
+export const RIGHT_WALL = COLS - 3;
+/** Where the shop's cage is set into the right wall, in tiles, like the bar's alcove opposite. */
+export const SHOP_ALCOVE = { x: RIGHT_WALL, y: 5, w: 2, h: 7 };
 /** One tile, in metres. */
 export const TILE_METRES = 0.8;
 
@@ -81,17 +88,18 @@ function gameObject(
 }
 
 // The room: the top two rows are the back wall (with the sign), the columns
-// left of LEFT_WALL, the last column and the bottom row are walls, and the
-// way in is at the bottom middle, where the player starts. The bar is set
-// into the left wall near the front (BAR_ALCOVE), its counter on the wall
-// line and its stools out in the room. Dealers (and the bartender) stand
-// behind their tables, as part of them (pieceLayout()).
+// left of LEFT_WALL and from RIGHT_WALL on are walls, and the way in is at
+// the bottom middle, where the player starts. The bar is set into the left
+// wall near the front (BAR_ALCOVE), its counter on the wall line and its
+// stools out in the room; opposite it the shop is a cashier's cage set into
+// the right wall (SHOP_ALCOVE). Dealers, the bartender and the shopkeeper
+// stand behind their tables and counters, as part of them (pieceLayout()).
 export const FLOOR_OBJECTS: FloorObject[] = [
   gameObject('blackjack', 6, 4, 4, 3),
   gameObject('poker', 14, 4, 6, 3),
-  gameObject('roulette', 23, 4, 5, 3),
+  gameObject('roulette', 21, 4, 5, 3),
   gameObject('slots', 6, 9, 5, 2),
-  gameObject('sports-betting', 23, 9, 5, 2),
+  gameObject('sports-betting', 21, 9, 5, 2),
   {
     id: 'bar',
     kind: 'bar',
@@ -110,10 +118,11 @@ export const FLOOR_OBJECTS: FloorObject[] = [
   {
     id: 'shop',
     kind: 'shop',
-    x: 14,
-    y: 9,
-    w: 6,
-    h: 2,
+    // The cage, plus the column in front of it where customers stand.
+    x: SHOP_ALCOVE.x - 1,
+    y: SHOP_ALCOVE.y,
+    w: SHOP_ALCOVE.w + 1,
+    h: SHOP_ALCOVE.h,
     interactive: {
       name: 'Cosmetic Shop',
       description: 'Spin the free Daily Login Box and open blind boxes for card backs, chips and outlines.',
@@ -122,11 +131,11 @@ export const FLOOR_OBJECTS: FloorObject[] = [
   },
   // Plants in the corners, pillars between the rows of games.
   { id: 'plant-1', kind: 'plant', x: LEFT_WALL, y: 2, w: 1, h: 1 },
-  { id: 'plant-2', kind: 'plant', x: 28, y: 2, w: 1, h: 1 },
+  { id: 'plant-2', kind: 'plant', x: RIGHT_WALL - 1, y: 2, w: 1, h: 1 },
   { id: 'plant-3', kind: 'plant', x: LEFT_WALL, y: 13, w: 1, h: 1 },
-  { id: 'plant-4', kind: 'plant', x: 28, y: 13, w: 1, h: 1 },
+  { id: 'plant-4', kind: 'plant', x: RIGHT_WALL - 1, y: 13, w: 1, h: 1 },
   { id: 'pillar-1', kind: 'pillar', x: 12, y: 7, w: 1, h: 1 },
-  { id: 'pillar-2', kind: 'pillar', x: 21, y: 7, w: 1, h: 1 },
+  { id: 'pillar-2', kind: 'pillar', x: 20, y: 7, w: 1, h: 1 },
 ];
 
 /** Where the player appears: just inside the door, facing in. */
@@ -241,8 +250,14 @@ export interface PieceLayout {
    * from just above the player's head.
    */
   seatedView?: { ahead: number; y: number; lookAhead: number; lookY: number };
-  /** Screens to look at (the middle of each, and its height), for a piece you play by watching. */
-  screens?: { x: number; y: number; z: number }[];
+  /**
+   * Screens to look at (the middle of each, and its height), for a piece you
+   * play by watching, or the shop's teller windows. The camera flies in to
+   * `distance` (0.82 m if left out) from it, coming from `from` (a direction
+   * on the floor; +z, the room's front, if left out), and looks at `look`
+   * (the screen itself if left out).
+   */
+  screens?: { x: number; y: number; z: number; from?: { x: number; z: number }; distance?: number; look?: { x: number; y: number; z: number } }[];
 }
 
 const CHAIR_RADIUS = 0.26;
@@ -274,6 +289,33 @@ export const BAR = {
   stoolX: 0.92,
   stoolTop: 0.76,
 };
+
+/**
+ * The shop's cage, metres across from the middle of its rectangle (towards
+ * the room is -x; the alcove's back wall is at +width / 2), shared with
+ * Furniture.tsx's drawing: the mirror of BAR.
+ */
+export const CAGE = {
+  /** The shelves' depth out from the back wall. */
+  backDepth: 0.42,
+  /** Where the shopkeeper stands. */
+  shopkeeperX: 0.5,
+  /** The counter: the middle of its body, how deep it is, and how high its top is. */
+  counterX: -0.12,
+  counterDepth: 0.54,
+  counterTop: 1.08,
+  /** How high the brass bars go above the counter, and the alcove's lowered ceiling. */
+  barsTop: 2.6,
+  ceiling: 3.4,
+};
+
+/** The cage's teller windows, along it (z, metres from its middle). */
+export const CAGE_WINDOWS = [-1.8, 0, 1.8];
+
+/** The cage's counter and shelves run the alcove's whole length, but for a hand's width at each end. */
+export function cageLength(depth: number): number {
+  return depth - 0.1;
+}
 
 /** The bar's counter and back bar run the alcove's whole length, but for a hand's width at each end. */
 export function barLength(depth: number): number {
@@ -369,11 +411,33 @@ export function pieceLayout(object: FloorObject): PieceLayout {
       break;
     }
     case 'shop': {
-      // The counter, with the shopkeeper behind it.
+      // A cashier's cage set into the right wall (local +x), running down
+      // the room (z), the mirror of the bar: in the alcove, shelves of
+      // cosmetics on its back wall and the shopkeeper; on the wall line, the
+      // counter, wall to wall, under brass bars with teller windows in them;
+      // out in the room, where customers stand. The alcove's walls are walls.
+      const wall = width / 2;
+      const length = cageLength(depth);
+      const wallLine = wall - SHOP_ALCOVE.w * TILE_METRES;
       layout = withChairsAndDealer({
-        body: [{ type: 'box', x: 0, z: 0.15, w: width - 0.3, d: 0.7 }],
+        body: [
+          { type: 'box', x: wall - CAGE.backDepth / 2, z: 0, w: CAGE.backDepth, d: length },
+          { type: 'box', x: CAGE.counterX, z: 0, w: CAGE.counterDepth, d: length },
+        ],
         chairs: [],
-        dealer: { x: 0, z: -0.45, handsY: 1.07, handsZ: 0.36 },
+        dealer: { x: CAGE.shopkeeperX, z: 0, handsY: CAGE.counterTop - 0.02, handsZ: CAGE.shopkeeperX - (CAGE.counterX + CAGE.counterDepth / 2) + 0.12, facing: -Math.PI / 2 },
+        // The teller windows: the camera comes up to one from the room, into
+        // the opening itself (ahead of the player's face, who's standing at
+        // the counter), and looks through it at the shopkeeper and the
+        // shelves behind.
+        screens: CAGE_WINDOWS.map((z) => ({
+          x: wallLine,
+          y: 1.52,
+          z,
+          from: { x: -1, z: 0 },
+          distance: 0.15,
+          look: { x: CAGE.shopkeeperX + 0.2, y: 1.45, z: z * 0.5 },
+        })),
       });
       break;
     }
@@ -441,14 +505,18 @@ export const PLAYER_RADIUS = 0.3;
 
 const inBarAlcove = (x: number, y: number) =>
   x >= BAR_ALCOVE.x && x < BAR_ALCOVE.x + BAR_ALCOVE.w && y >= BAR_ALCOVE.y && y < BAR_ALCOVE.y + BAR_ALCOVE.h;
+const inShopAlcove = (x: number, y: number) =>
+  x >= SHOP_ALCOVE.x && x < SHOP_ALCOVE.x + SHOP_ALCOVE.w && y >= SHOP_ALCOVE.y && y < SHOP_ALCOVE.y + SHOP_ALCOVE.h;
 
 // The front of the room (SRS-105.4): a rail runs across at y = DOOR.y, with
 // a gate in it in front of the casino's doors, and the foyer beyond it, up to
 // the front wall, is floor too, so the player can walk through the gate to
-// the doors and back. On the left the room stops at LEFT_WALL, except for the
-// bar's alcove.
+// the doors and back. The room stops at LEFT_WALL and RIGHT_WALL, except for
+// the bar's alcove and the shop's cage.
 const isWall = (x: number, y: number) => {
-  if (y < Math.floor(FRONT_WALL_Y)) return (x < LEFT_WALL && !inBarAlcove(x, y)) || x >= COLS - 1 || y <= 1;
+  if (y < Math.floor(FRONT_WALL_Y)) {
+    return (x < LEFT_WALL && !inBarAlcove(x, y)) || (x >= RIGHT_WALL && !inShopAlcove(x, y)) || x >= COLS - 1 || y <= 1;
+  }
   // From the front wall's row on there's only the lobby (its walls are
   // solids, LOBBY_SOLIDS), and nothing beyond it.
   return x < doorMiddle - LOBBY.width / 2 - 1 || x >= doorMiddle + LOBBY.width / 2 + 1 || y >= FRONT_WALL_Y + LOBBY.depth + 1;
@@ -489,7 +557,7 @@ const railPiece = (x1: number, x2: number): TileShape => ({
 
 const FRONT_SOLIDS: TileShape[] = [
   railPiece(LEFT_WALL, doorMiddle - GATE_HALF_WIDTH),
-  railPiece(doorMiddle + GATE_HALF_WIDTH, COLS - 1),
+  railPiece(doorMiddle + GATE_HALF_WIDTH, RIGHT_WALL),
   ...FOYER_PLANTS.map((plant) => ({ shape: { type: 'circle', x: 0, z: 0, r: 0.3 } as Shape, cx: plant.x, cy: plant.y })),
 ];
 

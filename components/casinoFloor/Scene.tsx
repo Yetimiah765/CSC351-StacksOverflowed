@@ -8,10 +8,13 @@ import * as THREE from 'three';
 import {
   BAR,
   BAR_ALCOVE,
+  CAGE,
   COLS,
   DOOR,
   FLOOR_OBJECTS,
   LEFT_WALL,
+  RIGHT_WALL,
+  SHOP_ALCOVE,
   ROWS,
   LOBBY_MIDDLE,
   START,
@@ -56,7 +59,7 @@ import {
   Plant,
   PokerTable,
   RouletteTable,
-  ShopCounter,
+  ShopCage,
   SlotMachines,
   SportsBar,
 } from './Furniture';
@@ -64,7 +67,6 @@ import Person, { type Motion, type SeatPose, type TossPose } from './Person';
 import { compileInBackground } from './compile';
 import CoinToss, { noCoin, type CoinFx } from './CoinToss';
 import { BASIN_FLOOR, BASIN_WATER } from './Fountain';
-import Highlight from './Highlight';
 import CasinoFront, { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
 import Lobby, { LOBBY_HALF_WIDTH, LOBBY_HEIGHT, LOBBY_NORTH_Z, LOBBY_SOUTH_Z, type LobbyState } from './Lobby';
 import { carpetTexture, neonTexture, wallTexture } from './textures';
@@ -394,10 +396,15 @@ function planSeating(object: FloorObject, spot: number | null, from: THREE.Vecto
       };
     }
   } else if (layout.screens?.length) {
-    // Right up to the screen, filling the view.
+    // Right up to the screen (or the shop's teller window), from the room's side of it.
     const screen = layout.screens[spot ?? 0] ?? layout.screens[0]!;
     const at = new THREE.Vector3(cx + screen.x, screen.y, cz + screen.z);
-    plan.zoomTo = { position: at.clone().add(new THREE.Vector3(0, 0, 0.82)), look: at };
+    const from = screen.from ?? { x: 0, z: 1 };
+    const distance = screen.distance ?? 0.82;
+    plan.zoomTo = {
+      position: at.clone().add(new THREE.Vector3(from.x * distance, 0, from.z * distance)),
+      look: screen.look ? new THREE.Vector3(cx + screen.look.x, screen.look.y, cz + screen.look.z) : at,
+    };
   }
   return plan;
 }
@@ -1229,7 +1236,7 @@ function Player({
       wz + Math.cos(yaw) * Math.cos(pitch) * distance
     );
     const [minX] = toWorld(LEFT_WALL + 0.3, 0);
-    const [maxX] = toWorld(COLS - 1.3, 0);
+    const [maxX] = toWorld(RIGHT_WALL - 0.3, 0);
     const back = (2 - ROWS / 2) * TILE_M + 0.4;
     if (casinoDoors.current > 0) {
       // While the casino's doors are open for them (SRS-103.17), it stays
@@ -1358,35 +1365,13 @@ function Room({
   onDoorsClick: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const [leftX, backZ] = toWorld(LEFT_WALL, 2);
-  const [rightX, frontZ] = toWorld(COLS - 1, ROWS - 1);
+  const [rightX, frontZ] = toWorld(RIGHT_WALL, ROWS - 1);
   const width = rightX - leftX;
   const depth = frontZ - backZ;
   const middleX = (leftX + rightX) / 2;
   const centerZ = (backZ + frontZ) / 2;
-  // The side walls run on past the floor's rail to the front wall.
-  const sideLength = FRONT_WALL_Z - backZ;
-  const sideZ = (backZ + FRONT_WALL_Z) / 2;
-  // The bar's alcove, set into the left wall: its back wall, and where it starts and ends along the room.
-  const [alcoveX, alcoveTop] = toWorld(BAR_ALCOVE.x, BAR_ALCOVE.y);
-  const [, alcoveBottom] = toWorld(0, BAR_ALCOVE.y + BAR_ALCOVE.h);
-  const alcoveDepth = leftX - alcoveX;
-  const alcoveLength = alcoveBottom - alcoveTop;
-  const alcoveMiddle = (alcoveTop + alcoveBottom) / 2;
-  // The left wall either side of the alcove.
-  const leftWalls = [
-    { from: backZ, to: alcoveTop },
-    { from: alcoveBottom, to: FRONT_WALL_Z },
-  ];
   const walls = useMemo(() => wallTexture([width / 2.4, 1.6]), [width]);
-  const rightWall = useMemo(() => wallTexture([sideLength / 2.4, 1.6]), [sideLength]);
-  const upperLength = alcoveTop - backZ;
-  const lowerLength = FRONT_WALL_Z - alcoveBottom;
-  const upperWall = useMemo(() => wallTexture([upperLength / 2.4, 1.6]), [upperLength]);
-  const lowerWall = useMemo(() => wallTexture([lowerLength / 2.4, 1.6]), [lowerLength]);
-  const leftWallMaps = [upperWall, lowerWall];
-  const alcoveSides = useMemo(() => wallTexture([alcoveDepth / 2.4, 1.6]), [alcoveDepth]);
   const sign = useMemo(() => neonTexture('STACKS OVERFLOWED', '#fbbf24'), []);
-  const headerHeight = WALL_HEIGHT - BAR.ceiling;
   return (
     <group>
       {/* Polished floor: a clear coat that catches the lights. (A true mirror,
@@ -1426,78 +1411,126 @@ function Room({
         <Sconce key={x} position={[middleX + x, 2.3, backZ]} rotation={0} />
       ))}
 
-      {/* The right wall */}
-      <mesh position={[rightX, WALL_HEIGHT / 2, sideZ]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[sideLength, WALL_HEIGHT]} />
-        <meshStandardMaterial map={rightWall} roughness={0.7} />
-      </mesh>
-      <mesh position={[rightX - 0.03, WALL_HEIGHT - 0.25, sideZ]}>
-        <boxGeometry args={[0.04, 0.05, sideLength]} />
-        <NeonStrip />
-      </mesh>
-      {sconces(depth, 0).map((z) => (
-        <Sconce key={z} position={[rightX, 2.3, centerZ + z]} rotation={-Math.PI / 2} />
-      ))}
-
-      {/* The left wall, either side of the bar's alcove; the neon strip runs on across the header */}
-      {leftWalls.map(({ from, to }, i) => (
-        <mesh key={i} position={[leftX, WALL_HEIGHT / 2, (from + to) / 2]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
-          <planeGeometry args={[to - from, WALL_HEIGHT]} />
-          <meshStandardMaterial map={leftWallMaps[i]} roughness={0.7} />
-        </mesh>
-      ))}
-      <mesh position={[leftX + 0.03, WALL_HEIGHT - 0.25, sideZ]}>
-        <boxGeometry args={[0.04, 0.05, sideLength]} />
-        <NeonStrip />
-      </mesh>
-      {/* Sconces flanking the alcove, and one more towards the back */}
-      {[backZ + 0.9, alcoveTop - 0.5, (alcoveBottom + frontZ) / 2].map((z) => (
-        <Sconce key={z} position={[leftX, 2.3, z]} rotation={Math.PI / 2} />
-      ))}
-
-      {/* The alcove: a back wall, two side walls and a lowered dark-wood ceiling,
-          with the header across its mouth above the bar (the sign is on it, in
-          Furniture.tsx) and gold pilasters framing it. Its floor is dark wood. */}
-      <mesh position={[alcoveX, BAR.ceiling / 2, alcoveMiddle]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[alcoveLength, BAR.ceiling]} />
-        <meshStandardMaterial color="#0d1220" roughness={0.75} />
-      </mesh>
-      {[
-        { z: alcoveTop, facing: 0 },
-        { z: alcoveBottom, facing: Math.PI },
-      ].map(({ z, facing }) => (
-        <mesh key={z} position={[(alcoveX + leftX) / 2, BAR.ceiling / 2, z]} rotation={[0, facing, 0]} receiveShadow>
-          <planeGeometry args={[alcoveDepth, BAR.ceiling]} />
-          <meshStandardMaterial map={alcoveSides} roughness={0.7} />
-        </mesh>
-      ))}
-      <mesh position={[(alcoveX + leftX) / 2, BAR.ceiling, alcoveMiddle]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[alcoveDepth, alcoveLength]} />
-        <meshStandardMaterial color="#1c0f08" roughness={0.6} />
-      </mesh>
-      <mesh position={[leftX, BAR.ceiling + headerHeight / 2, alcoveMiddle]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
-        <planeGeometry args={[alcoveLength, headerHeight]} />
-        <meshStandardMaterial color="#0b1120" roughness={0.6} />
-      </mesh>
-      {/* The header's underside, and a gold edge along its bottom */}
-      <mesh position={[leftX + 0.06, BAR.ceiling + 0.04, alcoveMiddle]}>
-        <boxGeometry args={[0.12, 0.08, alcoveLength + 0.24]} />
-        <Brass />
-      </mesh>
-      {[alcoveTop, alcoveBottom].map((z, i) => (
-        <mesh key={z} position={[leftX + 0.04, BAR.ceiling / 2, z + (i ? 0.06 : -0.06)]} castShadow>
-          <boxGeometry args={[0.1, BAR.ceiling, 0.12]} />
-          <Brass />
-        </mesh>
-      ))}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(alcoveX + leftX) / 2, 0.001, alcoveMiddle]} receiveShadow>
-        <planeGeometry args={[alcoveDepth, alcoveLength]} />
-        <meshStandardMaterial color="#2a160b" roughness={0.45} />
-      </mesh>
+      {/* The side walls: the bar set into the left one, the shop's cage into the right */}
+      <SideWall side={-1} wallX={leftX} backZ={backZ} frontZ={frontZ} alcove={BAR_ALCOVE} alcoveBackX={toWorld(BAR_ALCOVE.x, 0)[0]} ceiling={BAR.ceiling} />
+      <SideWall
+        side={1}
+        wallX={rightX}
+        backZ={backZ}
+        frontZ={frontZ}
+        alcove={SHOP_ALCOVE}
+        alcoveBackX={toWorld(SHOP_ALCOVE.x + SHOP_ALCOVE.w, 0)[0]}
+        ceiling={CAGE.ceiling}
+      />
 
       {/* The front, drawn across the whole grid (centred, as CasinoFront expects); what's left of
           LEFT_WALL is behind the left wall, out of sight. */}
       <CasinoFront state={lobbyState} width={(COLS - 2) * TILE_M} height={WALL_HEIGHT} highlight={doorsOutlined} onDoorsClick={onDoorsClick} />
+    </group>
+  );
+}
+
+/**
+ * One side wall (`side` -1 the left, 1 the right), from the back wall to the
+ * casino's front wall, with an alcove set into it (`alcove`, in tiles; the
+ * bar's or the shop's): the wall either side of it, an emerald neon strip
+ * along the top, sconces, and the alcove's back wall, side walls, lowered
+ * dark-wood ceiling, dark wood floor, gold pilasters and the header across
+ * its mouth (the sign on it is the piece's own, in Furniture.tsx).
+ */
+function SideWall({
+  side,
+  wallX,
+  backZ,
+  frontZ,
+  alcove,
+  alcoveBackX,
+  ceiling,
+}: {
+  side: -1 | 1;
+  wallX: number;
+  backZ: number;
+  frontZ: number;
+  alcove: { y: number; h: number };
+  alcoveBackX: number;
+  ceiling: number;
+}) {
+  // Into the room.
+  const inward = -side;
+  const facing = inward * (Math.PI / 2);
+  const [, alcoveTop] = toWorld(0, alcove.y);
+  const [, alcoveBottom] = toWorld(0, alcove.y + alcove.h);
+  const alcoveDepth = Math.abs(wallX - alcoveBackX);
+  const alcoveLength = alcoveBottom - alcoveTop;
+  const alcoveMiddle = (alcoveTop + alcoveBottom) / 2;
+  const alcoveX = (wallX + alcoveBackX) / 2;
+  const sideLength = FRONT_WALL_Z - backZ;
+  const sideZ = (backZ + FRONT_WALL_Z) / 2;
+  const headerHeight = WALL_HEIGHT - ceiling;
+  const upperLength = alcoveTop - backZ;
+  const lowerLength = FRONT_WALL_Z - alcoveBottom;
+  const upperWall = useMemo(() => wallTexture([upperLength / 2.4, 1.6]), [upperLength]);
+  const lowerWall = useMemo(() => wallTexture([lowerLength / 2.4, 1.6]), [lowerLength]);
+  const alcoveSides = useMemo(() => wallTexture([alcoveDepth / 2.4, 1.6]), [alcoveDepth]);
+  const segments = [
+    { from: backZ, to: alcoveTop, map: upperWall },
+    { from: alcoveBottom, to: FRONT_WALL_Z, map: lowerWall },
+  ];
+  // Sconces: one towards the back, a pair flanking the alcove, and one more in the middle of a long stretch towards the front.
+  const lights = [backZ + 0.9, alcoveTop - 0.5, alcoveBottom + 0.5];
+  if (frontZ - alcoveBottom > 2.5) lights.push((alcoveBottom + frontZ) / 2 + 0.4);
+  return (
+    <group>
+      {segments.map(({ from, to, map }) => (
+        <mesh key={from} position={[wallX, WALL_HEIGHT / 2, (from + to) / 2]} rotation={[0, facing, 0]} receiveShadow>
+          <planeGeometry args={[to - from, WALL_HEIGHT]} />
+          <meshStandardMaterial map={map} roughness={0.7} />
+        </mesh>
+      ))}
+      <mesh position={[wallX + inward * 0.03, WALL_HEIGHT - 0.25, sideZ]}>
+        <boxGeometry args={[0.04, 0.05, sideLength]} />
+        <NeonStrip />
+      </mesh>
+      {lights.map((z) => (
+        <Sconce key={z} position={[wallX, 2.3, z]} rotation={facing} />
+      ))}
+
+      <mesh position={[alcoveBackX, ceiling / 2, alcoveMiddle]} rotation={[0, facing, 0]} receiveShadow>
+        <planeGeometry args={[alcoveLength, ceiling]} />
+        <meshStandardMaterial color="#0d1220" roughness={0.75} />
+      </mesh>
+      {[
+        { z: alcoveTop, turn: 0 },
+        { z: alcoveBottom, turn: Math.PI },
+      ].map(({ z, turn }) => (
+        <mesh key={z} position={[alcoveX, ceiling / 2, z]} rotation={[0, turn, 0]} receiveShadow>
+          <planeGeometry args={[alcoveDepth, ceiling]} />
+          <meshStandardMaterial map={alcoveSides} roughness={0.7} />
+        </mesh>
+      ))}
+      <mesh position={[alcoveX, ceiling, alcoveMiddle]} rotation={[Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[alcoveDepth, alcoveLength]} />
+        <meshStandardMaterial color="#1c0f08" roughness={0.6} />
+      </mesh>
+      <mesh position={[wallX, ceiling + headerHeight / 2, alcoveMiddle]} rotation={[0, facing, 0]} receiveShadow>
+        <planeGeometry args={[alcoveLength, headerHeight]} />
+        <meshStandardMaterial color="#0b1120" roughness={0.6} />
+      </mesh>
+      {/* The header's underside, and a gold edge along its bottom */}
+      <mesh position={[wallX + inward * 0.06, ceiling + 0.04, alcoveMiddle]}>
+        <boxGeometry args={[0.12, 0.08, alcoveLength + 0.24]} />
+        <Brass />
+      </mesh>
+      {[alcoveTop, alcoveBottom].map((z, i) => (
+        <mesh key={z} position={[wallX + inward * 0.04, ceiling / 2, z + (i ? 0.06 : -0.06)]} castShadow>
+          <boxGeometry args={[0.1, ceiling, 0.12]} />
+          <Brass />
+        </mesh>
+      ))}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[alcoveX, 0.001, alcoveMiddle]} receiveShadow>
+        <planeGeometry args={[alcoveDepth, alcoveLength]} />
+        <meshStandardMaterial color="#2a160b" roughness={0.45} />
+      </mesh>
     </group>
   );
 }
@@ -1590,7 +1623,7 @@ function FloorPiece({ object, highlight }: { object: FloorObject; highlight: num
     case 'sports-betting':
       return <SportsBar width={width} depth={depth} highlight={highlight} />;
     case 'shop':
-      return <ShopCounter width={width} depth={depth} layout={layout} />;
+      return <ShopCage width={width} depth={depth} layout={layout} highlight={highlight} />;
     case 'bar':
       return <Bar width={width} depth={depth} layout={layout} highlight={highlight} />;
     case 'plant':
@@ -1870,13 +1903,13 @@ function Floor({
           const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);
           return (
             <group key={`light-${object.id}`}>
-              {/* The bar stands on the polished floor; the games each have a rug. */}
-              {object.kind === 'bar' ? null : <Rug object={object} />}
+              {/* The bar and the shop's cage stand on the polished floor; the games each have a rug. */}
+              {object.kind === 'bar' || object.kind === 'shop' ? null : <Rug object={object} />}
               <Spot
-                x={object.kind === 'bar' ? x + 0.6 : x}
+                x={object.kind === 'bar' ? x + 0.6 : object.kind === 'shop' ? x - 0.6 : x}
                 z={z}
-                color={object.kind === 'bar' ? '#ffc27a' : object.kind === 'slots' ? '#ffd1e8' : '#ffe8c2'}
-                intensity={object.kind === 'bar' ? 32 : 45}
+                color={object.kind === 'bar' || object.kind === 'shop' ? '#ffc27a' : object.kind === 'slots' ? '#ffd1e8' : '#ffe8c2'}
+                intensity={object.kind === 'bar' || object.kind === 'shop' ? 32 : 45}
               />
             </group>
           );
@@ -1889,10 +1922,8 @@ function Floor({
           const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);
           return (
             <group key={object.id} position={[x, 0, z]}>
-              {/* A table outlines its nearest chair; the shop is outlined whole (until the player's sitting down). */}
-              <Highlight enabled={object.id === nearId && object.kind === 'shop' && !playing}>
-                <FloorPiece object={object} highlight={object.id === nearId && !playing ? nearSpot : null} />
-              </Highlight>
+              {/* A table outlines its nearest chair, the sports bar its nearer screen and the shop its nearest window (until the player's sitting down). */}
+              <FloorPiece object={object} highlight={object.id === nearId && !playing ? nearSpot : null} />
             </group>
           );
         })}

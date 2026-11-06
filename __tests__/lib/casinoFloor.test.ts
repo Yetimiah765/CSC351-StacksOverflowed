@@ -4,9 +4,13 @@ import {
   BAR_STOOLS,
   BAR_ALCOVE,
   BAR_STOOL_SPACING,
+  CAGE,
+  CAGE_WINDOWS,
+  SHOP_ALCOVE,
   COLS,
   DOOR,
   LEFT_WALL,
+  RIGHT_WALL,
   FLOOR_OBJECTS,
   FOYER_PLANTS,
   KIOSKS,
@@ -106,8 +110,8 @@ describe('the casino floor', () => {
 
 describe('walking somewhere', () => {
   it('takes the shortest way, one tile at a time, around anything in the way', () => {
-    const path = findPath({ x: 13, y: 7 }, [{ x: 20, y: 7 }])!;
-    expect(path).toHaveLength(7);
+    const path = findPath({ x: 13, y: 7 }, [{ x: 19, y: 7 }])!;
+    expect(path).toHaveLength(6);
     for (const step of path) expect(isBlocked(step.x, step.y)).toBe(false);
   });
 
@@ -117,8 +121,8 @@ describe('walking somewhere', () => {
   });
 
   it('can walk all the way round the poker table, between it and its chairs and the pillars', () => {
-    const path = findPath({ x: 13, y: 7 }, [{ x: 20, y: 7 }])!;
-    expect(path).toHaveLength(7);
+    const path = findPath({ x: 13, y: 7 }, [{ x: 19, y: 7 }])!;
+    expect(path).toHaveLength(6);
   });
 });
 
@@ -169,7 +173,7 @@ describe('moving freely (the 3D floor)', () => {
 
   it('finds the game within reach of a point, and none further away', () => {
     expect(nearbyObjectAt({ x: 17, y: 7.1 })?.id).toBe('poker');
-    expect(nearbyObjectAt({ x: 17, y: 8.6 })?.id).toBe('shop');
+    expect(nearbyObjectAt({ x: RIGHT_WALL - 0.5, y: 8.5 })?.id).toBe('shop');
     expect(nearbyObjectAt({ x: 12.5, y: 12.5 })).toBeNull();
   });
 });
@@ -209,10 +213,10 @@ describe('taking a seat', () => {
 
   it('zooms into the nearer of the sports bar screens, and the shop has no chair', () => {
     const sports = byId('sports-betting');
-    expect(nearestChair(sports, { x: 24, y: 11 })).toBeNull();
-    expect(nearestScreen(sports, { x: 24, y: 11 })).toBe(0);
-    expect(nearestScreen(sports, { x: 27, y: 11 })).toBe(1);
-    expect(nearestChair(byId('shop'), { x: 17, y: 8.6 })).toBeNull();
+    expect(nearestChair(sports, { x: 22, y: 11 })).toBeNull();
+    expect(nearestScreen(sports, { x: 22, y: 11 })).toBe(0);
+    expect(nearestScreen(sports, { x: 25, y: 11 })).toBe(1);
+    expect(nearestChair(byId('shop'), { x: RIGHT_WALL - 0.5, y: 8.5 })).toBeNull();
   });
 });
 
@@ -283,6 +287,53 @@ describe('the bar', () => {
 
   it('BAR_STOOLS spaces them evenly about the middle', () => {
     expect(BAR_STOOLS(5.6)).toEqual([-2.2, -1.1, 0, 1.1, 2.2].map((z) => expect.closeTo(z, 10)));
+  });
+});
+
+describe("the shop's cage", () => {
+  const shop = byId('shop');
+
+  it('is set into the right wall, opposite the bar, and still opens the shop', () => {
+    expect(shop.x).toBe(SHOP_ALCOVE.x - 1);
+    expect(shop.x + shop.w).toBe(COLS - 1);
+    expect(shop.interactive?.href).toBe('/shop');
+    // The alcove is open behind the wall line, which is solid either side of it.
+    for (let y = SHOP_ALCOVE.y; y < SHOP_ALCOVE.y + SHOP_ALCOVE.h; y++) expect(isBlocked(RIGHT_WALL, y)).toBe(true);
+    expect(isBlocked(RIGHT_WALL, SHOP_ALCOVE.y - 1)).toBe(true);
+    expect(isBlocked(RIGHT_WALL, SHOP_ALCOVE.y + SHOP_ALCOVE.h)).toBe(true);
+  });
+
+  it('puts the counter on the wall line and the shopkeeper behind it, facing the room', () => {
+    const { dealer, chairs } = pieceLayout(shop);
+    const wallLine = (shop.w * 0.8) / 2 - SHOP_ALCOVE.w * 0.8;
+    expect(chairs).toEqual([]);
+    expect(Math.abs(CAGE.counterX - CAGE.counterDepth / 2 - wallLine)).toBeLessThan(0.1);
+    expect(dealer?.facing).toBeCloseTo(-Math.PI / 2);
+    expect(dealer!.x).toBeGreaterThan(CAGE.counterX + CAGE.counterDepth / 2);
+    expect(dealer!.x).toBeLessThan((shop.w * 0.8) / 2 - CAGE.backDepth);
+  });
+
+  it("has a teller window for each of CAGE_WINDOWS, flown up to from the room's side", () => {
+    const { screens } = pieceLayout(shop);
+    expect(screens?.map((window) => window.z)).toEqual(CAGE_WINDOWS);
+    for (const window of screens!) {
+      expect(window.from).toEqual({ x: -1, z: 0 });
+      // It looks through the window, into the cage.
+      expect(window.look!.x).toBeGreaterThan(window.x);
+    }
+  });
+
+  it("outlines the window nearest the player, and can't be walked behind", () => {
+    const middle = shop.y + shop.h / 2;
+    CAGE_WINDOWS.forEach((z, i) => {
+      expect(nearestScreen(shop, { x: RIGHT_WALL - 0.5, y: middle + z / 0.8 })).toBe(i);
+    });
+    expect(findPath(START, [{ x: RIGHT_WALL + 1, y: Math.floor(middle) }])).toBeNull();
+    expect(findPath(START, standingSpots(shop))).not.toBeNull();
+  });
+
+  it('leaves room to walk between it and the roulette table and the sports bar', () => {
+    expect(findPath({ x: RIGHT_WALL - 2, y: 3 }, [{ x: RIGHT_WALL - 2, y: 12 }])).toHaveLength(9);
   });
 });
 

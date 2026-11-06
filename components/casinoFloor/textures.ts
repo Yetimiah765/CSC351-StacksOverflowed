@@ -1513,3 +1513,50 @@ export function paintBarTv(
   const offset = -((time / 18) % span);
   for (let x = offset; x < w; x += span) ctx.fillText(message, x, h - 15);
 }
+
+// ---------- the shop's cage ----------
+/** A little price tag for the cage's shelves: a cream card with a gold coin and the price. */
+export function priceTagTexture(price: string) {
+  const { element, ctx } = canvas(128, 64);
+  ctx.fillStyle = '#f5ecd7';
+  ctx.fillRect(0, 0, 128, 64);
+  ctx.strokeStyle = '#8a6a1c';
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 124, 60);
+  ctx.fillStyle = '#e8b84a';
+  ctx.beginPath();
+  ctx.arc(26, 32, 14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#8a6a1c';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.fillStyle = '#3b1d0e';
+  ctx.font = 'bold 30px Georgia, serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(price, 46, 34);
+  return texture(element);
+}
+
+/** A card back for the cage's display cards: a coloured lattice inside a white border. */
+export function cardBackTexture(color: string, accent: string) {
+  const { element, ctx } = canvas(96, 136);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(0, 0, 96, 136);
+  ctx.fillStyle = color;
+  ctx.fillRect(7, 7, 82, 122);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  for (let i = -136; i < 136; i += 12) {
+    ctx.beginPath();
+    ctx.moveTo(7 + i, 7);
+    ctx.lineTo(7 + i + 122, 129);
+    ctx.moveTo(89 - i, 7);
+    ctx.lineTo(89 - i - 122, 129);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#f8fafc';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(12, 12, 72, 112);
+  return texture(element);
+}

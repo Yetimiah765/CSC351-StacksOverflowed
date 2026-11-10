@@ -9,8 +9,8 @@ import {
   totalStake,
 } from '../../../../lib/blackjack';
 import { requirePlayerId } from '../auth';
-import { changeBalance, finishBusy, getHand, removeHand, saveHand, startBusy } from '../hands';
-import { recordRound, refundLostRounds, saveStake } from '../record';
+import { changeBalance, finishBusy, getHand, saveHand, startBusy } from '../hands';
+import { recordRound, refundLostRounds } from '../record';
 
 // Hit, Stand, Double, or Split (SRS-903.1, SRS-904.1, SRS-910, SRS-911) on
 // the hand being played. Body: { handId, move, step }, where `step` is the
@@ -50,9 +50,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    const stored = getHand(playerId!);
+    const found = await getHand(supabase, playerId!);
+    if (!found.ok) return Response.json({ error: 'Unable to load your hand. Please try again.' }, { status: 500 });
+    const stored = found.hand;
     if (!stored) {
-      // The server may have lost the hand (e.g. in a restart): return its bets.
+      // The server may have lost the hand: return its bets.
       const refunded = await refundLostRounds(supabase, playerId!);
       return Response.json({ error: 'You have no hand in play.', refunded }, { status: 404 });
     }
@@ -79,19 +81,25 @@ export async function POST(request: Request) {
     }
 
     const { state, outcome } = playMove(stored.bet, stored.state, move);
-    // A lost round returns everything staked on it, the new bet included.
-    if (cost > 0) await saveStake(supabase, handId, totalStake(stored.bet, state));
-    if (!outcome) {
-      saveHand(playerId!, { ...stored, state });
-      return Response.json({ hand: handView(handId, stored.bet, state, null), balance }, { status: 200 });
+    // Saved only if the round is still where this request found it, so a
+    // move that reached another copy of the server first wins and this one
+    // is undone. A lost round returns everything staked on it, so the row's
+    // bet includes any new bet.
+    const fromStep = stored.state.step;
+    const saved = outcome
+      ? await recordRound(supabase, playerId!, handId, stored.bet, state, outcome, stored.startedAt, fromStep)
+      : await saveHand(supabase, handId, fromStep, { bet: stored.bet, state }, totalStake(stored.bet, state));
+    if (saved !== 'saved') {
+      if (cost > 0) {
+        const returned = await changeBalance(supabase, playerId!, cost);
+        if (!returned.ok) console.error(`Blackjack: failed to return ${cost} to player ${playerId}: ${returned.error}`);
+      }
+      return saved === 'moved'
+        ? Response.json({ error: 'That hand already moved on, maybe in another tab.' }, { status: 409 })
+        : Response.json({ error: 'Your move could not be saved. Please try again.' }, { status: 500 });
     }
-
-    // Kept in memory until its row is closed, so it can't be taken for a lost
-    // round meanwhile. If it can't be saved, the open row returns the bets.
-    const saved = await recordRound(supabase, playerId!, handId, stored.bet, state, outcome, stored.startedAt);
-    removeHand(playerId!);
-    if (!saved) {
-      return Response.json({ error: 'The hand could not be saved, so your bets will be returned.' }, { status: 500 });
+    if (!outcome) {
+      return Response.json({ hand: handView(handId, stored.bet, state, null), balance }, { status: 200 });
     }
     const view = handView(handId, stored.bet, state, outcome);
     const payout = totalStake(stored.bet, state) + outcome.net;

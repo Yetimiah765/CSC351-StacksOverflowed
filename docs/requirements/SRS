@@ -244,6 +244,10 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 # **Inactivity, connection, missed blinds, and busted players**
 
+**SRS-8.4, Equipped cosmetics at the table.** The system shall show each seated player's equipped card back on that player's face-down cards, their equipped chip on their bet and chip stack, and their equipped profile outline around their profile picture. For an empty cosmetic slot, the system shall show the table's default card back or chip.
+
+*Traces to: UR-008, UR-120*
+
 **UR-009, JN – Removal for Prolonged Inactivity**
 
 *User story: As a player, I want the system to automatically remove a player who is unable or unwilling to participate, whether through prolonged disconnection or repeated timed-out turns while connected, so that a seat isn't held indefinitely and the table can keep moving for everyone else.*
@@ -732,6 +736,78 @@ flowchart LR
 
 *Traces to: UR-021*
 
+**SRS-21.4, Reset an empty table.** When the last seated player leaves a table or is removed from it, the system shall clear the previous hand's result, the dealer button, and the blind history from the table state, so that the next player to sit down sees a new table.
+
+*Traces to: UR-021, UR-013*
+
+**UR-022, JN – Table Animations**
+
+*User story: As a player, I want to see the cards being dealt, the bets being made and the pots being won, and to have time to see each hand's result, so that I can follow every hand as it happens, as at a real table.*
+
+**SRS-22.1, Result display before the next hand.** After a hand ends, the system shall keep that hand's result (the final board, each revealed hand and its name, and each winner's amount) on the table, and shall not deal the next hand until the time in SRS-NFR-027 has passed.
+
+*Traces to: UR-022, UR-020*
+
+**SRS-22.2, Shuffle and deal animation.** At the start of each hand, the system shall show the previous hand's cards being gathered into the deck, the deck being shuffled, and the hole cards travelling from the deck to each dealt-in player's seat in the deal order in SRS-16.2 through SRS-16.4, the player's own cards arriving face up and every other player's face down.
+
+*Traces to: UR-022, UR-016*
+
+**SRS-22.3, Community card animation.** When community cards are dealt, the system shall show each card leaving the deck face down, turning face up and landing on the board, the flop's three cards one after another, with a stronger landing for the turn and the strongest for the river.
+
+*Traces to: UR-022, UR-017*
+
+**SRS-22.4, Fold animation.** When a player folds, the system shall show that player's cards being thrown face down onto a muck pile, which shall stay on the table until the next hand begins.
+
+*Traces to: UR-022*
+
+**SRS-22.5, Chip animation.** The system shall show chips moving from a player's seat onto the table when that player posts a blind, bets, calls or raises, and from the pot to each winner's seat when a pot is awarded, followed by the amount won shown over the winner's seat.
+
+*Traces to: UR-022, UR-005*
+
+**SRS-22.6, Action callout.** Upon each betting action, the system shall show a callout across the table naming the action (Fold, Check, Call, Bet, Raise or All-in) on every client viewing the table, drawn more forcefully the more aggressive the action. Cards dealt as a result of the action shall not appear until its callout has passed.
+
+*Traces to: UR-022, UR-015*
+
+**SRS-22.7, Showdown animation.** At showdown, the system shall reveal the hands one after another in the order defined in SRS-6.5, marking the winning hands. When the board was run out under SRS-17.8, the system shall then show the remaining community cards being dealt street by street. The system shall not show the hands' names in the result, or move the awarded chips, until every community card is on the board.
+
+*Traces to: UR-022, UR-005, UR-006*
+
+**SRS-22.8, No replay on opening the table.** When a player opens a table's page, the system shall show the hand in progress, or the last hand's result, as it stands, and shall not play the animations of anything that happened before the page was opened.
+
+*Traces to: UR-022, UR-002*
+
+**SRS-22.9, Reduced motion at the table.** When the player's device is set to reduce motion, the system shall show the table's changes without the animations in SRS-22.2 through SRS-22.7.
+
+*Traces to: UR-022*
+
+**SRS-22.10, Table fits the screen.** In a laptop or desktop browser window at least 1024 pixels wide and 600 pixels tall, the table page shall show the whole table, the player's own hole cards and their available actions without the page scrolling.
+
+*Traces to: UR-022, UR-015*
+
+**UR-023, JN – Emotes**
+
+*User story: As a player, I want to send quick emotes to the table, so that I can react to a hand without typing.*
+
+**SRS-23.1, Send an emote.** The system shall allow a seated player to choose one of the emotes they own and send it to their table at any time, during or between hands.
+
+*Traces to: UR-023*
+
+**SRS-23.2, Display an emote.** Upon receiving a valid emote, the system shall display it over the sending player's seat on every client viewing the table for the duration in SRS-NFR-029.
+
+*Traces to: UR-023*
+
+**SRS-23.3, Reject an emote.** The system shall not display an emote sent by a player who is not seated at the table, who does not own that emote, or who sent their previous emote less than the cooldown in SRS-NFR-028 before.
+
+*Traces to: UR-023*
+
+**SRS-23.4, Default emotes.** Every player shall own the default emotes without having to win or buy them.
+
+*Traces to: UR-023*
+
+**SRS-23.5, Emotes do not affect play.** Sending or receiving an emote shall not change the table state or the hand in progress.
+
+*Traces to: UR-023, UR-003*
+
 # **Non-functional requirements**
 
 *Every configured value referenced above is fixed here, with a number, a unit, and a condition. Numbering continues from the preceding sections of the full specification.*
@@ -791,6 +867,18 @@ flowchart LR
 **SRS-NFR-026, Single poker server per table.** At any time, at most one running poker server shall accept actions for a given table, so that no table has two copies of its state.
 
 *Traces to: UR-001, UR-007*
+
+**SRS-NFR-027, Result display time.** The configured time between the end of a hand and the dealing of the next hand shall be 10 seconds after a showdown, 15 seconds after a showdown that followed an all-in run-out, and 6 seconds after a hand won because every other player folded.
+
+*Traces to: UR-022, UR-020*
+
+**SRS-NFR-028, Emote cooldown.** The configured cooldown between two emotes sent by the same player shall be 2.5 seconds.
+
+*Traces to: UR-023*
+
+**SRS-NFR-029, Emote display duration.** The configured time an emote is displayed over the sender's seat shall be 2.6 seconds.
+
+*Traces to: UR-023*
 
 # Login/Registration Page
 
@@ -1090,6 +1178,22 @@ flowchart LR
 
 *Traces to: UR-107, UR-108*
 
+**SRS-107.8, JN, Walking around the casino floor.** A logged-in player shall be able to walk their character around the casino floor in third person, the camera following behind them, using the keyboard or by clicking or tapping where to go. The floor's walls, game tables, machines, chairs and other furniture shall block the way.
+
+*Traces to: UR-107*
+
+**SRS-107.9, JN, Games on the casino floor.** The casino floor shall show each game listed on the home page as its own table, machine or betting area, and shall show a game's name when the player's character is near it.
+
+*Traces to: UR-107*
+
+**SRS-107.10, JN, The bar.** The casino floor shall have a bar with stools. When the player's character is near it, the system shall offer the nearest stool; if the player accepts, the character shall sit down on it, the camera behind them facing the bar's TVs, without opening another page. The player shall be able to get up again with a walk key or a button.
+
+*Traces to: UR-107*
+
+**SRS-107.11, JN, Showdowns on the bar's TVs.** The bar's TVs shall show the sportsbook's Showdowns, the same ones in the same order as the Showdown page lists them. For each, a TV shall show both teams, the score once the game has started or otherwise the coins bet on each side, whether the game is upcoming, live or final, and the pool. With more Showdowns than TVs, the TVs shall page through them together every 8 seconds. The TVs shall show a change to the Showdowns within 30 seconds.
+
+*Traces to: UR-107, UR-202*
+
 ### UR-108, JO – Select Game
 
 *User story: As a logged-in player, I want to select an available game from the home page, so that I can begin playing.*
@@ -1125,6 +1229,18 @@ flowchart LR
 **SRS-108.8, JO, Checking in to play.** When a guest picks a game or the Cosmetic Shop from the list below the home page's 3D view, or is turned away from a game's page (SRS-108.3), the system shall open a check-in tablet (SRS-103.13) at the front desk straight away, without showing their character walking there. Once they log in, it shall take them straight to what they picked. Closing the tablet without logging in shall leave them at the desk.
 
 *Traces to: UR-103, UR-108*
+
+**SRS-108.9, JN, Taking a seat to play.** When a logged-in player's character is near a game on the casino floor, the system shall offer to play it and outline the seat the character would take. If the player accepts, the system shall show the character walking to that seat and sitting down, and the camera moving in to the table, before opening the game's page. For sports betting, which has screens instead of seats, the camera shall move into the nearer screen instead.
+
+*Traces to: UR-108*
+
+**SRS-108.10, JN, Cosmetic Shop on the casino floor.** The casino floor shall have the Cosmetic Shop as a cashier's cage with teller windows. When a logged-in player's character is near it, the system shall offer to open the shop and outline the nearer window; if the player accepts, the camera shall move into that window before opening the Cosmetic Shop.
+
+*Traces to: UR-108, UR-122*
+
+**SRS-108.11, JN, Coming soon on the casino floor.** When a player tries to play a game on the casino floor that is marked coming soon (SRS-107.3), the system shall say that it is coming soon and shall not open a page.
+
+*Traces to: UR-107, UR-108*
 
 ### UR-109, JO – View Balance
 
@@ -2621,3 +2737,11 @@ The system shall not accept, process, store, or disburse any real-world currency
 *Applies to: Entire website.*
 
 *Traces to: URD Scope, Section 1.2*
+
+**SRS-NFR-11, JN, Dependency Vulnerabilities.**
+
+The deployed website and poker server shall not use any third-party package version that has a published critical- or high-severity security vulnerability for which a fixed version has been available for more than 14 days.
+
+*Applies to: Entire website and the poker server.*
+
+*Traces to: URD-001, URD-103*

@@ -780,6 +780,18 @@ flowchart LR
 
 *Traces to: UR-016*
 
+**SRS-NFR-024, Poker server availability.** The poker tables shall accept joins and betting actions for at least 99% of each calendar month, excluding announced maintenance, and shall do so without depending on any player's or developer's own computer being switched on.
+
+*Traces to: UR-001*
+
+**SRS-NFR-025, Automatic poker server recovery.** When the poker server stops unexpectedly, the system shall restart it without anyone acting, and every configured table shall accept joins again within 60 seconds of the stop. On restarting, the system shall restore chip stacks per SRS-7.3 and void any hand in progress per SRS-7.4.
+
+*Traces to: UR-001, UR-007*
+
+**SRS-NFR-026, Single poker server per table.** At any time, at most one running poker server shall accept actions for a given table, so that no table has two copies of its state.
+
+*Traces to: UR-001, UR-007*
+
 # Login/Registration Page
 
 ### UR-101, JO – Sign Up

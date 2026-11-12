@@ -13,7 +13,13 @@
 // empties it, so it's free for anyone to sit in, and the server's next
 // table and lobby broadcasts show it open.
 
-import { BUSTED_DECISION_TIMEOUT_MS, CONSECUTIVE_TIMEOUT_LIMIT, type PokerTable, type Removal } from './pokerTable';
+import {
+  BUSTED_DECISION_TIMEOUT_MS,
+  CONSECUTIVE_TIMEOUT_LIMIT,
+  DISCONNECT_REMOVAL_MS,
+  type PokerTable,
+  type Removal,
+} from './pokerTable';
 
 /**
  * Why a player was removed, as they're told it (SRS-9.11): the table's own
@@ -28,7 +34,7 @@ export function removalNotice(reason: RemovalNoticeReason): string {
     case 'timeouts':
       return `You were removed from the table because your turn timed out in ${CONSECUTIVE_TIMEOUT_LIMIT} hands in a row. Your chips have been returned to your balance.`;
     case 'disconnected':
-      return 'You were removed from the table because you were disconnected for too long. Your chips have been returned to your balance.';
+      return `You were removed from the table because you were disconnected for more than ${DISCONNECT_REMOVAL_MS / 60_000} minutes. Your chips have been returned to your balance.`;
     case 'busted':
       return `You were removed from your seat because you didn't buy back in or leave within ${BUSTED_DECISION_TIMEOUT_MS / 1000} seconds of running out of chips.`;
   }

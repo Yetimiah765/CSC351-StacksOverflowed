@@ -66,6 +66,7 @@
 //   SRS-21.2 Leave during a hand folds when action next reaches that player
 //   SRS-21.3 ...and removes them once the hand ends (drainRemovals())
 //   SRS-NFR-022 Maximum seat count (3-9 seats)
+//   SRS-NFR-013 Disconnection removal duration (DISCONNECT_REMOVAL_MS)
 //   SRS-NFR-014 Consecutive-timeout removal threshold (CONSECUTIVE_TIMEOUT_LIMIT)
 //   SRS-NFR-018 Per-turn time limit (TURN_TIME_LIMIT_MS; the caller runs
 //            the clock with trackTurn()/nextTurnDeadline())
@@ -123,6 +124,9 @@ export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'] | 'runout', number>
 export const BUSTED_DECISION_TIMEOUT_MS = 60_000;
 // SRS-NFR-018: how long a player has to act once it's their turn.
 export const TURN_TIME_LIMIT_MS = 20_000;
+// SRS-NFR-013: a player disconnected (SRS-10.1/10.2) for this long without a
+// break is removed from their seat (SRS-9.4).
+export const DISCONNECT_REMOVAL_MS = 120_000;
 // SRS-NFR-014: a player whose turn times out in this many hands in a row,
 // without acting for themselves in between, is removed from their seat.
 export const CONSECUTIVE_TIMEOUT_LIMIT = 4;

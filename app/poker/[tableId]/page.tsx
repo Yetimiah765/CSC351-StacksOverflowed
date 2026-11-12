@@ -13,6 +13,7 @@ import {
   TURN_TIME_LIMIT_MS,
   getBettingOptions,
   isBustedSeat,
+  timedOutHandsBeforeRemoval,
   type BettingMove,
   type HandResult,
   type Street,
@@ -1668,6 +1669,18 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         : `Post ${myPostCost} and play next hand`}
                     </button>
                   </div>
+                ) : null}
+
+                {mySeat && timedOutHandsBeforeRemoval(mySeat) !== null ? (
+                  // SRS-9.8: the hands left before they're removed (SRS-9.7).
+                  <p
+                    role="alert"
+                    className="mb-3 rounded-lg border border-red-400/50 bg-red-500/10 px-3 py-2 text-sm text-red-100"
+                  >
+                    Your turn has timed out in {mySeat.timeouts} hands in a row. If it times out in{' '}
+                    {timedOutHandsBeforeRemoval(mySeat)} more hand, you&apos;ll be removed from the table. Act on your
+                    next turn to stay.
+                  </p>
                 ) : null}
 
                 {!amBusted ? (

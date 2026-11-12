@@ -95,7 +95,12 @@ export function usePokerChannel<State>(
   // A table's emotes (POKER_EVENT_EMOTE); the lobby has none.
   onEmote?: (emote: PokerEmotePayload) => void,
   // A table's removal notices (POKER_EVENT_NOTICE, SRS-9.11).
-  onNotice?: (notice: PokerNoticePayload) => void
+  onNotice?: (notice: PokerNoticePayload) => void,
+  // A table's presence ticket for a seated player (SRS-10.2): tracked on the
+  // channel while given, so the poker server notices the moment this page's
+  // connection ends. Pass null (not undefined) on a table, even before
+  // there's a ticket, so the channel joins with presence on.
+  presenceTicket?: string | null
 ) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
@@ -106,6 +111,8 @@ export function usePokerChannel<State>(
   onEmoteRef.current = onEmote;
   const onNoticeRef = useRef(onNotice);
   onNoticeRef.current = onNotice;
+  const usesPresence = presenceTicket !== undefined;
+  const channelRef = useRef<ReturnType<NonNullable<ReturnType<typeof getSupabaseBrowserClient>>['channel']> | null>(null);
 
   useEffect(() => {
     if (!channelName || !enabled) return;
@@ -117,8 +124,11 @@ export function usePokerChannel<State>(
     }
 
     const nextChannel = supabase.channel(channelName, {
-      config: { broadcast: { self: false } },
+      config: usesPresence
+        ? { broadcast: { self: false }, presence: { key: '', enabled: true } }
+        : { broadcast: { self: false } },
     });
+    channelRef.current = nextChannel;
     // Ask the server for the table as it is now.
     const requestSync = () => {
       const sync: PokerSyncPayload = { requestId: generateId(), action: 'sync' };
@@ -158,9 +168,18 @@ export function usePokerChannel<State>(
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       setConnected(false);
+      channelRef.current = null;
       supabase.removeChannel(nextChannel);
     };
-  }, [channelName, enabled]);
+  }, [channelName, enabled, usesPresence]);
+
+  // SRS-10.2: track the ticket while there is one, stop when it goes.
+  useEffect(() => {
+    const channel = channelRef.current;
+    if (!connected || !channel || !usesPresence) return;
+    if (presenceTicket) void channel.track({ ticket: presenceTicket });
+    else void channel.untrack();
+  }, [connected, presenceTicket, usesPresence]);
 
   const sendAction = useCallback(
     async (token: string, request: Omit<PokerActionRequest, 'requestId'>): Promise<PokerAckPayload> => {

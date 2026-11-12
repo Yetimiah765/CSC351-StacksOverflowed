@@ -70,6 +70,7 @@ import {
   RELAY_MAX_AGE_MS,
   getPokerServerSecret,
   sealHoleCards,
+  verifyPresenceTicket,
   verifyRelayedAction,
   type RelayedAction,
 } from '../lib/pokerSecure';
@@ -160,13 +161,16 @@ async function refundBalance(supabase: SupabaseClient, playerId: number, amount:
 }
 
 const CHANNEL_CONFIG = { config: { broadcast: { self: false } } };
+// Table channels also carry presence: seated players' pages track a signed
+// ticket there, so the server sees when one's connection ends (SRS-10.2).
+const TABLE_CHANNEL_CONFIG = { config: { broadcast: { self: false }, presence: { key: '' } } };
 
 function startServer(supabase: SupabaseClient, secret: string) {
   const lobbyChannel = supabase.channel(POKER_LOBBY_CHANNEL_NAME, CHANNEL_CONFIG);
   const entries: TableEntry[] = POKER_TABLES.map((config) => ({
     config,
     table: new PokerTable(config.id, config.maxSeats, config.bigBlind, config.smallBlind),
-    channel: supabase.channel(pokerTableChannelName(config.id), CHANNEL_CONFIG),
+    channel: supabase.channel(pokerTableChannelName(config.id), TABLE_CHANNEL_CONFIG),
     startTimer: null,
     bustedTimer: null,
     turnTimer: null,
@@ -584,7 +588,49 @@ function startServer(supabase: SupabaseClient, secret: string) {
     if (payload?.action === 'sync') broadcastLobby();
   });
 
+  // SRS-10.2: a player's page leaving the channel's presence (its connection
+  // ended: the tab closed, the browser quit) marks them disconnected at once
+  // — unless they're still there in another tab. Presence can't mark anyone
+  // as back, since tickets can be copied; only a signed action does (SRS-10.3).
+  function presentPlayers(entry: TableEntry, ignoring: Set<string>, now: number): Set<number> {
+    const present = new Set<number>();
+    for (const presences of Object.values(entry.channel.presenceState<{ ticket?: unknown }>())) {
+      for (const presence of presences) {
+        if (ignoring.has(presence.presence_ref)) continue;
+        const playerId = verifyPresenceTicket(presence.ticket, entry.config.id, secret, now);
+        if (playerId !== null) present.add(playerId);
+      }
+    }
+    return present;
+  }
+
+  function handlePresenceLeave(entry: TableEntry, left: { presence_ref: string; ticket?: unknown }[]) {
+    const now = Date.now();
+    const gone = new Set<number>();
+    for (const presence of left) {
+      const playerId = verifyPresenceTicket(presence.ticket, entry.config.id, secret, now);
+      if (playerId !== null) gone.add(playerId);
+    }
+    if (gone.size === 0) return;
+    const stillHere = presentPlayers(entry, new Set(left.map((presence) => presence.presence_ref)), now);
+    entry.queue = entry.queue
+      .then(() => {
+        const marked = [...gone].filter((playerId) => !stillHere.has(playerId) && entry.table.markDisconnected(String(playerId)));
+        if (marked.length === 0) return;
+        // eslint-disable-next-line no-console
+        console.log(`${entry.config.name}: player(s) ${marked.join(', ')} disconnected`);
+        broadcastTable(entry);
+      })
+      .catch((error) => {
+        // eslint-disable-next-line no-console
+        console.error(`${entry.config.name}: presence leave failed`, error);
+      });
+  }
+
   for (const entry of entries) {
+    entry.channel.on('presence', { event: 'leave' }, ({ leftPresences }) =>
+      handlePresenceLeave(entry, leftPresences as unknown as { presence_ref: string; ticket?: unknown }[])
+    );
     entry.channel.on('broadcast', { event: POKER_EVENT_ACTION }, async ({ payload }: { payload: unknown }) => {
       if ((payload as { action?: string } | null)?.action === 'sync') {
         broadcastTable(entry);

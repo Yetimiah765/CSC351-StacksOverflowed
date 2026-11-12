@@ -26,6 +26,8 @@ import type { BettingMove } from './pokerTable';
 
 /** Signed actions older (or further in the future) than this are rejected. */
 export const RELAY_MAX_AGE_MS = 30_000;
+/** How long a presence ticket (SRS-10.2) is good for. */
+export const PRESENCE_TICKET_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export function getPokerServerSecret(): string | null {
   return process.env.POKER_SERVER_SECRET || null;
@@ -91,6 +93,35 @@ export function signRelayedAction(action: RelayedAction, secret: string): Signed
 }
 
 const isOptionalNumber = (value: unknown) => value === undefined || typeof value === 'number';
+
+// 3. Presence tickets (SRS-10.2). A seated player's page tracks presence on
+//    the table's channel so the poker server sees the moment its connection
+//    ends. Presence is public too, so what it tracks is a ticket the Next
+//    server signed for that player and table: "<playerId>.<issuedAt>.<hmac>".
+//    Anyone can copy a ticket off the channel, so the poker server only ever
+//    uses presence to notice a player leaving, never to treat one as back.
+
+function presenceMac(secret: string, tableId: string, playerId: number, issuedAt: number): string {
+  return hmac(secret, JSON.stringify(['presence', tableId, playerId, issuedAt])).toString('base64url');
+}
+
+export function signPresenceTicket(tableId: string, playerId: number, issuedAt: number, secret: string): string {
+  return `${playerId}.${issuedAt}.${presenceMac(secret, tableId, playerId, issuedAt)}`;
+}
+
+/** The player a presence ticket was signed for at `tableId`, or null if it's forged, for another table, or too old. */
+export function verifyPresenceTicket(ticket: unknown, tableId: string, secret: string, now: number): number | null {
+  if (typeof ticket !== 'string') return null;
+  const [id, issued, mac, ...rest] = ticket.split('.');
+  if (rest.length > 0 || !id || !issued || !mac || !/^\d+$/.test(id) || !/^\d+$/.test(issued)) return null;
+  const playerId = Number(id);
+  const issuedAt = Number(issued);
+  if (now - issuedAt > PRESENCE_TICKET_MAX_AGE_MS || issuedAt - now > RELAY_MAX_AGE_MS) return null;
+  const expected = Buffer.from(presenceMac(secret, tableId, playerId, issuedAt));
+  const given = Buffer.from(mac);
+  if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
+  return playerId;
+}
 
 /**
  * The relayed action if `payload` was signed with `secret` for `tableId`

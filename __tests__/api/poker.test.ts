@@ -28,7 +28,15 @@ vi.mock('../../lib/supabase', () => ({
 import { getSupabaseClient } from '../../lib/supabase';
 import { POST as postAction } from '../../app/api/poker/action/route';
 import { POST as postHoleCards } from '../../app/api/poker/hole-cards/route';
-import { RELAY_MAX_AGE_MS, sealHoleCards, verifyRelayedAction } from '../../lib/pokerSecure';
+import { POST as postPresence } from '../../app/api/poker/presence/route';
+import {
+  PRESENCE_TICKET_MAX_AGE_MS,
+  RELAY_MAX_AGE_MS,
+  sealHoleCards,
+  signPresenceTicket,
+  verifyPresenceTicket,
+  verifyRelayedAction,
+} from '../../lib/pokerSecure';
 
 const SECRET = 'route-test-secret';
 
@@ -210,5 +218,39 @@ describe('POST /api/poker/hole-cards (SRS-6.1)', () => {
 
   it('returns 400 for a malformed body', async () => {
     expect((await postHoleCards(req('/api/poker/hole-cards', { tableId: 'low-1' }))).status).toBe(400);
+  });
+});
+
+describe('POST /api/poker/presence (SRS-10.2)', () => {
+  it("signs a ticket for the session's player at that table", async () => {
+    const res = await postPresence(req('/api/poker/presence', { tableId: 'low-1' }));
+    expect(res.status).toBe(200);
+    const { ticket } = (await res.json()) as { ticket: string };
+    expect(ticket).not.toContain('valid-token');
+    expect(verifyPresenceTicket(ticket, 'low-1', SECRET, Date.now())).toBe(7);
+    // Only for that table.
+    expect(verifyPresenceTicket(ticket, 'low-2', SECRET, Date.now())).toBeNull();
+  });
+
+  it('needs a signed-in player and a real table', async () => {
+    expect((await postPresence(req('/api/poker/presence', { tableId: 'low-1' }, null))).status).toBe(401);
+    sessions.maybeSingleResult = { data: null, error: null };
+    expect((await postPresence(req('/api/poker/presence', { tableId: 'low-1' }))).status).toBe(401);
+    sessions.maybeSingleResult = { data: { player_id: 7 }, error: null };
+    expect((await postPresence(req('/api/poker/presence', { tableId: 'nope' }))).status).toBe(400);
+  });
+});
+
+describe('presence tickets (SRS-10.2)', () => {
+  const now = 1_000_000;
+
+  it('rejects a forged, altered, or expired ticket', () => {
+    const ticket = signPresenceTicket('low-1', 7, now, SECRET);
+    expect(verifyPresenceTicket(ticket, 'low-1', SECRET, now)).toBe(7);
+    expect(verifyPresenceTicket(signPresenceTicket('low-1', 7, now, 'other-secret'), 'low-1', SECRET, now)).toBeNull();
+    expect(verifyPresenceTicket(ticket.replace(/^7\./, '8.'), 'low-1', SECRET, now)).toBeNull();
+    expect(verifyPresenceTicket(ticket, 'low-1', SECRET, now + PRESENCE_TICKET_MAX_AGE_MS + 1)).toBeNull();
+    expect(verifyPresenceTicket('junk', 'low-1', SECRET, now)).toBeNull();
+    expect(verifyPresenceTicket(undefined, 'low-1', SECRET, now)).toBeNull();
   });
 });

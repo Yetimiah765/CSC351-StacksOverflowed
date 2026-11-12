@@ -1376,7 +1376,9 @@ export class PokerTable {
   /**
    * Takes a player out of their seat for `reason` (SRS-9.4, SRS-9.7). A
    * player still in the hand in progress isn't removed until it ends
-   * (SRS-9.13) and keeps playing it meanwhile; anyone else is removed now,
+   * (SRS-9.13) and keeps playing it meanwhile, still eligible for every pot
+   * they've put chips into unless they fold (SRS-9.14: pending removal
+   * changes nothing about the hand); anyone else is removed now,
    * anything they'd already put into this hand staying in the pot. Either
    * way the removal comes out of drainRemovals(). Returns false if they
    * aren't seated.

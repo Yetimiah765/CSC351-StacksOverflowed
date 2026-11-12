@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { CONSECUTIVE_TIMEOUT_LIMIT, PokerTable, TURN_TIME_LIMIT_MS } from '../../lib/pokerTable';
+import { createDeck } from '../../lib/pokerCards';
 
 // The turn clock and what happens when it runs out (SRS-4.x, SRS-NFR-018).
 // Same set-up as pokerTableHand.test.ts: a 6-seat table with 5/10 blinds.
@@ -313,5 +314,92 @@ describe('putting off removing a player in the hand (SRS-9.13)', () => {
     expect(table.getState().seats[1].playerId).toBeNull();
     expect(table.drainRemovals()).toEqual([{ playerId: p(2), chipStack: 1000, reason: 'disconnected' }]);
     expect(table.removePlayer(p(2), 'disconnected')).toBe(false);
+  });
+});
+
+/**
+ * A deck that deals `holes` to the dealt-in seats in `dealOrder` (from the
+ * small blind, SRS-16.3), then burns before each street so the board is `board`.
+ */
+function stackDeck(dealOrder: number[], holes: Record<number, string>, board: string): string[] {
+  const holeCards = Object.fromEntries(Object.entries(holes).map(([seatNumber, cards]) => [seatNumber, cards.split(' ')]));
+  const boardCards = board.split(' ');
+  const used = new Set([...Object.values(holeCards).flat(), ...boardCards]);
+  const spare = createDeck().filter((card) => !used.has(card));
+  const burn = () => spare.shift() as string;
+  return [
+    ...dealOrder.map((seatNumber) => holeCards[seatNumber][0]),
+    ...dealOrder.map((seatNumber) => holeCards[seatNumber][1]),
+    burn(),
+    ...boardCards.slice(0, 3),
+    burn(),
+    boardCards[3],
+    burn(),
+    boardCards[4],
+    ...spare,
+  ];
+}
+
+describe('a player whose removal is put off stays in the running (SRS-9.14)', () => {
+  // Button 1, SB 2, BB 3; seat 1 holds aces and wins any showdown.
+  const deck = () => stackDeck([2, 3, 1], { 1: 'As Ad', 2: '7c 2d', 3: '8h 3s' }, 'Kc Qd 9s 5h 4c');
+
+  it('can win the pot, and is removed with their winnings', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0), deck());
+    table.removePlayer(p(1), 'timeouts');
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    table.act(p(3), 'check');
+    for (let street = 0; street < 3; street++) {
+      table.act(p(2), 'check');
+      table.act(p(3), 'check');
+      table.act(p(1), 'check');
+    }
+    const result = table.getState().lastHandResult;
+    expect(result?.reason).toBe('showdown');
+    expect(result?.awards).toEqual([expect.objectContaining({ seatNumber: 1, amount: 30 })]);
+    expect(table.drainRemovals()).toEqual([{ playerId: p(1), chipStack: 1020, reason: 'timeouts' }]);
+  });
+
+  it('is eligible for every pot they put chips into, side pots included', () => {
+    // Seat 1 is short (100) and all-in; seats 2 and 3 build a side pot.
+    const table = tableWith([1, 2, 3], { 1: 100 });
+    table.startHand(pick(0), deck());
+    table.removePlayer(p(1), 'disconnected');
+    table.act(p(1), 'raise', 100); // all-in
+    table.act(p(2), 'raise', 300);
+    table.act(p(3), 'call');
+    for (let street = 0; street < 3; street++) {
+      table.act(p(2), 'check');
+      table.act(p(3), 'check');
+    }
+    const result = table.getState().lastHandResult;
+    // Seat 1 wins the main pot (3 x 100); the side pot goes to the better of seats 2 and 3 (eights).
+    expect(result?.awards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ seatNumber: 1, amount: 300 }),
+        expect.objectContaining({ seatNumber: 3, amount: 400 }),
+      ])
+    );
+    expect(table.drainRemovals()).toEqual([{ playerId: p(1), chipStack: 300, reason: 'disconnected' }]);
+  });
+
+  it('loses that right only by folding', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(pick(0), deck());
+    table.removePlayer(p(1), 'timeouts');
+    table.act(p(1), 'fold');
+    // Folded and pending: out of the hand, so removed straight away is not
+    // what happens — they're removed when the hand ends, having won nothing.
+    table.act(p(2), 'call');
+    table.act(p(3), 'check');
+    for (let street = 0; street < 3; street++) {
+      table.act(p(2), 'check');
+      table.act(p(3), 'check');
+    }
+    const result = table.getState().lastHandResult;
+    expect(result?.awards.map((award) => award.seatNumber)).not.toContain(1);
+    expect(table.drainRemovals()).toEqual([{ playerId: p(1), chipStack: 1000, reason: 'timeouts' }]);
   });
 });

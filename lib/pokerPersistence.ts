@@ -4,6 +4,7 @@
 // through a Postgres function that moves coins and seat rows together in one
 // transaction (supabase/migrations/2026-11-12_poker_persistent_stacks.sql):
 //   * fn_poker_join / fn_poker_rebuy / fn_poker_leave — balance <-> seat
+//   * fn_poker_hand_started — a hand is under way (so a restart voids it, SRS-7.4)
 //   * fn_poker_hand_finished — every seat's stack after the hand (SRS-7.2)
 // and loadSavedTables() reads it all back when the server starts (SRS-7.3).
 // Stacks are never written mid-hand, so what's stored is always the value
@@ -123,6 +124,27 @@ export async function persistLeave(
   return false;
 }
 
+/** SRS-7.4: a hand is under way at this table, with these button and blind seats. */
+export async function persistHandStarted(
+  supabase: SupabaseClient,
+  tableKey: string,
+  state: Pick<TableState, 'dealerSeat' | 'smallBlindSeat' | 'bigBlindSeat'>
+): Promise<void> {
+  await callFunction(supabase, 'fn_poker_hand_started', {
+    p_table_key: tableKey,
+    p_dealer_seat: state.dealerSeat,
+    p_small_blind_seat: state.smallBlindSeat,
+    p_big_blind_seat: state.bigBlindSeat,
+  });
+}
+
+/** SRS-7.4: once a hand a restart interrupted has been voided, the table is no longer mid-hand. */
+export async function clearHandInProgress(supabase: SupabaseClient, tableKey: string): Promise<void> {
+  const { error } = await supabase.from('poker_tables').update({ hand_in_progress: false }).eq('table_key', tableKey);
+  // eslint-disable-next-line no-console
+  if (error) console.error(`Could not clear hand_in_progress at ${tableKey}:`, error.message);
+}
+
 /** What's saved about a seat after a hand. */
 export interface SeatToSave {
   seatNumber: number;
@@ -169,6 +191,8 @@ export interface SavedTable {
   dealerSeat: number | null;
   smallBlindSeat: number | null;
   bigBlindSeat: number | null;
+  /** The server stopped during a hand: it's void, and the stacks are from before it (SRS-7.4). */
+  handInProgress: boolean;
   seats: Omit<SavedSeat, 'username'>[];
 }
 
@@ -183,7 +207,7 @@ export async function loadSavedTables(
   const { data, error } = await supabase
     .from('poker_tables')
     .select(
-      'table_key, dealer_button_seat, last_small_blind_seat, last_big_blind_seat, poker_seats(seat_number, player_id, chip_stack, owes_small_blind, owes_big_blind, consecutive_timeouts)'
+      'table_key, dealer_button_seat, last_small_blind_seat, last_big_blind_seat, hand_in_progress, poker_seats(seat_number, player_id, chip_stack, owes_small_blind, owes_big_blind, consecutive_timeouts)'
     )
     .in('table_key', tableKeys);
   if (error) return { ok: false, error: `${error.message} (has ${POKER_MIGRATION} been run?)` };
@@ -194,6 +218,7 @@ export async function loadSavedTables(
     dealer_button_seat: number | null;
     last_small_blind_seat: number | null;
     last_big_blind_seat: number | null;
+    hand_in_progress: boolean;
     poker_seats: {
       seat_number: number;
       player_id: number;
@@ -207,6 +232,7 @@ export async function loadSavedTables(
       dealerSeat: row.dealer_button_seat,
       smallBlindSeat: row.last_small_blind_seat,
       bigBlindSeat: row.last_big_blind_seat,
+      handInProgress: row.hand_in_progress,
       seats: (row.poker_seats ?? []).map((seat) => ({
         seatNumber: seat.seat_number,
         playerId: String(seat.player_id),

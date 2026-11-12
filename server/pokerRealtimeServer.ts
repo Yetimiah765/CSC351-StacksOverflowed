@@ -58,8 +58,10 @@ import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import { noticeReason, payOutRemovals, type RemovalNoticeReason } from '../lib/pokerRemovals';
 import {
+  clearHandInProgress,
   loadSavedTables,
   persistHandFinished,
+  persistHandStarted,
   persistJoin,
   persistLeave,
   persistRebuy,
@@ -161,7 +163,16 @@ async function startServer(supabase: SupabaseClient, secret: string) {
   }
   for (const entry of entries) {
     const savedTable = saved.tables.get(entry.config.id);
-    if (!savedTable || savedTable.seats.length === 0) continue;
+    if (!savedTable) continue;
+    // SRS-7.4: the server stopped mid-hand. The saved stacks are from before
+    // that hand (they're only written when one ends), so restoring them
+    // voids it: everyone gets back what they'd put into it.
+    if (savedTable.handInProgress) {
+      // eslint-disable-next-line no-console
+      console.log(`${entry.config.name}: voided the hand interrupted by the restart (stacks are from before it)`);
+      await clearHandInProgress(supabase, entry.config.id);
+    }
+    if (savedTable.seats.length === 0) continue;
     const seats = [];
     for (const seat of savedTable.seats) {
       const username = await getPlayerUsername(supabase, Number(seat.playerId));
@@ -421,13 +432,24 @@ async function startServer(supabase: SupabaseClient, secret: string) {
     return { handNumber: state.handNumber, inHand: state.phase === 'in-hand' };
   }
 
-  // SRS-7.2: call after anything that can end a hand (an action, a leave, a
-  // turn timing out, the start timer). A hand that has ended has every
-  // seat's stack saved, read now, before the next action can change it, and
-  // written in turn with the table's other writes.
+  // SRS-7.2/7.4: call after anything that can start or end a hand (an
+  // action, a leave, a turn timing out, the start timer). A hand that has
+  // started is marked under way with its button and blinds (so a restart
+  // voids it); one that has ended has every seat's stack saved. What to save
+  // is read now, before the next action can change it, and written in turn
+  // with the table's other writes.
   function saveChanges(entry: TableEntry, before: { handNumber: number; inHand: boolean }) {
     const state = entry.table.getState();
-    const ended = (before.inHand || state.handNumber !== before.handNumber) && state.phase !== 'in-hand';
+    const startedHand = state.handNumber !== before.handNumber;
+    if (startedHand && state.phase === 'in-hand') {
+      const positions = {
+        dealerSeat: state.dealerSeat,
+        smallBlindSeat: state.smallBlindSeat,
+        bigBlindSeat: state.bigBlindSeat,
+      };
+      void queueWrite(entry, () => persistHandStarted(supabase, entry.config.id, positions));
+    }
+    const ended = (before.inHand || startedHand) && state.phase !== 'in-hand';
     if (!ended) return;
     const seats = seatsToSave(state);
     void queueWrite(entry, () => persistHandFinished(supabase, entry.config.id, seats));

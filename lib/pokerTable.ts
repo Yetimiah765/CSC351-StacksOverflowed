@@ -124,6 +124,12 @@ export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'] | 'runout', number>
 export const BUSTED_DECISION_TIMEOUT_MS = 60_000;
 // SRS-NFR-018: how long a player has to act once it's their turn.
 export const TURN_TIME_LIMIT_MS = 20_000;
+// SRS-10.1: a seated player the server hasn't heard from for this long is
+// marked disconnected. Their page sends a heartbeat every
+// HEARTBEAT_INTERVAL_MS while they're seated, so a live one is never silent
+// that long.
+export const SILENCE_DISCONNECT_MS = 30_000;
+export const HEARTBEAT_INTERVAL_MS = 10_000;
 // SRS-NFR-013: a player disconnected (SRS-10.1/10.2) for this long without a
 // break is removed from their seat (SRS-9.4).
 export const DISCONNECT_REMOVAL_MS = 120_000;
@@ -202,6 +208,8 @@ export interface Seat {
    * a removal condition while still in it); null otherwise.
    */
   removalPending: RemovalReason | null;
+  /** SRS-10.1/10.2: marked disconnected, until they're heard from again (SRS-10.3). */
+  disconnected: boolean;
 }
 
 /**
@@ -403,6 +411,8 @@ interface SeatRecord extends Omit<Seat, 'bustedMsRemaining' | 'waitingForButton'
   holeCards: Card[];
   /** This hand's timeout has already been counted (SRS-9.5: once per hand). */
   timedOutThisHand: boolean;
+  /** When the server last heard from this player (heardFrom()); null until it has. */
+  lastHeardAt: number | null;
 }
 
 function emptySeat(seatNumber: number): SeatRecord {
@@ -431,6 +441,8 @@ function emptySeat(seatNumber: number): SeatRecord {
     timeouts: 0,
     timedOutThisHand: false,
     removalPending: null,
+    disconnected: false,
+    lastHeardAt: null,
   };
 }
 
@@ -539,6 +551,7 @@ export class PokerTable {
           bustedAt,
           newcomer: _newcomer,
           timedOutThisHand: _counted,
+          lastHeardAt: _heard,
           ...seat
         } = record;
         return {
@@ -1515,6 +1528,41 @@ export class PokerTable {
     }
     seat.postingMissedBlinds = true;
     return { ok: true };
+  }
+
+  /**
+   * Something came from this player at `now` — any action their page sent,
+   * heartbeats included. Returns false if they aren't seated here.
+   */
+  heardFrom(playerId: string, now: number): boolean {
+    const seat = this.findSeatByPlayerId(playerId);
+    if (!seat) return false;
+    seat.lastHeardAt = now;
+    return true;
+  }
+
+  /**
+   * SRS-10.1: marks every seated player not heard from for
+   * SILENCE_DISCONNECT_MS by `now` as disconnected, and returns their ids.
+   * Like the other clocks, the caller runs the timer (nextSilenceDeadline()).
+   */
+  markSilentDisconnected(now: number): string[] {
+    const marked: string[] = [];
+    for (const seat of this.seats) {
+      if (seat.playerId === null || seat.disconnected || seat.lastHeardAt === null) continue;
+      if (now - seat.lastHeardAt < SILENCE_DISCONNECT_MS) continue;
+      seat.disconnected = true;
+      marked.push(seat.playerId);
+    }
+    return marked;
+  }
+
+  /** When the next connected player will have been silent too long, or null if nobody's being watched. */
+  nextSilenceDeadline(): number | null {
+    const deadlines = this.seats
+      .filter((seat) => seat.playerId !== null && !seat.disconnected && seat.lastHeardAt !== null)
+      .map((seat) => (seat.lastHeardAt as number) + SILENCE_DISCONNECT_MS);
+    return deadlines.length > 0 ? Math.min(...deadlines) : null;
   }
 
   /**

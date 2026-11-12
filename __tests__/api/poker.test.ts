@@ -110,6 +110,14 @@ describe('POST /api/poker/action', () => {
     expect(verifyRelayedAction(payload, SECRET, 'low-1', Date.now())).toMatchObject({ action: 'rebuy', buyIn: 500 });
   });
 
+  it("relays a seated player's heartbeat, signed like any action (SRS-10.1)", async () => {
+    const res = await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'h', action: 'heartbeat' }));
+    expect(res.status).toBe(202);
+
+    const payload = httpSend.mock.calls[0]?.[2];
+    expect(verifyRelayedAction(payload, SECRET, 'low-1', Date.now())).toMatchObject({ action: 'heartbeat', playerId: 7 });
+  });
+
   it('relays an emote, signed along with everything else', async () => {
     await postAction(req('/api/poker/action', { tableId: 'low-1', requestId: 'e', action: 'emote', emote: 'laugh' }));
 

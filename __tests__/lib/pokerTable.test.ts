@@ -50,6 +50,7 @@ describe('PokerTable', () => {
       waitingForButton: false,
       timeouts: 0,
       removalPending: null,
+      disconnected: false,
     });
   });
 
@@ -160,6 +161,7 @@ describe('PokerTable', () => {
       waitingForButton: false,
       timeouts: 0,
       removalPending: null,
+      disconnected: false,
     });
   });
 

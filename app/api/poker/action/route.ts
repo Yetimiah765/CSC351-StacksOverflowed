@@ -12,7 +12,8 @@ function getToken(request: Request): string | null {
   return auth?.startsWith('Bearer ') ? auth.slice(7) : null;
 }
 
-const ACTIONS = ['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind', 'emote'];
+// 'heartbeat': a seated player's page saying it's still there (SRS-10.1).
+const ACTIONS = ['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind', 'emote', 'heartbeat'];
 const MOVES: BettingMove[] = ['fold', 'check', 'call', 'bet', 'raise'];
 const isOptionalNumber = (value: unknown) => value === undefined || typeof value === 'number';
 

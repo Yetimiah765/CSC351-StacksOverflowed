@@ -14,6 +14,15 @@ export const SYNC_LATENCY_SHARE = 0.95;
 /** ...for clients whose round trip to the server is at most this. */
 export const SYNC_CLIENT_MAX_RTT_MS = 200;
 
+/**
+ * SRS-NFR-020: the near-removal warning (SRS-9.8), the removal notice
+ * (SRS-9.11) and the busted player's choice (SRS-12.2) show within this long
+ * of what triggers them. Each rides on what the server sends straight after
+ * the change — the table state, or the notice event — with nothing added, so
+ * it reaches the page as fast as a state update does.
+ */
+export const MESSAGE_LATENCY_LIMIT_MS = 1_000;
+
 /** The value at or under which `share` of the samples fall (nearest rank). */
 export function percentile(samples: number[], share: number): number {
   if (samples.length === 0) return Number.NaN;

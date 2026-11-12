@@ -1111,6 +1111,12 @@ export class PokerTable {
         this.fold(next);
         continue;
       }
+      // SRS-2.2: the turn reaches a disconnected player with nothing to
+      // call: check for them now, with no countdown (SRS-4.1).
+      if (next.disconnected && next.bet >= this.currentBet) {
+        this.recordAction(next, 'check', true);
+        continue;
+      }
       // A new turn: its clock starts at the caller's next trackTurn().
       this.turnSerial += 1;
       return;

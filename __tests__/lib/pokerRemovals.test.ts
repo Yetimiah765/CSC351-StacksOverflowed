@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PokerTable } from '../../lib/pokerTable';
+import { DISCONNECT_REMOVAL_MS, PokerTable } from '../../lib/pokerTable';
 import { noticeReason, payOutRemovals, removalNotice } from '../../lib/pokerRemovals';
 
 // SRS-9.9: a removed player's stack, less anything already in a pot, goes
@@ -121,7 +121,7 @@ describe('the seat is open again after a removal (SRS-9.10)', () => {
 describe('telling a removed player why (SRS-9.11)', () => {
   it('says why for each of the table\'s own removals', () => {
     expect(removalNotice('timeouts')).toMatch(/timed out in 4 hands in a row/);
-    expect(removalNotice('disconnected')).toMatch(/disconnected/);
+    expect(removalNotice('disconnected')).toMatch(/disconnected for more than 2 minutes/);
     expect(removalNotice('busted')).toMatch(/within 60 seconds of running out of chips/);
     // Chips are mentioned only where there were chips to return.
     expect(removalNotice('timeouts')).toMatch(/returned to your balance/);
@@ -132,5 +132,11 @@ describe('telling a removed player why (SRS-9.11)', () => {
     expect(noticeReason({ playerId: '1', chipStack: 0, reason: 'left' })).toBeNull();
     expect(noticeReason({ playerId: '1', chipStack: 10, reason: 'timeouts' })).toBe('timeouts');
     expect(noticeReason({ playerId: '1', chipStack: 10, reason: 'disconnected' })).toBe('disconnected');
+  });
+});
+
+describe('the disconnection removal duration (SRS-NFR-013)', () => {
+  it('is two minutes', () => {
+    expect(DISCONNECT_REMOVAL_MS).toBe(2 * 60 * 1000);
   });
 });

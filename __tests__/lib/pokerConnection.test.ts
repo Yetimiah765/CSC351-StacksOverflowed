@@ -203,3 +203,33 @@ describe('the disconnection timer resets on reconnection (SRS-9.3)', () => {
     expect(table.nextDisconnectDeadline()).toBe(110_000 + DISCONNECT_REMOVAL_MS);
   });
 });
+
+describe('reconnecting to the held seat (SRS-2.1)', () => {
+  it('gets the same seat and stack back', () => {
+    const table = tableWith([1, 2, 3], { 2: 870 });
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2), 1_000);
+    // Held meanwhile: nobody else can sit there.
+    expect(table.checkSeat(2)).toBe('That seat is already taken.');
+    expect(table.heardFrom(p(2), DISCONNECT_REMOVAL_MS)).toBe('reconnected');
+    expect(seat(table, 2)).toMatchObject({ playerId: p(2), chipStack: 870, disconnected: false });
+  });
+
+  it('works mid-hand too: a player back in time plays on from where they were', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0); // button 1, SB 2, BB 3; seat 1 first
+    table.markDisconnected(p(1), 0);
+    table.heardFrom(p(1), 5_000);
+    expect(table.act(p(1), 'call')).toEqual({ ok: true });
+  });
+
+  it("isn't possible once they've been removed", () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2), 0);
+    table.removeLongDisconnected(DISCONNECT_REMOVAL_MS);
+    expect(table.heardFrom(p(2), DISCONNECT_REMOVAL_MS + 1)).toBeNull();
+    expect(seat(table, 2).playerId).toBeNull();
+  });
+});

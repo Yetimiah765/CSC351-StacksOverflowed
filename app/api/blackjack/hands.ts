@@ -1,12 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BlackjackState } from '../../../lib/blackjack';
 
-// Hands in play, kept in this server's memory and keyed by player_id, until
-// the database gets somewhere to store them (blackjack_hands has no columns
-// for cards yet). Only the server ever sees the face-down card and the deck.
-// A server restart forgets every hand in play; their bets are then returned
-// to the players (refundLostRounds in ./record.ts). Kept on globalThis so a
-// dev-server hot reload doesn't wipe it.
+// The round in play lives in its open blackjack_hands row (round_state:
+// { bet, state }), so every copy of the server, as on the live site, plays
+// the same round. Only the server reads it, so the face-down card and the
+// deck never reach the browser. A move is saved only if the round is still
+// at the step it was read at, so two copies can't both play the same round.
 
 export interface StoredHand {
   /** The round's blackjack_hands row (./record.ts). */
@@ -17,26 +16,66 @@ export interface StoredHand {
   startedAt: string;
 }
 
-const memory = globalThis as typeof globalThis & {
-  __blackjackHands?: Map<number, StoredHand>;
-  __blackjackBusy?: Set<number>;
-};
-const hands = (memory.__blackjackHands ??= new Map<number, StoredHand>());
-// Players with a Deal or a move in flight, so two quick requests (two
-// Deals, or a double click) can't both run.
+/** What round_state holds. */
+export interface RoundState {
+  bet: number;
+  state: BlackjackState;
+}
+
+export type HandLookup = { ok: true; hand: StoredHand | null } | { ok: false };
+
+/** The player's round in play, if any; not ok if it could not be read. */
+export async function getHand(supabase: SupabaseClient, playerId: number): Promise<HandLookup> {
+  const { data, error } = await supabase
+    .from('blackjack_hands')
+    .select('hand_id, round_state, started_at')
+    .eq('player_id', playerId)
+    .is('completed_at', null)
+    .not('round_state', 'is', null)
+    .maybeSingle();
+  if (error) {
+    console.error(`Blackjack: could not read the hand of player ${playerId}: ${error.message}`);
+    return { ok: false };
+  }
+  if (!data) return { ok: true, hand: null };
+  const round = data.round_state as RoundState;
+  return {
+    ok: true,
+    hand: { handId: data.hand_id, bet: round.bet, state: round.state, startedAt: data.started_at },
+  };
+}
+
+/**
+ * Saves the round's next state and everything staked on it (bet_amount, so a
+ * lost round returns all of it), only if the round is still open at
+ * `fromStep`. 'moved' if another request moved it first.
+ */
+export async function saveHand(
+  supabase: SupabaseClient,
+  handId: number,
+  fromStep: number,
+  round: RoundState,
+  stake: number
+): Promise<'saved' | 'moved' | 'error'> {
+  const { data, error } = await supabase
+    .from('blackjack_hands')
+    .update({ round_state: round, bet_amount: stake })
+    .eq('hand_id', handId)
+    .is('completed_at', null)
+    .eq('round_state->state->>step', String(fromStep))
+    .select('hand_id');
+  if (error) {
+    console.error(`Blackjack: could not save hand ${handId}: ${error.message}`);
+    return 'error';
+  }
+  return data?.length ? 'saved' : 'moved';
+}
+
+const memory = globalThis as typeof globalThis & { __blackjackBusy?: Set<number> };
+// Players with a Deal or a move in flight on this copy of the server, so a
+// double click is turned away at once. Requests reaching different copies
+// are kept apart by the database (saveHand, and one open row per player).
 const busy = (memory.__blackjackBusy ??= new Set<number>());
-
-export function getHand(playerId: number): StoredHand | undefined {
-  return hands.get(playerId);
-}
-
-export function saveHand(playerId: number, hand: StoredHand) {
-  hands.set(playerId, hand);
-}
-
-export function removeHand(playerId: number) {
-  hands.delete(playerId);
-}
 
 /** Marks a request as started; false if one is already running for the player. */
 export function startBusy(playerId: number): boolean {
@@ -45,17 +84,12 @@ export function startBusy(playerId: number): boolean {
   return true;
 }
 
-export function isBusy(playerId: number): boolean {
-  return busy.has(playerId);
-}
-
 export function finishBusy(playerId: number) {
   busy.delete(playerId);
 }
 
-/** For tests: forget every hand. */
-export function clearHands() {
-  hands.clear();
+/** For tests: forget every request in flight. */
+export function clearBusy() {
   busy.clear();
 }
 

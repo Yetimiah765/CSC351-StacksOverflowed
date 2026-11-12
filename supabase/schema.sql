@@ -2467,7 +2467,8 @@ $$;
 -- Table: blackjack_hands
 -- Reviewed by: HC (<HC Hersy Contreras>)
 -- Supports: SRS-117.1, SRS-117.4, SRS-118.1, SRS-118.3, SRS-901.1, SRS-901.2, SRS-907.1, SRS-908.1, SRS-909.1, SRS-1001.1
--- Purpose: Stores each blackjack hand's bet, declared result, and net winnings or losses for the player's hand history.
+-- Purpose: Stores each blackjack hand's bet, declared result, and net winnings or losses for the player's hand history,
+--          and the cards of the round in play, so every copy of the server can play it.
 CREATE TABLE blackjack_hands (
     hand_id         SERIAL       PRIMARY KEY,
     player_id       INTEGER      NOT NULL
@@ -2481,6 +2482,11 @@ CREATE TABLE blackjack_hands (
     net_amount      BIGINT,
     started_at      TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at    TIMESTAMPTZ,
+    -- The round in play: { bet, state } with every hand's cards, the
+    -- dealer's cards (the face-down one too) and the rest of the deck. Read
+    -- only by the server; NULL once the round is over. An open row with no
+    -- round_state is a round the server lost, whose bets are returned.
+    round_state     JSONB,
 
     CONSTRAINT chk_blackjack_hands_completion
         CHECK ((result IS NULL AND net_amount IS NULL AND completed_at IS NULL)
@@ -2491,8 +2497,21 @@ CREATE TABLE blackjack_hands (
         CHECK (result IS NULL
                OR (result = 'Win'           AND net_amount > 0)
                OR (result IN ('Lose','Bust') AND net_amount = -bet_amount)
-               OR (result = 'Push'          AND net_amount = 0))
+               OR (result = 'Push'          AND net_amount = 0)),
+
+    -- A finished hand keeps no cards.
+    CONSTRAINT chk_blackjack_hands_state_only_in_play
+        CHECK (completed_at IS NULL OR round_state IS NULL)
 );
+
+-- One round in play per player, however many copies of the server take requests.
+CREATE UNIQUE INDEX uq_blackjack_hands_one_open_per_player
+    ON blackjack_hands (player_id)
+    WHERE completed_at IS NULL;
+
+-- The deck and the dealer's face-down card must never reach a browser. Only
+-- the server (service role, which bypasses row level security) reads this table.
+ALTER TABLE blackjack_hands ENABLE ROW LEVEL SECURITY;
 
 -- Table: ai_suggestions
 -- Reviewed by: HC (<HC Hersy Contreras>)

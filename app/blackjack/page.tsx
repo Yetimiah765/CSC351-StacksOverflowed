@@ -20,7 +20,7 @@ import {
 // hand (app/api/blackjack/), so this page only sends the bet and the
 // player's moves and draws what comes back: the dealer's face-down card and
 // the deck never reach the browser. A refresh picks up the hand in play from
-// GET /api/blackjack (until the server restarts — hands live in its memory).
+// GET /api/blackjack, which reads it from the database, on any device.
 // The AI assistant is still a placeholder.
 // Styled to match the home page and the poker table (slate panels, emerald
 // accents, wood-rail felt). The coin balance lives in the nav bar, so it

@@ -187,12 +187,17 @@ export default function CasinoFront({
   const walls = useMemo(() => wallTexture([1 / 2.4, 1.6 / height]), [height]);
   const wall = useMemo(() => {
     const edge = CASINO_DOOR_HALF + LINING;
+    // The wall's turned round to face into the room (rotation y = π), which
+    // mirrors x, so the doorway is cut at -doorX to end up at doorX. (The
+    // doors aren't at the room's middle, so cutting it at doorX left the
+    // wall over part of the left-hand door.)
+    const at = -doorX;
     const shape = new THREE.Shape();
     shape.moveTo(-width / 2, 0);
-    shape.lineTo(doorX - edge, 0);
-    shape.lineTo(doorX - edge, CASINO_DOOR_HEIGHT + LINING);
-    shape.lineTo(doorX + edge, CASINO_DOOR_HEIGHT + LINING);
-    shape.lineTo(doorX + edge, 0);
+    shape.lineTo(at - edge, 0);
+    shape.lineTo(at - edge, CASINO_DOOR_HEIGHT + LINING);
+    shape.lineTo(at + edge, CASINO_DOOR_HEIGHT + LINING);
+    shape.lineTo(at + edge, 0);
     shape.lineTo(width / 2, 0);
     shape.lineTo(width / 2, height);
     shape.lineTo(-width / 2, height);

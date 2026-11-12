@@ -105,3 +105,40 @@ describe('auto-check when time runs out (SRS-4.2)', () => {
     expect(table.getState().lastAction?.automatic).toBeUndefined();
   });
 });
+
+describe('auto-fold when time runs out (SRS-4.3)', () => {
+  it('folds for a player who faces a bet', () => {
+    // Preflop, seat 1 (first to act) faces the big blind.
+    const table = handUnderWay();
+    table.trackTurn(0);
+    expect(table.timeOutTurn(TURN_TIME_LIMIT_MS)).toEqual({ playerId: p(1), move: 'fold' });
+    const state = table.getState();
+    expect(state.seats[0]).toMatchObject({ inHand: false, folded: true, lastAction: 'Fold' });
+    expect(state.lastAction).toMatchObject({ seatNumber: 1, move: 'fold', automatic: true });
+    // The turn moves on to the small blind.
+    expect(state.activeSeat).toBe(2);
+  });
+
+  it('folds a player facing a bet after the flop too', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    table.act(p(3), 'check');
+    // Flop: seat 2 bets, seat 3 runs out of time facing it.
+    expect(table.act(p(2), 'bet', 20)).toEqual({ ok: true });
+    table.trackTurn(50_000);
+    expect(table.timeOutTurn(50_000 + TURN_TIME_LIMIT_MS)).toEqual({ playerId: p(3), move: 'fold' });
+    expect(table.getState().activeSeat).toBe(1);
+  });
+
+  it("ends the hand when the fold leaves one player", () => {
+    const table = handUnderWay();
+    table.act(p(1), 'fold');
+    // The small blind faces the big blind and runs out of time.
+    table.trackTurn(0);
+    expect(table.timeOutTurn(TURN_TIME_LIMIT_MS)).toEqual({ playerId: p(2), move: 'fold' });
+    const state = table.getState();
+    expect(state.phase).not.toBe('in-hand');
+    expect(state.lastHandResult).toMatchObject({ reason: 'fold', awards: [{ seatNumber: 3, amount: 10 }] }); // the blinds, less the big blind's uncalled 5 (SRS-19.5)
+  });
+});

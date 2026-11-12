@@ -12,6 +12,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { SavedSeat, TableState } from './pokerTable';
+import type { RemovalNoticeReason } from './pokerRemovals';
 
 export type PersistResult = { ok: true } | { ok: false; error: string };
 
@@ -268,4 +269,84 @@ export async function loadSavedTables(
     return { ok: false, error: `poker_tables has no row for ${missing.join(', ')} (run ${POKER_MIGRATION}).` };
   }
   return { ok: true, tables };
+}
+
+// ---------- removal notices (SRS-9.11, SRS-9.12) ----------
+
+/** poker_removal_notices.removal_reason for each reason a player is told about. */
+export const NOTICE_REASONS: Record<RemovalNoticeReason, string> = {
+  disconnected: 'Disconnection timeout',
+  timeouts: 'Consecutive turn timeouts',
+  busted: 'No busted-player response',
+};
+
+/**
+ * Records that the table removed a player, and why. A player who was
+ * connected was told there and then (SRS-9.11), so theirs is saved as
+ * delivered; a disconnected player's waits until they next open the site
+ * (SRS-9.12, takeRemovalNotices()).
+ */
+export async function recordRemovalNotice(
+  supabase: SupabaseClient,
+  tableKey: string,
+  playerId: number,
+  reason: RemovalNoticeReason,
+  delivered: boolean
+): Promise<void> {
+  const { data: table } = await supabase.from('poker_tables').select('table_id').eq('table_key', tableKey).maybeSingle();
+  const now = new Date().toISOString();
+  const { error } = await supabase.from('poker_removal_notices').insert({
+    player_id: playerId,
+    table_id: (table as { table_id: number } | null)?.table_id ?? null,
+    removal_reason: NOTICE_REASONS[reason],
+    removed_at: now,
+    delivered_at: delivered ? now : null,
+  });
+  // eslint-disable-next-line no-console
+  if (error) console.error(`Could not record the removal notice for player ${playerId}:`, error.message);
+}
+
+/** A removal notice as the player is shown it. */
+export interface RemovalNoticeView {
+  reason: RemovalNoticeReason;
+  tableName: string | null;
+  removedAt: string;
+}
+
+/**
+ * SRS-9.12: the player's notices they haven't been shown (removed while
+ * disconnected), oldest first, marked shown as they're handed over.
+ */
+export async function takeRemovalNotices(supabase: SupabaseClient, playerId: number): Promise<RemovalNoticeView[] | null> {
+  const { data, error } = await supabase
+    .from('poker_removal_notices')
+    .select('notice_id, removal_reason, removed_at, poker_tables(table_name)')
+    .eq('player_id', playerId)
+    .is('delivered_at', null)
+    .order('removed_at', { ascending: true });
+  if (error) return null;
+  const rows = (data ?? []) as unknown as {
+    notice_id: number;
+    removal_reason: string;
+    removed_at: string;
+    poker_tables: { table_name: string } | null;
+  }[];
+  if (rows.length === 0) return [];
+  const { error: markError } = await supabase
+    .from('poker_removal_notices')
+    .update({ delivered_at: new Date().toISOString() })
+    .in(
+      'notice_id',
+      rows.map((row) => row.notice_id)
+    );
+  if (markError) return null;
+  const byText = Object.fromEntries(Object.entries(NOTICE_REASONS).map(([reason, text]) => [text, reason])) as Record<
+    string,
+    RemovalNoticeReason
+  >;
+  return rows.flatMap((row) =>
+    byText[row.removal_reason]
+      ? [{ reason: byText[row.removal_reason] as RemovalNoticeReason, tableName: row.poker_tables?.table_name ?? null, removedAt: row.removed_at }]
+      : []
+  );
 }

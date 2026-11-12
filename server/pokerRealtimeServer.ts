@@ -65,6 +65,7 @@ import {
   persistJoin,
   persistLeave,
   persistRebuy,
+  saveHandOnTime,
   seatsToSave,
 } from '../lib/pokerPersistence';
 import { EMOTE_COOLDOWN_MS, canSendEmote, isEmoteId } from '../lib/emotes';
@@ -452,7 +453,17 @@ async function startServer(supabase: SupabaseClient, secret: string) {
     const ended = (before.inHand || startedHand) && state.phase !== 'in-hand';
     if (!ended) return;
     const seats = seatsToSave(state);
-    void queueWrite(entry, () => persistHandFinished(supabase, entry.config.id, seats));
+    // SRS-NFR-019: saved within a second of the hand ending; timed from now,
+    // so a wait behind the table's earlier writes counts.
+    const endedAt = Date.now();
+    void queueWrite(entry, () =>
+      saveHandOnTime(() => persistHandFinished(supabase, entry.config.id, seats), endedAt)
+    ).then(({ saved, ms, onTime }) => {
+      if (saved && !onTime) {
+        // eslint-disable-next-line no-console
+        console.warn(`${entry.config.name}: saving the stacks took ${ms} ms after the hand ended (limit 1000 ms, SRS-NFR-019)`);
+      }
+    });
   }
 
   // Starts or cancels this table's countdown to match who's seated now (see

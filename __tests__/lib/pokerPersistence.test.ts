@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { PokerTable } from '../../lib/pokerTable';
 import {
   POKER_MIGRATION,
+  STACK_SAVE_LIMIT_MS,
+  saveHandOnTime,
   clearHandInProgress,
   loadSavedTables,
   persistHandFinished,
@@ -316,5 +318,40 @@ describe('voiding a hand a restart interrupted (SRS-7.4)', () => {
     await clearHandInProgress(client, 'low-1');
     expect(builder.update).toHaveBeenCalledWith({ hand_in_progress: false });
     expect(builder.eq).toHaveBeenCalledWith('table_key', 'low-1');
+  });
+});
+
+describe('saving within a second of the hand ending (SRS-NFR-019)', () => {
+  it('is one second', () => {
+    expect(STACK_SAVE_LIMIT_MS).toBe(1_000);
+  });
+
+  it('times the save from when the hand ended, including any wait before it', async () => {
+    let clock = 5_000;
+    const save = async () => {
+      clock += 300; // the database call
+      return true;
+    };
+    // Ended at 4,800 (it waited 200 ms behind an earlier write), saved at 5,300.
+    expect(await saveHandOnTime(save, 4_800, () => clock)).toEqual({ saved: true, ms: 500, onTime: true });
+  });
+
+  it('says when it was too slow, or did not save at all', async () => {
+    let clock = 0;
+    const slow = async () => {
+      clock += 1_500;
+      return true;
+    };
+    expect(await saveHandOnTime(slow, 0, () => clock)).toEqual({ saved: true, ms: 1_500, onTime: false });
+    expect((await saveHandOnTime(async () => false, clock, () => clock)).onTime).toBe(false);
+  });
+
+  it('saves the real thing quickly against a database answering at once', async () => {
+    const { client } = fakeSupabase([{ status: 'saved', seats: 3 }]);
+    const table = tableWith([1, 2, 3]);
+    const started = Date.now();
+    const result = await saveHandOnTime(() => persistHandFinished(client, 'low-1', seatsToSave(table.getState())), started);
+    expect(result.saved).toBe(true);
+    expect(result.onTime).toBe(true);
   });
 });

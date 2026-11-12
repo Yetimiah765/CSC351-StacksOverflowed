@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HEARTBEAT_INTERVAL_MS, PokerTable, SILENCE_DISCONNECT_MS } from '../../lib/pokerTable';
+import { DISCONNECT_REMOVAL_MS, HEARTBEAT_INTERVAL_MS, PokerTable, SILENCE_DISCONNECT_MS } from '../../lib/pokerTable';
 
 // Players' connections (SRS-10.x) and what a disconnection means for their
 // seat (SRS-2.x, SRS-9.1-9.4). A 6-seat table with 5/10 blinds.
@@ -66,11 +66,11 @@ describe('disconnection detected when the connection ends (SRS-10.2)', () => {
   it('marks the player disconnected straight away', () => {
     const table = tableWith([1, 2, 3]);
     heardFromAll(table, [1, 2, 3], 0);
-    expect(table.markDisconnected(p(2))).toBe(true);
+    expect(table.markDisconnected(p(2), 0)).toBe(true);
     expect(seat(table, 2)).toMatchObject({ playerId: p(2), disconnected: true });
     // Once is enough; and only for someone seated.
-    expect(table.markDisconnected(p(2))).toBe(false);
-    expect(table.markDisconnected('someone-else')).toBe(false);
+    expect(table.markDisconnected(p(2), 0)).toBe(false);
+    expect(table.markDisconnected('someone-else', 0)).toBe(false);
   });
 
   it('stops watching them for silence once they are marked', () => {
@@ -78,7 +78,7 @@ describe('disconnection detected when the connection ends (SRS-10.2)', () => {
     heardFromAll(table, [1, 2, 3], 0);
     table.heardFrom(p(1), 5_000);
     table.heardFrom(p(3), 5_000);
-    table.markDisconnected(p(2));
+    table.markDisconnected(p(2), 0);
     expect(table.nextSilenceDeadline()).toBe(5_000 + SILENCE_DISCONNECT_MS);
     expect(table.markSilentDisconnected(5_000 + SILENCE_DISCONNECT_MS - 1)).toEqual([]);
   });
@@ -88,7 +88,7 @@ describe('reconnection detected from a signed request (SRS-10.3)', () => {
   it('marks a disconnected player reconnected when they are next heard from', () => {
     const table = tableWith([1, 2, 3]);
     heardFromAll(table, [1, 2, 3], 0);
-    table.markDisconnected(p(2));
+    table.markDisconnected(p(2), 0);
     expect(table.heardFrom(p(2), 40_000)).toBe('reconnected');
     expect(seat(table, 2).disconnected).toBe(false);
     // And watched for silence again from then.
@@ -117,7 +117,7 @@ describe('disconnected players are not dealt in (SRS-9.1)', () => {
   it('leaves a disconnected player out of the hand', () => {
     const table = tableWith([1, 2, 3, 4]);
     heardFromAll(table, [1, 2, 3, 4], 0);
-    table.markDisconnected(p(4));
+    table.markDisconnected(p(4), 0);
     expect(table.startHand(() => 0)).toBe(true);
     const state = table.getState();
     expect(state.seats.slice(0, 4).map((s) => s.inHand)).toEqual([true, true, true, false]);
@@ -128,7 +128,7 @@ describe('disconnected players are not dealt in (SRS-9.1)', () => {
   it("doesn't start a hand that would be short because of it (SRS-20.1)", () => {
     const table = tableWith([1, 2, 3]);
     heardFromAll(table, [1, 2, 3], 0);
-    table.markDisconnected(p(2));
+    table.markDisconnected(p(2), 0);
     expect(table.updateCountdown(0)).toBeNull();
     expect(table.getState().phase).toBe('waiting');
     expect(table.startHand(() => 0)).toBe(false);
@@ -138,7 +138,7 @@ describe('disconnected players are not dealt in (SRS-9.1)', () => {
     const table = tableWith([1, 2, 3]);
     heardFromAll(table, [1, 2, 3], 0);
     expect(table.updateCountdown(0)).toBe('started');
-    table.markDisconnected(p(3));
+    table.markDisconnected(p(3), 0);
     expect(table.updateCountdown(1_000)).toBe('cancelled');
   });
 
@@ -146,7 +146,40 @@ describe('disconnected players are not dealt in (SRS-9.1)', () => {
     const table = tableWith([1, 2, 3]);
     heardFromAll(table, [1, 2, 3], 0);
     table.startHand(() => 0);
-    table.markDisconnected(p(1));
+    table.markDisconnected(p(1), 0);
     expect(seat(table, 1).inHand).toBe(true);
+  });
+});
+
+describe('the disconnection timer starts (SRS-9.2)', () => {
+  it('starts when a player is marked disconnected', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    expect(table.nextDisconnectDeadline()).toBeNull();
+    expect(seat(table, 2).disconnectedMsRemaining).toBeNull();
+    table.markDisconnected(p(2), 10_000);
+    expect(table.nextDisconnectDeadline()).toBe(10_000 + DISCONNECT_REMOVAL_MS);
+    expect(table.getState(10_000).seats[1].disconnectedMsRemaining).toBe(DISCONNECT_REMOVAL_MS);
+    expect(table.getState(70_000).seats[1].disconnectedMsRemaining).toBe(DISCONNECT_REMOVAL_MS - 60_000);
+  });
+
+  it('starts from when silence marked them, too (SRS-10.1)', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.heardFrom(p(1), 25_000);
+    table.heardFrom(p(2), 25_000);
+    table.markSilentDisconnected(SILENCE_DISCONNECT_MS);
+    expect(table.nextDisconnectDeadline()).toBe(SILENCE_DISCONNECT_MS + DISCONNECT_REMOVAL_MS);
+  });
+
+  it('runs one timer per player; the next deadline is the earliest', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(3), 5_000);
+    table.markDisconnected(p(1), 9_000);
+    expect(table.nextDisconnectDeadline()).toBe(5_000 + DISCONNECT_REMOVAL_MS);
+    // Marking someone again doesn't restart theirs.
+    table.markDisconnected(p(3), 50_000);
+    expect(table.nextDisconnectDeadline()).toBe(5_000 + DISCONNECT_REMOVAL_MS);
   });
 });

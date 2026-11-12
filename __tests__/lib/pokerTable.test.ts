@@ -51,6 +51,7 @@ describe('PokerTable', () => {
       timeouts: 0,
       removalPending: null,
       disconnected: false,
+      disconnectedMsRemaining: null,
     });
   });
 
@@ -162,6 +163,7 @@ describe('PokerTable', () => {
       timeouts: 0,
       removalPending: null,
       disconnected: false,
+      disconnectedMsRemaining: null,
     });
   });
 

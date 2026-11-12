@@ -212,8 +212,10 @@ function startServer(supabase: SupabaseClient, secret: string) {
 
   function broadcastTable(entry: TableEntry) {
     // Every change is broadcast, so this is where busted players' decision
-    // clocks start and stop (SRS-12.10), before the state that shows them.
+    // clocks start and stop (SRS-12.10), and the turn's clock (SRS-NFR-018),
+    // before the state that shows them.
     scheduleBustedTimeout(entry);
+    entry.table.trackTurn(Date.now());
     const state = entry.table.getState();
     // SRS-6.1: every player's hole cards ride along sealed for them alone.
     const holeCards: Record<string, string> = {};

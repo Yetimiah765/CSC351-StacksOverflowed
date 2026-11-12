@@ -66,6 +66,8 @@
 //   SRS-21.2 Leave during a hand folds when action next reaches that player
 //   SRS-21.3 ...and removes them once the hand ends (drainRemovals())
 //   SRS-NFR-022 Maximum seat count (3-9 seats)
+//   SRS-NFR-018 Per-turn time limit (TURN_TIME_LIMIT_MS; the caller runs
+//            the clock with trackTurn()/nextTurnDeadline())
 //
 // playerId identifies the signed-in account (the players.player_id from
 // supabase/schema.sql, as a string), not a transport-level connection id —
@@ -118,6 +120,8 @@ export const NEXT_HAND_DELAY_MS: Record<HandResult['reason'] | 'runout', number>
 // SRS-NFR-015 / SRS-12.10: how long a busted player has to buy back in or
 // leave before they're removed from their seat.
 export const BUSTED_DECISION_TIMEOUT_MS = 60_000;
+// SRS-NFR-018: how long a player has to act once it's their turn.
+export const TURN_TIME_LIMIT_MS = 20_000;
 
 /**
  * waiting: fewer than MIN_PLAYERS_TO_START seated with chips (SRS-20.2/20.5).
@@ -255,6 +259,12 @@ export interface TableState {
   minRaise: number;
   /** The most recent player action (SRS-1.7). */
   lastAction: LastAction | null;
+  /**
+   * SRS-NFR-018: ms the player holding the turn has left to act, once the
+   * caller has started the turn's clock (trackTurn()); null when nobody's
+   * turn is being timed. Relative, like countdownMsRemaining.
+   */
+  turnMsRemaining: number | null;
   /** How the previous hand ended; kept until the next hand starts. */
   lastHandResult: HandResult | null;
 }
@@ -426,6 +436,13 @@ export class PokerTable {
   private nextCountdownMs: number | null = null;
   /** Actions taken at this table so far, for LastAction.id. */
   private actionCount = 0;
+  /**
+   * The turn clock (SRS-NFR-018): turnSerial counts every time the turn lands
+   * on a player; trackTurn() starts the clock for a turn it hasn't seen yet.
+   */
+  private turnSerial = 0;
+  private timedTurn = 0;
+  private turnStartedAt: number | null = null;
 
   /** smallBlind defaults to half the big blind, rounded down (minimum 1). */
   constructor(
@@ -489,6 +506,10 @@ export class PokerTable {
       currentBet: this.currentBet,
       minRaise: this.minRaise,
       lastAction: this.lastAction,
+      turnMsRemaining:
+        this.activeSeat === null || this.turnStartedAt === null || this.timedTurn !== this.turnSerial
+          ? null
+          : Math.max(0, this.turnStartedAt + TURN_TIME_LIMIT_MS - now),
       lastHandResult: this.lastHandResult,
     };
   }
@@ -1004,6 +1025,8 @@ export class PokerTable {
         this.fold(next);
         continue;
       }
+      // A new turn: its clock starts at the caller's next trackTurn().
+      this.turnSerial += 1;
       return;
     }
   }
@@ -1404,6 +1427,30 @@ export class PokerTable {
     }
     seat.postingMissedBlinds = true;
     return { ok: true };
+  }
+
+  /**
+   * SRS-NFR-018: starts the clock for the turn in progress at `now`, if it
+   * hasn't been started yet, and stops it when nobody's turn is open. Like
+   * trackBusted(), the caller calls this after every change and schedules a
+   * timer for nextTurnDeadline().
+   */
+  trackTurn(now: number): void {
+    if (this.phase !== 'in-hand' || this.activeSeat === null) {
+      this.turnStartedAt = null;
+      return;
+    }
+    if (this.timedTurn !== this.turnSerial) {
+      this.timedTurn = this.turnSerial;
+      this.turnStartedAt = now;
+    }
+  }
+
+  /** When the player holding the turn runs out of time, or null if no turn is being timed. */
+  nextTurnDeadline(): number | null {
+    if (this.phase !== 'in-hand' || this.activeSeat === null || this.turnStartedAt === null) return null;
+    if (this.timedTurn !== this.turnSerial) return null;
+    return this.turnStartedAt + TURN_TIME_LIMIT_MS;
   }
 
   /**

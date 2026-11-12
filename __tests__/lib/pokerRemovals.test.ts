@@ -66,13 +66,11 @@ describe('paying out removed players (SRS-9.9)', () => {
     expect(paid).toEqual([[3, 1005]]);
   });
 
-  it('has nothing to pay a player with no chips', async () => {
-    const table = tableWith([1, 2, 3]);
+  it('pays nothing to a player with no chips, but still frees their seat (SRS-7.2)', async () => {
     const removals = [{ playerId: '2', chipStack: 0, reason: 'left' as const }];
     const { paid, pay } = payments();
     await payOutRemovals({ drainRemovals: () => removals }, pay);
-    expect(paid).toEqual([]);
-    expect(table.getState().seatedCount).toBe(3);
+    expect(paid).toEqual([[2, 0]]);
   });
 });
 

@@ -1,0 +1,165 @@
+// Saving poker seats and stacks (UR-007), for the poker realtime server
+// (server/pokerRealtimeServer.ts). The server keeps each table in memory
+// while it plays; poker_seats in the database is the record. Every write goes
+// through a Postgres function that moves coins and seat rows together in one
+// transaction (supabase/migrations/2026-11-12_poker_persistent_stacks.sql):
+//   * fn_poker_join / fn_poker_rebuy / fn_poker_leave — balance <-> seat
+//   * fn_poker_hand_finished — every seat's stack after the hand (SRS-7.2)
+// Stacks are never written mid-hand, so what's stored is always the value
+// from before any hand in progress.
+
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { TableState } from './pokerTable';
+
+export type PersistResult = { ok: true } | { ok: false; error: string };
+
+export const POKER_MIGRATION = 'supabase/migrations/2026-11-12_poker_persistent_stacks.sql';
+
+interface FunctionReply {
+  status: string;
+  min?: number;
+  max?: number;
+  balance?: number;
+}
+
+async function callFunction(
+  supabase: SupabaseClient,
+  name: string,
+  args: Record<string, unknown>
+): Promise<FunctionReply | null> {
+  const { data, error } = await supabase.rpc(name, args);
+  if (error || !data) {
+    // eslint-disable-next-line no-console
+    console.error(`${name} failed:`, error?.message ?? 'no reply');
+    return null;
+  }
+  return data as FunctionReply;
+}
+
+// What a refused buy-in means to the player (SRS-1.6, SRS-12.8).
+function refusal(reply: FunctionReply | null): string {
+  switch (reply?.status) {
+    case 'invalid_buy_in':
+      return `Buy-in must be between ${reply.min} and ${reply.max}.`;
+    case 'insufficient_balance':
+      return 'That buy-in exceeds your balance.';
+    case 'seat_taken':
+      return 'That seat is already taken.';
+    case 'invalid_seat':
+      return 'That seat does not exist.';
+    case 'already_seated':
+      return 'You are already seated at another table. Leave that table first.';
+    case 'not_seated':
+      return 'You are not seated at this table.';
+    case 'not_busted':
+      return 'You can only buy back in once you are out of chips.';
+    case 'not_active':
+      return 'Your account cannot play right now.';
+    case 'not_found':
+      return 'Unable to load your profile.';
+    case 'no_table':
+      return `This table isn't set up in the database yet (run ${POKER_MIGRATION}).`;
+    default:
+      return 'Unable to update your balance. Please try again.';
+  }
+}
+
+/** SRS-1.2: take the buy-in from the player's balance and give them the seat. */
+export async function persistJoin(
+  supabase: SupabaseClient,
+  tableKey: string,
+  playerId: number,
+  seatNumber: number,
+  buyIn: number
+): Promise<PersistResult> {
+  const reply = await callFunction(supabase, 'fn_poker_join', {
+    p_table_key: tableKey,
+    p_player_id: playerId,
+    p_seat_number: seatNumber,
+    p_buy_in: buyIn,
+  });
+  return reply?.status === 'joined' ? { ok: true } : { ok: false, error: refusal(reply) };
+}
+
+/** SRS-12.4: a busted player's buy-back, from their balance to their stack. */
+export async function persistRebuy(
+  supabase: SupabaseClient,
+  tableKey: string,
+  playerId: number,
+  amount: number
+): Promise<PersistResult> {
+  const reply = await callFunction(supabase, 'fn_poker_rebuy', {
+    p_table_key: tableKey,
+    p_player_id: playerId,
+    p_amount: amount,
+  });
+  return reply?.status === 'rebought' ? { ok: true } : { ok: false, error: refusal(reply) };
+}
+
+/**
+ * SRS-9.9 / SRS-9.10: free the seat and pay `chipStack` (the stack as the
+ * table holds it now, never chips already in a pot) into the player's
+ * balance. Tried twice, since there's no ack to report a failure to; a
+ * failure is logged with the amount owed.
+ */
+export async function persistLeave(
+  supabase: SupabaseClient,
+  tableKey: string,
+  playerId: number,
+  chipStack: number
+): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const reply = await callFunction(supabase, 'fn_poker_leave', {
+      p_table_key: tableKey,
+      p_player_id: playerId,
+      p_chip_stack: chipStack,
+    });
+    // 'not_seated' means there was nothing to pay out (already left).
+    if (reply?.status === 'left' || reply?.status === 'not_seated') return true;
+  }
+  // eslint-disable-next-line no-console
+  console.error(`Could not pay ${chipStack} back to player ${playerId} leaving ${tableKey}.`);
+  return false;
+}
+
+/** What's saved about a seat after a hand. */
+export interface SeatToSave {
+  seatNumber: number;
+  playerId: number;
+  chipStack: number;
+  owesSmallBlind: boolean;
+  owesBigBlind: boolean;
+  consecutiveTimeouts: number;
+}
+
+/** The seats to save after a hand: everyone still seated, with their stack, missed blinds and timeouts. */
+export function seatsToSave(state: Pick<TableState, 'seats'>): SeatToSave[] {
+  return state.seats.flatMap((seat) =>
+    seat.playerId && seat.chipStack !== null
+      ? [
+          {
+            seatNumber: seat.seatNumber,
+            playerId: Number(seat.playerId),
+            chipStack: seat.chipStack,
+            owesSmallBlind: seat.missedSmallBlind,
+            owesBigBlind: seat.missedBigBlind,
+            consecutiveTimeouts: seat.timeouts,
+          },
+        ]
+      : []
+  );
+}
+
+/** SRS-7.2: save every seat's stack once a hand has ended. Tried twice; resolves with whether it was saved. */
+export async function persistHandFinished(supabase: SupabaseClient, tableKey: string, seats: SeatToSave[]): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const reply = await callFunction(supabase, 'fn_poker_hand_finished', {
+      p_table_key: tableKey,
+      p_seats: seats,
+    });
+    if (reply?.status === 'saved') return true;
+  }
+  // eslint-disable-next-line no-console
+  console.error(`Could not save the stacks at ${tableKey} after a hand.`);
+  return false;
+}

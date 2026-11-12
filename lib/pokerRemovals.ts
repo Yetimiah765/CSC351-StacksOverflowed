@@ -47,8 +47,10 @@ export function noticeReason(removal: Removal): RemovalNoticeReason | null {
 
 /**
  * Takes every removal the table has queued since last time and pays each
- * player's remaining stack into their balance (skipping empty stacks).
- * Returns the removals, for the caller to tell each player why (SRS-9.11).
+ * player's remaining stack into their balance, through `pay`, which also
+ * frees their seat in the database (SRS-7.2) — so it's called for an empty
+ * stack too, paying nothing. Returns the removals, for the caller to tell
+ * each player why (SRS-9.11).
  */
 export async function payOutRemovals(
   table: Pick<PokerTable, 'drainRemovals'>,
@@ -56,7 +58,7 @@ export async function payOutRemovals(
 ): Promise<Removal[]> {
   const removals = table.drainRemovals();
   for (const removal of removals) {
-    if (removal.chipStack > 0) await pay(Number(removal.playerId), removal.chipStack);
+    await pay(Number(removal.playerId), removal.chipStack);
   }
   return removals;
 }

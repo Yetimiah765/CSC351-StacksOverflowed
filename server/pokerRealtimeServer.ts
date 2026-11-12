@@ -90,6 +90,8 @@ interface TableEntry {
   bustedTimer: ReturnType<typeof setTimeout> | null;
   /** Fires when the player holding the turn runs out of time (SRS-4.2-4.4); null when no turn is timed. */
   turnTimer: ReturnType<typeof setTimeout> | null;
+  /** Fires when the next seated player will have been silent too long (SRS-10.1); null when nobody's watched. */
+  silenceTimer: ReturnType<typeof setTimeout> | null;
   /**
    * This table's actions, handled one at a time in the order they arrive:
    * several await the database, and two interleaving at those awaits (a
@@ -168,6 +170,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     startTimer: null,
     bustedTimer: null,
     turnTimer: null,
+    silenceTimer: null,
     queue: Promise.resolve(),
   }));
 
@@ -222,6 +225,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     // before the state that shows them.
     scheduleBustedTimeout(entry);
     scheduleTurnTimeout(entry);
+    scheduleSilenceCheck(entry);
     const state = entry.table.getState();
     // SRS-6.1: every player's hole cards ride along sealed for them alone.
     const holeCards: Record<string, string> = {};
@@ -259,6 +263,37 @@ function startServer(supabase: SupabaseClient, secret: string) {
       }
       broadcastTable(entry);
     }, Math.max(0, deadline - now));
+  }
+
+  // SRS-10.1: one timer per table, for whichever seated player will next
+  // have been silent too long. Heartbeats move the deadlines on without a
+  // broadcast, so when it fires it checks, marks anyone really silent as
+  // disconnected (and broadcasts that), and sets itself again.
+  function scheduleSilenceCheck(entry: TableEntry) {
+    if (entry.silenceTimer) {
+      clearTimeout(entry.silenceTimer);
+      entry.silenceTimer = null;
+    }
+    const deadline = entry.table.nextSilenceDeadline();
+    if (deadline === null) return;
+    entry.silenceTimer = setTimeout(() => {
+      entry.silenceTimer = null;
+      entry.queue = entry.queue
+        .then(() => {
+          const marked = entry.table.markSilentDisconnected(Date.now());
+          if (marked.length > 0) {
+            // eslint-disable-next-line no-console
+            console.log(`${entry.config.name}: no word from player(s) ${marked.join(', ')}; marked disconnected`);
+            broadcastTable(entry);
+          } else {
+            scheduleSilenceCheck(entry);
+          }
+        })
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error(`${entry.config.name}: silence check failed`, error);
+        });
+    }, Math.max(0, deadline - Date.now()));
   }
 
   // SRS-4.2-4.4: one timer per table, for the turn in progress (SRS-NFR-018).
@@ -398,6 +433,8 @@ function startServer(supabase: SupabaseClient, secret: string) {
       // exceed Realtime's broadcast payload size limit.
       const result = table.join(String(playerId), username, buyIn as number, null, seatNumber);
       if (result.ok) {
+        // Watching their connection from now on (SRS-10.1).
+        table.heardFrom(String(playerId), Date.now());
         refreshCountdown(entry);
         broadcastTable(entry);
         broadcastLobby();
@@ -563,8 +600,11 @@ function startServer(supabase: SupabaseClient, secret: string) {
       // One action at a time per table (see TableEntry.queue).
       entry.queue = entry.queue
         .then(async () => {
+          // Anything signed from a seated player shows they're still there (SRS-10.1).
+          entry.table.heardFrom(String(action.playerId), Date.now());
           let result: AckResult;
-          if (action.action === 'join') result = await handleJoin(entry, action);
+          if (action.action === 'heartbeat') result = { ok: true };
+          else if (action.action === 'join') result = await handleJoin(entry, action);
           else if (action.action === 'leave') result = await handleLeave(entry, action);
           else if (action.action === 'rebuy') result = await handleRebuy(entry, action);
           else if (action.action === 'post-blinds') result = handlePostBlinds(entry, action, true);

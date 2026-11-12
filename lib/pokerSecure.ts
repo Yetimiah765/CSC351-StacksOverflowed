@@ -31,7 +31,15 @@ export function getPokerServerSecret(): string | null {
   return process.env.POKER_SERVER_SECRET || null;
 }
 
-export type RelayedActionType = 'join' | 'leave' | 'act' | 'rebuy' | 'post-blinds' | 'wait-for-big-blind' | 'emote';
+export type RelayedActionType =
+  | 'join'
+  | 'leave'
+  | 'act'
+  | 'rebuy'
+  | 'post-blinds'
+  | 'wait-for-big-blind'
+  | 'emote'
+  | 'heartbeat';
 
 /** What POST /api/poker/action broadcasts on a table's channel. */
 export interface RelayedAction {
@@ -105,7 +113,9 @@ export function verifyRelayedAction(
     typeof candidate.nonce !== 'string' ||
     typeof candidate.issuedAt !== 'number' ||
     typeof candidate.playerId !== 'number' ||
-    !['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind', 'emote'].includes(candidate.action as string) ||
+    !['join', 'leave', 'act', 'rebuy', 'post-blinds', 'wait-for-big-blind', 'emote', 'heartbeat'].includes(
+      candidate.action as string
+    ) ||
     !isOptionalNumber(candidate.buyIn) ||
     !isOptionalNumber(candidate.seatNumber) ||
     !isOptionalNumber(candidate.amount) ||

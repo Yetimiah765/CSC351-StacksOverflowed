@@ -8,6 +8,7 @@ import { notifyBalanceChanged } from '../../../lib/balanceEvents';
 import {
   MAX_BUY_IN_MULTIPLIER,
   MIN_BUY_IN_MULTIPLIER,
+  HEARTBEAT_INTERVAL_MS,
   MIN_PLAYERS_TO_START,
   TURN_TIME_LIMIT_MS,
   getBettingOptions,
@@ -401,6 +402,25 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     setBustedEndsAt(msRemaining === null ? null : Date.now() + msRemaining);
   }, [mySeat]);
   const bustedSeconds = bustedEndsAt === null ? null : Math.max(0, Math.ceil((bustedEndsAt - now) / 1000));
+
+  // SRS-10.1: while seated, tell the poker server every HEARTBEAT_INTERVAL_MS
+  // that this page is still here (and straight away on sitting down or
+  // coming back to the tab), so it can tell when a player has gone silent.
+  const seatedHere = Boolean(mySeat);
+  useEffect(() => {
+    if (!seatedHere || !token || !config || !connected) return;
+    const beat = () => void sendAction(token, { tableId: config.id, action: 'heartbeat' });
+    beat();
+    const interval = setInterval(beat, HEARTBEAT_INTERVAL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') beat();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [seatedHere, token, config, connected, sendAction]);
 
   // A busted player's seat disappearing without them clicking Leave means
   // the server removed them for not choosing in time (SRS-12.10).
@@ -1327,6 +1347,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         }}
                       >
                         {shown.handName}
+                      </p>
+                    ) : seat.disconnected ? (
+                      // SRS-10.1/10.2: they've gone; their seat is held for now.
+                      <p key="disconnected" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                        Disconnected
                       </p>
                     ) : isActive ? (
                       // SRS-3.2: active turn indicator; SRS-4.1: the time

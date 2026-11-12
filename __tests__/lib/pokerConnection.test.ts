@@ -233,3 +233,55 @@ describe('reconnecting to the held seat (SRS-2.1)', () => {
     expect(seat(table, 2).playerId).toBeNull();
   });
 });
+
+describe('checking for a disconnected player (SRS-2.2)', () => {
+  /** A hand at seats 1-3 called round to the flop: seats 2, 3, 1 to act there. */
+  function onTheFlop() {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0); // button 1, SB 2, BB 3
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    table.act(p(3), 'check');
+    expect(table.getState().street).toBe('flop');
+    return table;
+  }
+
+  it('checks at once when the turn reaches them with nothing to call', () => {
+    const table = onTheFlop();
+    table.markDisconnected(p(3), 0);
+    table.act(p(2), 'check');
+    // Seat 3 is skipped over with a check; the turn goes straight to seat 1.
+    const state = table.getState();
+    expect(state.activeSeat).toBe(1);
+    expect(state.seats[2]).toMatchObject({ inHand: true, lastAction: 'Check' });
+  });
+
+  it('starts no countdown for them (SRS-4.1)', () => {
+    const table = onTheFlop();
+    table.markDisconnected(p(3), 0);
+    table.act(p(2), 'check');
+    table.trackTurn(0);
+    // The clock running is seat 1's, not seat 3's.
+    expect(table.getState().activeSeat).toBe(1);
+    expect(table.nextTurnDeadline()).not.toBeNull();
+  });
+
+  it("doesn't count it as one of their timeouts (SRS-9.5)", () => {
+    const table = onTheFlop();
+    table.markDisconnected(p(3), 0);
+    table.act(p(2), 'check');
+    expect(seat(table, 3).timeouts).toBe(0);
+  });
+
+  it('checks a hand through to the showdown when everyone left is disconnected', () => {
+    const table = onTheFlop();
+    table.markDisconnected(p(1), 0);
+    table.markDisconnected(p(3), 0);
+    table.act(p(2), 'check');
+    // Seat 2 has to act for themselves each street; the others are checked for.
+    table.act(p(2), 'check');
+    table.act(p(2), 'check');
+    expect(table.getState().lastHandResult?.reason).toBe('showdown');
+  });
+});

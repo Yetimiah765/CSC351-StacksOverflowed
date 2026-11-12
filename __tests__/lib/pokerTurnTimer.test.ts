@@ -142,3 +142,61 @@ describe('auto-fold when time runs out (SRS-4.3)', () => {
     expect(state.lastHandResult).toMatchObject({ reason: 'fold', awards: [{ seatNumber: 3, amount: 10 }] }); // the blinds, less the big blind's uncalled 5 (SRS-19.5)
   });
 });
+
+describe('the hand moves on after an automatic action (SRS-4.4)', () => {
+  /** What the server does when the turn's timer fires: start the clock, wait it out, time out. */
+  function runOutTheClock(table: PokerTable, now: number) {
+    table.trackTurn(now);
+    const deadline = table.nextTurnDeadline() as number;
+    expect(deadline).not.toBeNull();
+    return { result: table.timeOutTurn(deadline), at: deadline };
+  }
+
+  it('passes the turn on, with a fresh clock for the next player', () => {
+    const table = handUnderWay();
+    const { at } = runOutTheClock(table, 0);
+    expect(table.getState().activeSeat).toBe(2);
+    table.trackTurn(at);
+    expect(table.nextTurnDeadline()).toBe(at + TURN_TIME_LIMIT_MS);
+  });
+
+  it('skips players who can no longer act (SRS-18.5)', () => {
+    // Seat 2 is all-in, so when seat 1 times out the turn goes to seat 3.
+    const table = tableWith([1, 2, 3, 4]);
+    table.startHand(pick(0)); // button 1, SB 2, BB 3, seat 4 first
+    table.act(p(4), 'call');
+    table.act(p(1), 'call');
+    table.act(p(2), 'raise', 1000); // all-in
+    table.act(p(3), 'fold');
+    // Seat 4 faces the all-in and runs out of time.
+    expect(runOutTheClock(table, 0).result).toEqual({ playerId: p(4), move: 'fold' });
+    expect(table.getState().activeSeat).toBe(1);
+  });
+
+  it('closes the round and deals the next street (SRS-18.3)', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    runOutTheClock(table, 0); // the big blind checks
+    expect(table.getState().street).toBe('flop');
+    expect(table.getState().activeSeat).toBe(2);
+  });
+
+  it('can carry a hand through to the showdown on its own', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    // Nobody acts again: every turn times out as a check.
+    let now = 0;
+    for (let turns = 0; table.getState().phase === 'in-hand' && turns < 20; turns++) {
+      const { result, at } = runOutTheClock(table, now);
+      expect(result?.move).toBe('check');
+      now = at;
+    }
+    const state = table.getState();
+    expect(state.phase).not.toBe('in-hand');
+    expect(state.lastHandResult?.reason).toBe('showdown');
+    // And the table goes on to count down to the next hand.
+    expect(table.updateCountdown(now)).toBe('started');
+  });
+});

@@ -202,6 +202,8 @@ export interface LastAction {
   /** The round contribution after the move (0 for check/fold). */
   amount: number;
   allIn: boolean;
+  /** Taken for the player when their time ran out (SRS-4.2/4.3), not by them. */
+  automatic?: boolean;
 }
 
 export interface HandResult {
@@ -949,7 +951,7 @@ export class PokerTable {
     this.currentBet = to;
   }
 
-  private recordAction(seat: SeatRecord, move: BettingMove) {
+  private recordAction(seat: SeatRecord, move: BettingMove, automatic = false) {
     seat.hasActed = true;
     seat.actedSinceFullRaise = true;
     seat.lastAction =
@@ -972,6 +974,7 @@ export class PokerTable {
       move,
       amount: move === 'fold' || move === 'check' ? 0 : seat.bet,
       allIn: seat.allIn,
+      ...(automatic ? { automatic: true } : {}),
     };
   }
 
@@ -1444,6 +1447,22 @@ export class PokerTable {
       this.timedTurn = this.turnSerial;
       this.turnStartedAt = now;
     }
+  }
+
+  /**
+   * The turn's time is up by `now` (SRS-NFR-018): act for the player holding
+   * it. With nothing to call, they check (SRS-4.2). Returns what was done for
+   * whom, or null if no timed turn has run out.
+   */
+  timeOutTurn(now: number): { playerId: string; move: BettingMove } | null {
+    const deadline = this.nextTurnDeadline();
+    if (deadline === null || now < deadline) return null;
+    const seat = this.seats[(this.activeSeat as number) - 1] as SeatRecord;
+    const options = getBettingOptions(seat, { currentBet: this.currentBet, minRaise: this.minRaise, bigBlind: this.bigBlind });
+    if (!options.canCheck) return null;
+    this.recordAction(seat, 'check', true);
+    this.advance();
+    return { playerId: seat.playerId as string, move: 'check' };
   }
 
   /** When the player holding the turn runs out of time, or null if no turn is being timed. */

@@ -71,3 +71,37 @@ describe('the turn clock (SRS-NFR-018)', () => {
     expect(table.getState(2_000).turnMsRemaining).toBeNull();
   });
 });
+
+describe('auto-check when time runs out (SRS-4.2)', () => {
+  /** Preflop called round to the big blind (seat 3), who has nothing to call. */
+  function bigBlindToCheck() {
+    const table = handUnderWay();
+    expect(table.act(p(1), 'call')).toEqual({ ok: true });
+    expect(table.act(p(2), 'call')).toEqual({ ok: true });
+    expect(table.getState().activeSeat).toBe(3);
+    table.trackTurn(10_000);
+    return table;
+  }
+
+  it('does nothing before the time is up', () => {
+    const table = bigBlindToCheck();
+    expect(table.timeOutTurn(10_000 + TURN_TIME_LIMIT_MS - 1)).toBeNull();
+    expect(table.getState().activeSeat).toBe(3);
+    expect(table.getState().street).toBe('preflop');
+  });
+
+  it('checks for a player who does not face a bet', () => {
+    const table = bigBlindToCheck();
+    expect(table.timeOutTurn(10_000 + TURN_TIME_LIMIT_MS)).toEqual({ playerId: p(3), move: 'check' });
+    const state = table.getState();
+    expect(state.lastAction).toMatchObject({ seatNumber: 3, move: 'check', automatic: true });
+    // The check closed the round: the flop is out.
+    expect(state.street).toBe('flop');
+    expect(state.board).toHaveLength(3);
+  });
+
+  it('only marks the automatic actions as automatic', () => {
+    const table = bigBlindToCheck();
+    expect(table.getState().lastAction?.automatic).toBeUndefined();
+  });
+});

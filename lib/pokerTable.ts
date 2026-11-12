@@ -595,9 +595,12 @@ export class PokerTable {
     return this.findSeatByPlayerId(playerId)?.seatNumber ?? null;
   }
 
-  /** Seated with chips — able to be dealt in. Busted players (0 chips) sit out. */
+  /**
+   * Seated with chips and connected — able to be dealt in. Busted players
+   * (0 chips) sit out, and so do disconnected ones (SRS-9.1).
+   */
   private isEligible(seat: SeatRecord): boolean {
-    return seat.playerId !== null && (seat.chipStack ?? 0) > 0;
+    return seat.playerId !== null && (seat.chipStack ?? 0) > 0 && !seat.disconnected;
   }
 
   /** Eligible with no missed-blind marker, so dealt into every hand (SRS-13.4). */

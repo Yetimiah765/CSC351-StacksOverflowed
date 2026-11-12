@@ -173,6 +173,24 @@ export function seatsToSave(state: Pick<TableState, 'seats'>): SeatToSave[] {
   );
 }
 
+/** SRS-NFR-019: a hand's stacks must be saved within this long of it ending. */
+export const STACK_SAVE_LIMIT_MS = 1_000;
+
+/**
+ * SRS-NFR-019: runs a hand's save (persistHandFinished()) and times it from
+ * when the hand ended, `endedAt`, to when the save was done — which includes
+ * any wait behind the table's earlier writes. `now` is the clock, for tests.
+ */
+export async function saveHandOnTime(
+  save: () => Promise<boolean>,
+  endedAt: number,
+  now: () => number = Date.now
+): Promise<{ saved: boolean; ms: number; onTime: boolean }> {
+  const saved = await save();
+  const ms = now() - endedAt;
+  return { saved, ms, onTime: saved && ms <= STACK_SAVE_LIMIT_MS };
+}
+
 /** SRS-7.2: save every seat's stack once a hand has ended. Tried twice; resolves with whether it was saved. */
 export async function persistHandFinished(supabase: SupabaseClient, tableKey: string, seats: SeatToSave[]): Promise<boolean> {
   for (let attempt = 0; attempt < 2; attempt++) {

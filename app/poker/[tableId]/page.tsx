@@ -189,6 +189,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   const [turnEndsAt, setTurnEndsAt] = useState<number | null>(null);
   // Removed from their seat by the table; says why until they sit down again (SRS-9.11).
   const [removedBecause, setRemovedBecause] = useState<RemovalNoticeReason | null>(null);
+  // SRS-10.2: a signed ticket the page tracks on the channel's presence while
+  // seated, so the poker server sees at once when this page's connection ends.
+  const [presenceTicket, setPresenceTicket] = useState<string | null>(null);
   // This player's id, for the channel's callbacks (set once the profile loads).
   const myPlayerIdRef = useRef<number | null>(null);
   myPlayerIdRef.current = profile?.playerId ?? null;
@@ -234,7 +237,8 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
       if (myPlayerIdRef.current !== null && notice.playerId === String(myPlayerIdRef.current)) {
         setRemovedBecause(notice.reason);
       }
-    }
+    },
+    presenceTicket
   );
 
   // Cards landing shake the whole table (alternating classes, so a shake
@@ -403,10 +407,33 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   }, [mySeat]);
   const bustedSeconds = bustedEndsAt === null ? null : Math.max(0, Math.ceil((bustedEndsAt - now) / 1000));
 
+  const seatedHere = Boolean(mySeat);
+
+  // SRS-10.2: get a presence ticket for this table on sitting down; drop it on leaving.
+  useEffect(() => {
+    if (!seatedHere || !token || !config) {
+      setPresenceTicket(null);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/poker/presence', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ tableId: config.id }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { ticket?: string } | null) => {
+        if (!cancelled && data?.ticket) setPresenceTicket(data.ticket);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [seatedHere, token, config]);
+
   // SRS-10.1: while seated, tell the poker server every HEARTBEAT_INTERVAL_MS
   // that this page is still here (and straight away on sitting down or
   // coming back to the tab), so it can tell when a player has gone silent.
-  const seatedHere = Boolean(mySeat);
   useEffect(() => {
     if (!seatedHere || !token || !config || !connected) return;
     const beat = () => void sendAction(token, { tableId: config.id, action: 'heartbeat' });

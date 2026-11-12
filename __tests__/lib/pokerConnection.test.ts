@@ -61,3 +61,25 @@ describe('disconnection detected by silence (SRS-10.1)', () => {
     expect(table.heardFrom('someone-else', 0)).toBe(false);
   });
 });
+
+describe('disconnection detected when the connection ends (SRS-10.2)', () => {
+  it('marks the player disconnected straight away', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    expect(table.markDisconnected(p(2))).toBe(true);
+    expect(seat(table, 2)).toMatchObject({ playerId: p(2), disconnected: true });
+    // Once is enough; and only for someone seated.
+    expect(table.markDisconnected(p(2))).toBe(false);
+    expect(table.markDisconnected('someone-else')).toBe(false);
+  });
+
+  it('stops watching them for silence once they are marked', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.heardFrom(p(1), 5_000);
+    table.heardFrom(p(3), 5_000);
+    table.markDisconnected(p(2));
+    expect(table.nextSilenceDeadline()).toBe(5_000 + SILENCE_DISCONNECT_MS);
+    expect(table.markSilentDisconnected(5_000 + SILENCE_DISCONNECT_MS - 1)).toEqual([]);
+  });
+});

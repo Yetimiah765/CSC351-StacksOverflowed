@@ -1542,6 +1542,17 @@ export class PokerTable {
   }
 
   /**
+   * SRS-10.2: this player's connection has ended. Returns true if that marked
+   * them disconnected (false if they weren't seated, or already were).
+   */
+  markDisconnected(playerId: string): boolean {
+    const seat = this.findSeatByPlayerId(playerId);
+    if (!seat || seat.disconnected) return false;
+    seat.disconnected = true;
+    return true;
+  }
+
+  /**
    * SRS-10.1: marks every seated player not heard from for
    * SILENCE_DISCONNECT_MS by `now` as disconnected, and returns their ids.
    * Like the other clocks, the caller runs the timer (nextSilenceDeadline()).

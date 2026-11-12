@@ -57,7 +57,14 @@ import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import { noticeReason, payOutRemovals, type RemovalNoticeReason } from '../lib/pokerRemovals';
-import { persistHandFinished, persistJoin, persistLeave, persistRebuy, seatsToSave } from '../lib/pokerPersistence';
+import {
+  loadSavedTables,
+  persistHandFinished,
+  persistJoin,
+  persistLeave,
+  persistRebuy,
+  seatsToSave,
+} from '../lib/pokerPersistence';
 import { EMOTE_COOLDOWN_MS, canSendEmote, isEmoteId } from '../lib/emotes';
 import {
   POKER_EVENT_ACTION,
@@ -122,7 +129,7 @@ const CHANNEL_CONFIG = { config: { broadcast: { self: false } } };
 // ticket there, so the server sees when one's connection ends (SRS-10.2).
 const TABLE_CHANNEL_CONFIG = { config: { broadcast: { self: false }, presence: { key: '' } } };
 
-function startServer(supabase: SupabaseClient, secret: string) {
+async function startServer(supabase: SupabaseClient, secret: string) {
   const lobbyChannel = supabase.channel(POKER_LOBBY_CHANNEL_NAME, CHANNEL_CONFIG);
   const entries: TableEntry[] = POKER_TABLES.map((config) => ({
     config,
@@ -136,6 +143,34 @@ function startServer(supabase: SupabaseClient, secret: string) {
     writes: Promise.resolve(),
     queue: Promise.resolve(),
   }));
+
+  // SRS-7.3: put everyone back where they were, with the stacks saved when
+  // the last hand ended. Nobody's page is connected yet, so they start
+  // disconnected: dealt in once they're back, removed if they aren't in time.
+  const saved = await loadSavedTables(
+    supabase,
+    entries.map((entry) => entry.config.id)
+  );
+  if (!saved.ok) {
+    // eslint-disable-next-line no-console
+    console.error(`Cannot load the poker tables: ${saved.error}`);
+    // Let the process wind down rather than kill it mid-request.
+    process.exitCode = 1;
+    await supabase.removeAllChannels();
+    return;
+  }
+  for (const entry of entries) {
+    const savedTable = saved.tables.get(entry.config.id);
+    if (!savedTable || savedTable.seats.length === 0) continue;
+    const seats = [];
+    for (const seat of savedTable.seats) {
+      const username = await getPlayerUsername(supabase, Number(seat.playerId));
+      seats.push({ ...seat, username: username ?? `Player ${seat.playerId}` });
+    }
+    entry.table.restore({ ...savedTable, seats }, Date.now());
+    // eslint-disable-next-line no-console
+    console.log(`${entry.config.name}: restored ${seats.length} seated player(s) and their stacks`);
+  }
 
   // Players with a join being processed right now. A join awaits several
   // database calls between checking that the player isn't seated anywhere
@@ -749,6 +784,16 @@ function startServer(supabase: SupabaseClient, secret: string) {
     });
   }
 
+  // Restored tables start their clocks (the disconnection timers, SRS-9.2,
+  // and any busted players' decision timers). Nothing is broadcast yet: the
+  // channels aren't subscribed, and every page asks for the state (sync)
+  // once it is.
+  for (const entry of entries) {
+    refreshCountdown(entry);
+    scheduleBustedTimeout(entry);
+    scheduleDisconnectRemoval(entry);
+  }
+
   lobbyChannel.subscribe((status) => {
     if (status === 'SUBSCRIBED') {
       // eslint-disable-next-line no-console
@@ -782,5 +827,9 @@ if (!supabase) {
     'POKER_SERVER_SECRET is not configured — the poker server cannot verify player actions or deal private cards. Set the same value for the Next app and this process (see .env.example).'
   );
 } else {
-  startServer(supabase, secret);
+  startServer(supabase, secret).catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error('The poker server could not start:', error);
+    process.exit(1);
+  });
 }

@@ -5,11 +5,12 @@
 // transaction (supabase/migrations/2026-11-12_poker_persistent_stacks.sql):
 //   * fn_poker_join / fn_poker_rebuy / fn_poker_leave — balance <-> seat
 //   * fn_poker_hand_finished — every seat's stack after the hand (SRS-7.2)
+// and loadSavedTables() reads it all back when the server starts (SRS-7.3).
 // Stacks are never written mid-hand, so what's stored is always the value
 // from before any hand in progress.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { TableState } from './pokerTable';
+import type { SavedSeat, TableState } from './pokerTable';
 
 export type PersistResult = { ok: true } | { ok: false; error: string };
 
@@ -162,4 +163,65 @@ export async function persistHandFinished(supabase: SupabaseClient, tableKey: st
   // eslint-disable-next-line no-console
   console.error(`Could not save the stacks at ${tableKey} after a hand.`);
   return false;
+}
+
+export interface SavedTable {
+  dealerSeat: number | null;
+  smallBlindSeat: number | null;
+  bigBlindSeat: number | null;
+  seats: Omit<SavedSeat, 'username'>[];
+}
+
+/**
+ * SRS-7.3: every lobby table's saved seats, keyed by table key. A key with
+ * no row means the migration hasn't been run.
+ */
+export async function loadSavedTables(
+  supabase: SupabaseClient,
+  tableKeys: string[]
+): Promise<{ ok: true; tables: Map<string, SavedTable> } | { ok: false; error: string }> {
+  const { data, error } = await supabase
+    .from('poker_tables')
+    .select(
+      'table_key, dealer_button_seat, last_small_blind_seat, last_big_blind_seat, poker_seats(seat_number, player_id, chip_stack, owes_small_blind, owes_big_blind, consecutive_timeouts)'
+    )
+    .in('table_key', tableKeys);
+  if (error) return { ok: false, error: `${error.message} (has ${POKER_MIGRATION} been run?)` };
+
+  const tables = new Map<string, SavedTable>();
+  for (const row of (data ?? []) as {
+    table_key: string;
+    dealer_button_seat: number | null;
+    last_small_blind_seat: number | null;
+    last_big_blind_seat: number | null;
+    poker_seats: {
+      seat_number: number;
+      player_id: number;
+      chip_stack: number | string;
+      owes_small_blind: boolean;
+      owes_big_blind: boolean;
+      consecutive_timeouts: number | null;
+    }[];
+  }[]) {
+    tables.set(row.table_key, {
+      dealerSeat: row.dealer_button_seat,
+      smallBlindSeat: row.last_small_blind_seat,
+      bigBlindSeat: row.last_big_blind_seat,
+      seats: (row.poker_seats ?? []).map((seat) => ({
+        seatNumber: seat.seat_number,
+        playerId: String(seat.player_id),
+        // BIGINT can come back from PostgREST as a string.
+        chipStack: Number(seat.chip_stack),
+        missedSmallBlind: seat.owes_small_blind,
+        missedBigBlind: seat.owes_big_blind,
+        timeouts: seat.consecutive_timeouts ?? 0,
+      })),
+    });
+  }
+
+  const missing = tableKeys.filter((key) => !tables.has(key));
+  if (missing.length > 0) {
+    return { ok: false, error: `poker_tables has no row for ${missing.join(', ')} (run ${POKER_MIGRATION}).` };
+  }
+  return { ok: true, tables };
 }

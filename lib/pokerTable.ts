@@ -335,6 +335,17 @@ export interface ActionResult {
   error?: string;
 }
 
+/** A seat as last saved to the database (poker_seats), for restore(). */
+export interface SavedSeat {
+  seatNumber: number;
+  playerId: string;
+  username: string;
+  chipStack: number;
+  missedSmallBlind?: boolean;
+  missedBigBlind?: boolean;
+  timeouts?: number;
+}
+
 /**
  * A player removed from their seat since the caller last asked
  * (drainRemovals()): `chipStack` is what they had left, not counting chips
@@ -1517,6 +1528,40 @@ export class PokerTable {
     seat.chipStack = chipStack;
     seat.bustedAt = null;
     return { ok: true };
+  }
+
+  /**
+   * SRS-7.3: rebuilds the table from what was last saved, after the poker
+   * server restarts: each saved seat with its player, the stack saved when
+   * the last hand ended, missed blinds and timeouts, and the button and blind
+   * seats carry on from the last hand that was dealt. Nobody's page is
+   * connected yet, so everyone restored starts disconnected at `now`: they
+   * aren't dealt in until they're back (SRS-10.3), and are removed and paid
+   * out if they don't come back in time (SRS-9.4). Call on a fresh table,
+   * before anyone joins.
+   */
+  restore(
+    saved: { dealerSeat: number | null; smallBlindSeat: number | null; bigBlindSeat: number | null; seats: SavedSeat[] },
+    now: number
+  ): void {
+    for (const savedSeat of saved.seats) {
+      const seat = this.seats[savedSeat.seatNumber - 1];
+      if (!seat) continue;
+      Object.assign(seat, emptySeat(seat.seatNumber), {
+        playerId: savedSeat.playerId,
+        username: savedSeat.username,
+        chipStack: savedSeat.chipStack,
+        missedSmallBlind: savedSeat.missedSmallBlind ?? false,
+        missedBigBlind: savedSeat.missedBigBlind ?? false,
+        timeouts: savedSeat.timeouts ?? 0,
+      });
+      this.disconnect(seat, now);
+    }
+    if (saved.seats.length > 0) {
+      this.dealerSeat = saved.dealerSeat;
+      this.previousSmallBlindSeat = saved.smallBlindSeat;
+      this.previousBigBlindSeat = saved.bigBlindSeat;
+    }
   }
 
   /**

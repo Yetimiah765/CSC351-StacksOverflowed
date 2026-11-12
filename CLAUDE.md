@@ -11,6 +11,7 @@ npm run realtime   # start the poker realtime relay process (connects to Supabas
 npm run build      # production build
 npm test           # run all tests (vitest)
 npx vitest run __tests__/api/auth.test.ts   # run a single test file
+npm run test:shuffle  # SRS-NFR-023: 1,000,000 poker shuffles, chi-square test at 0.01 (about 5 s)
 ```
 
 ## Environment setup

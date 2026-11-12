@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PokerTable } from '../../lib/pokerTable';
 import {
   POKER_MIGRATION,
+  loadSavedTables,
   persistHandFinished,
   persistJoin,
   persistLeave,
@@ -158,5 +159,92 @@ describe('saving every stack after a hand (SRS-7.2)', () => {
     const { client, rpc } = fakeSupabase([new Error('timeout'), new Error('timeout')]);
     expect(await persistHandFinished(client, 'low-1', [])).toBe(false);
     expect(rpc).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('restoring the saved stacks when the server starts (SRS-7.3)', () => {
+  const saved = {
+    dealerSeat: 2,
+    smallBlindSeat: 3,
+    bigBlindSeat: 4,
+    seats: [
+      { seatNumber: 2, playerId: '7', username: 'Ann', chipStack: 1250, missedBigBlind: true, timeouts: 2 },
+      { seatNumber: 3, playerId: '8', username: 'Bo', chipStack: 400 },
+      { seatNumber: 4, playerId: '9', username: 'Cy', chipStack: 0 },
+    ],
+  };
+
+  it('puts each player back in their seat with the stack saved after the last hand', () => {
+    const table = new PokerTable('low-1', 6, 5, 2);
+    table.restore(saved, 1_000);
+    const state = table.getState(1_000);
+    expect(state.seatedCount).toBe(3);
+    expect(state.seats[1]).toMatchObject({ playerId: '7', username: 'Ann', chipStack: 1250, missedBigBlind: true, timeouts: 2 });
+    expect(state.seats[2]).toMatchObject({ playerId: '8', chipStack: 400 });
+    // The button carries on from the last hand.
+    expect(state.dealerSeat).toBe(2);
+  });
+
+  it('starts everyone disconnected until they are back (SRS-10.3), on the removal clock (SRS-9.2)', () => {
+    const table = new PokerTable('low-1', 6, 5, 2);
+    table.restore(saved, 1_000);
+    expect(table.getState(1_000).seats[1]).toMatchObject({ disconnected: true });
+    expect(table.nextDisconnectDeadline()).not.toBeNull();
+    // Nobody's dealt in while they're away.
+    expect(table.updateCountdown(1_000)).toBeNull();
+    // Back: the same seat and stack.
+    expect(table.heardFrom('7', 2_000)).toBe('reconnected');
+    expect(table.getState().seats[1]).toMatchObject({ chipStack: 1250, disconnected: false });
+  });
+
+  it('keeps a busted player busted, with their decision to make (SRS-12.1)', () => {
+    const table = new PokerTable('low-1', 6, 5, 2);
+    table.restore(saved, 1_000);
+    expect(table.getState().seats[3]).toMatchObject({ playerId: '9', chipStack: 0 });
+    table.trackBusted(1_000);
+    expect(table.nextBustedDeadline()).not.toBeNull();
+  });
+});
+
+describe('reading the saved tables (SRS-7.3)', () => {
+  const row = (tableKey: string, seats: unknown[] = []) => ({
+    table_key: tableKey,
+    dealer_button_seat: seats.length ? 2 : null,
+    last_small_blind_seat: seats.length ? 3 : null,
+    last_big_blind_seat: seats.length ? 4 : null,
+    poker_seats: seats,
+  });
+  function fakeTables(rows: unknown[]) {
+    const builder = { select: vi.fn(() => builder), in: vi.fn(async () => ({ data: rows, error: null })) };
+    return { from: vi.fn(() => builder) } as never;
+  }
+
+  it('reads every table with its saved seats, stacks, markers and timeouts', async () => {
+    const loaded = await loadSavedTables(
+      fakeTables([
+        row('low-1', [
+          { seat_number: 2, player_id: 7, chip_stack: '1250', owes_small_blind: false, owes_big_blind: true, consecutive_timeouts: 1 },
+        ]),
+        row('low-2'),
+      ]),
+      ['low-1', 'low-2']
+    );
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.tables.get('low-1')).toEqual({
+      dealerSeat: 2,
+      smallBlindSeat: 3,
+      bigBlindSeat: 4,
+      seats: [{ seatNumber: 2, playerId: '7', chipStack: 1250, missedSmallBlind: false, missedBigBlind: true, timeouts: 1 }],
+    });
+    expect(loaded.tables.get('low-2')?.seats).toEqual([]);
+  });
+
+  it('says which tables are missing when the migration has not been run', async () => {
+    const loaded = await loadSavedTables(fakeTables([row('low-1')]), ['low-1', 'mid-1']);
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain('mid-1');
+    expect(loaded.error).toContain(POKER_MIGRATION);
   });
 });

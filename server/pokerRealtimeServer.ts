@@ -44,7 +44,8 @@
 //
 // Run with: npm run realtime
 
-import { randomInt } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
+import { hostname } from 'os';
 import { config as loadEnv } from 'dotenv';
 import type { RealtimeChannel, SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -57,6 +58,7 @@ import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import { noticeReason, payOutRemovals, type RemovalNoticeReason } from '../lib/pokerRemovals';
+import { LEASE_RENEW_MS, LEASE_TTL_MS, afterRenewal, claimLease, releaseLease, waitForLease } from '../lib/pokerLease';
 import {
   clearHandInProgress,
   loadSavedTables,
@@ -139,7 +141,45 @@ const CHANNEL_CONFIG = { config: { broadcast: { self: false } } };
 // ticket there, so the server sees when one's connection ends (SRS-10.2).
 const TABLE_CHANNEL_CONFIG = { config: { broadcast: { self: false }, presence: { key: '' } } };
 
+// SRS-NFR-026: only the server holding the lease runs the tables
+// (lib/pokerLease.ts). It waits for the lease, renews it, gives it up when
+// shutting down, and stops at once if it ever loses it.
+async function holdLease(supabase: SupabaseClient): Promise<void> {
+  const holder = `${hostname()}-${process.pid}-${randomUUID().slice(0, 8)}`;
+  let heldUntil = await waitForLease(supabase, holder, {
+    onWaiting: (heldBy) =>
+      // eslint-disable-next-line no-console
+      console.log(`Another poker server${heldBy ? ` (${heldBy})` : ''} is running; waiting to take over…`),
+  });
+  // eslint-disable-next-line no-console
+  console.log(`Holding the poker server lease as ${holder}`);
+
+  const renew = setInterval(async () => {
+    const asked = Date.now();
+    const reply = await claimLease(supabase, holder);
+    if (reply?.held && reply.holder === holder) heldUntil = asked + LEASE_TTL_MS;
+    if (afterRenewal(reply, holder, heldUntil, Date.now()) === 'stop') {
+      // eslint-disable-next-line no-console
+      console.error('Lost the poker server lease (another server may have the tables now); stopping.');
+      process.exit(1);
+    }
+  }, LEASE_RENEW_MS);
+
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    clearInterval(renew);
+    await releaseLease(supabase, holder).catch(() => undefined);
+    process.exit(0);
+  };
+  process.once('SIGTERM', () => void stop());
+  process.once('SIGINT', () => void stop());
+}
+
 async function startServer(supabase: SupabaseClient, secret: string) {
+  await holdLease(supabase);
+
   const lobbyChannel = supabase.channel(POKER_LOBBY_CHANNEL_NAME, CHANNEL_CONFIG);
   const entries: TableEntry[] = POKER_TABLES.map((config) => ({
     config,

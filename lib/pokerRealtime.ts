@@ -15,6 +15,7 @@
 
 import type { BettingMove, TablePhase, TableState } from './pokerTable';
 import type { RelayedActionType } from './pokerSecure';
+import type { RemovalNoticeReason } from './pokerRemovals';
 
 export const POKER_LOBBY_CHANNEL_NAME = 'poker:lobby';
 
@@ -27,6 +28,8 @@ export const POKER_EVENT_STATE = 'state';
 export const POKER_EVENT_ACK = 'ack';
 /** An emote a seated player sent, for everyone at the table to see. */
 export const POKER_EVENT_EMOTE = 'emote';
+/** A player was removed from their seat by the table, and why (SRS-9.11). */
+export const POKER_EVENT_NOTICE = 'notice';
 
 /** Sent on a channel by any client to ask for the current state. */
 export interface PokerSyncPayload {
@@ -50,6 +53,12 @@ export interface PokerActionRequest {
   amount?: number;
   /** For an 'emote' action: which one (an id from lib/emotes.ts). */
   emote?: string;
+}
+
+/** A table channel's `notice` broadcast: `playerId` lost their seat, for `reason`. */
+export interface PokerNoticePayload {
+  playerId: string;
+  reason: RemovalNoticeReason;
 }
 
 /** A table channel's `emote` broadcast: show `emote` over this seat. */

@@ -50,17 +50,19 @@ import {
 import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
-import { payOutRemovals } from '../lib/pokerRemovals';
+import { noticeReason, payOutRemovals, type RemovalNoticeReason } from '../lib/pokerRemovals';
 import { EMOTE_COOLDOWN_MS, canSendEmote, isEmoteId } from '../lib/emotes';
 import {
   POKER_EVENT_ACTION,
   POKER_EVENT_ACK,
   POKER_EVENT_EMOTE,
+  POKER_EVENT_NOTICE,
   POKER_EVENT_STATE,
   POKER_LOBBY_CHANNEL_NAME,
   pokerTableChannelName,
   type PokerEmotePayload,
   type PokerLobbyState,
+  type PokerNoticePayload,
   type PokerTableBroadcast,
 } from '../lib/pokerRealtime';
 import type { BettingMove } from '../lib/pokerTable';
@@ -251,6 +253,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
       if (removed.length > 0) {
         // eslint-disable-next-line no-console
         console.log(`${entry.config.name}: removed busted player(s) ${removed.join(', ')} after the decision timeout`);
+        removed.forEach((playerId) => sendNotice(entry, playerId, 'busted'));
         refreshCountdown(entry);
         broadcastLobby();
       }
@@ -299,8 +302,21 @@ function startServer(supabase: SupabaseClient, secret: string) {
   // (SRS-21.3), timed out too often (SRS-9.7), and so on — get what they had
   // left paid back into their balance (SRS-9.9). Call after anything that can
   // end a hand or remove a player.
+  // Each is then told why, unless they left of their own accord (SRS-9.11).
   async function settleRemovals(entry: TableEntry) {
-    return payOutRemovals(entry.table, (playerId, chips) => refundBalance(supabase, playerId, chips));
+    const removals = await payOutRemovals(entry.table, (playerId, chips) => refundBalance(supabase, playerId, chips));
+    for (const removal of removals) {
+      const reason = noticeReason(removal);
+      if (reason) sendNotice(entry, removal.playerId, reason);
+    }
+    return removals;
+  }
+
+  // SRS-9.11: tells a removed player why, on the table's channel; their page
+  // shows it if it's open (it says so straight away, SRS-NFR-020).
+  function sendNotice(entry: TableEntry, playerId: string, reason: RemovalNoticeReason) {
+    const payload: PokerNoticePayload = { playerId, reason };
+    entry.channel.send({ type: 'broadcast', event: POKER_EVENT_NOTICE, payload });
   }
 
   // Starts or cancels this table's countdown to match who's seated now (see

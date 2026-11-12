@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { notifyBalanceChanged } from '../../../lib/balanceEvents';
 import {
-  BUSTED_DECISION_TIMEOUT_MS,
   MAX_BUY_IN_MULTIPLIER,
   MIN_BUY_IN_MULTIPLIER,
   MIN_PLAYERS_TO_START,
@@ -27,6 +26,7 @@ import {
   type PokerTableBroadcast,
 } from '../../../lib/pokerRealtime';
 import { EMOTE_SHOW_MS } from '../../../lib/emotes';
+import { removalNotice, type RemovalNoticeReason } from '../../../lib/pokerRemovals';
 import EmoteArt from '../../../components/emotes/EmoteArt';
 import type { EquippedArt } from '../../api/players/[playerId]/cosmetics/route';
 import { usePlayerProfile, usePokerChannel } from '../usePoker';
@@ -186,8 +186,11 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // When the player holding the turn runs out of time (SRS-4.1, SRS-NFR-018),
   // rebuilt from turnMsRemaining the same way.
   const [turnEndsAt, setTurnEndsAt] = useState<number | null>(null);
-  // Removed for not choosing in time; says why until they sit down again (SRS-9.11).
-  const [removedForTimeout, setRemovedForTimeout] = useState(false);
+  // Removed from their seat by the table; says why until they sit down again (SRS-9.11).
+  const [removedBecause, setRemovedBecause] = useState<RemovalNoticeReason | null>(null);
+  // This player's id, for the channel's callbacks (set once the profile loads).
+  const myPlayerIdRef = useRef<number | null>(null);
+  myPlayerIdRef.current = profile?.playerId ?? null;
   const [now, setNow] = useState(() => Date.now());
 
   const fetchedAvatarsRef = useRef(new Set<string>());
@@ -224,6 +227,12 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
           }),
         EMOTE_SHOW_MS
       );
+    },
+    // SRS-9.11: the table removed someone; if it's this player, say why.
+    (notice) => {
+      if (myPlayerIdRef.current !== null && notice.playerId === String(myPlayerIdRef.current)) {
+        setRemovedBecause(notice.reason);
+      }
     }
   );
 
@@ -404,7 +413,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
       wasBustedRef.current = false;
     } else if (wasBustedRef.current) {
       wasBustedRef.current = false;
-      if (!leaving) setRemovedForTimeout(true);
+      if (!leaving) setRemovedBecause((reason) => reason ?? 'busted');
     }
   }, [tableState, amBusted, mySeat, leaving]);
 
@@ -530,7 +539,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     });
     if (result.ok) {
       setSelectedSeat(null);
-      setRemovedForTimeout(false);
+      setRemovedBecause(null);
       await refreshBalance();
     } else {
       setJoinError(result.error || 'Unable to join the table.');
@@ -1477,11 +1486,10 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
 
         {/* Right: what you can do right now */}
         <aside className="rounded-3xl border border-white/10 bg-gradient-to-b from-slate-900/95 to-slate-950/95 p-4 shadow-2xl shadow-black/60 order-2 flex flex-col gap-3 lg:order-3 lg:max-h-full lg:w-80 lg:shrink-0 lg:overflow-y-auto">
-            {removedForTimeout && !mySeat ? (
+            {removedBecause && !mySeat ? (
               // SRS-9.11: why they lost their seat.
-              <p className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
-                You were removed from your seat because you didn&apos;t buy back in or leave within{' '}
-                {BUSTED_DECISION_TIMEOUT_MS / 1000} seconds of running out of chips.
+              <p role="alert" className="rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-sm text-amber-100">
+                {removalNotice(removedBecause)}
               </p>
             ) : null}
             {!mySeat ? (

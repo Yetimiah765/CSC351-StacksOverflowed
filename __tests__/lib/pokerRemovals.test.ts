@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PokerTable } from '../../lib/pokerTable';
-import { payOutRemovals } from '../../lib/pokerRemovals';
+import { noticeReason, payOutRemovals, removalNotice } from '../../lib/pokerRemovals';
 
 // SRS-9.9: a removed player's stack, less anything already in a pot, goes
 // back into their balance.
@@ -115,5 +115,22 @@ describe('the seat is open again after a removal (SRS-9.10)', () => {
     table.trackBusted(0);
     expect(table.removeTimedOutBusted(Number.MAX_SAFE_INTEGER)).toEqual([busted?.playerId]);
     expectOpen(table, busted?.seatNumber as number, 3);
+  });
+});
+
+describe('telling a removed player why (SRS-9.11)', () => {
+  it('says why for each of the table\'s own removals', () => {
+    expect(removalNotice('timeouts')).toMatch(/timed out in 4 hands in a row/);
+    expect(removalNotice('disconnected')).toMatch(/disconnected/);
+    expect(removalNotice('busted')).toMatch(/within 60 seconds of running out of chips/);
+    // Chips are mentioned only where there were chips to return.
+    expect(removalNotice('timeouts')).toMatch(/returned to your balance/);
+    expect(removalNotice('busted')).not.toMatch(/returned/);
+  });
+
+  it('tells everyone removed except those who chose to leave', () => {
+    expect(noticeReason({ playerId: '1', chipStack: 0, reason: 'left' })).toBeNull();
+    expect(noticeReason({ playerId: '1', chipStack: 10, reason: 'timeouts' })).toBe('timeouts');
+    expect(noticeReason({ playerId: '1', chipStack: 10, reason: 'disconnected' })).toBe('disconnected');
   });
 });

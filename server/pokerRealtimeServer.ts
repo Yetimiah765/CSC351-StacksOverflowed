@@ -93,6 +93,8 @@ interface TableEntry {
   turnTimer: ReturnType<typeof setTimeout> | null;
   /** Fires when the next seated player will have been silent too long (SRS-10.1); null when nobody's watched. */
   silenceTimer: ReturnType<typeof setTimeout> | null;
+  /** Fires when the next disconnected player has been gone too long (SRS-9.4); null when nobody's disconnected. */
+  disconnectTimer: ReturnType<typeof setTimeout> | null;
   /**
    * This table's actions, handled one at a time in the order they arrive:
    * several await the database, and two interleaving at those awaits (a
@@ -175,6 +177,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     bustedTimer: null,
     turnTimer: null,
     silenceTimer: null,
+    disconnectTimer: null,
     queue: Promise.resolve(),
   }));
 
@@ -230,6 +233,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     scheduleBustedTimeout(entry);
     scheduleTurnTimeout(entry);
     scheduleSilenceCheck(entry);
+    scheduleDisconnectRemoval(entry);
     const state = entry.table.getState();
     // SRS-6.1: every player's hole cards ride along sealed for them alone.
     const holeCards: Record<string, string> = {};
@@ -299,6 +303,38 @@ function startServer(supabase: SupabaseClient, secret: string) {
         .catch((error) => {
           // eslint-disable-next-line no-console
           console.error(`${entry.config.name}: silence check failed`, error);
+        });
+    }, Math.max(0, deadline - Date.now()));
+  }
+
+  // SRS-9.4: one timer per table, for whichever disconnected player will
+  // first have been gone for DISCONNECT_REMOVAL_MS (SRS-NFR-013). When it
+  // fires they're removed (after the hand, if they're still in it, SRS-9.13),
+  // paid out (SRS-9.9) and told why (SRS-9.11); the broadcast sets the next.
+  function scheduleDisconnectRemoval(entry: TableEntry) {
+    if (entry.disconnectTimer) {
+      clearTimeout(entry.disconnectTimer);
+      entry.disconnectTimer = null;
+    }
+    const deadline = entry.table.nextDisconnectDeadline();
+    if (deadline === null) return;
+    entry.disconnectTimer = setTimeout(() => {
+      entry.disconnectTimer = null;
+      entry.queue = entry.queue
+        .then(async () => {
+          const removed = entry.table.removeLongDisconnected(Date.now());
+          if (removed.length > 0) {
+            // eslint-disable-next-line no-console
+            console.log(`${entry.config.name}: removing player(s) ${removed.join(', ')} after being disconnected too long`);
+            refreshCountdown(entry);
+            broadcastLobby();
+          }
+          broadcastTable(entry);
+          await settleRemovals(entry);
+        })
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error(`${entry.config.name}: disconnection removal failed`, error);
         });
     }, Math.max(0, deadline - Date.now()));
   }

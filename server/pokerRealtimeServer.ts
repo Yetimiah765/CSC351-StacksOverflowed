@@ -646,8 +646,13 @@ function startServer(supabase: SupabaseClient, secret: string) {
       // One action at a time per table (see TableEntry.queue).
       entry.queue = entry.queue
         .then(async () => {
-          // Anything signed from a seated player shows they're still there (SRS-10.1).
-          entry.table.heardFrom(String(action.playerId), Date.now());
+          // Anything signed from a seated player shows they're still there
+          // (SRS-10.1), and back if they'd been marked disconnected (SRS-10.3).
+          const heard = entry.table.heardFrom(String(action.playerId), Date.now());
+          if (heard === 'reconnected') {
+            // eslint-disable-next-line no-console
+            console.log(`${entry.config.name}: player ${action.playerId} reconnected`);
+          }
           let result: AckResult;
           if (action.action === 'heartbeat') result = { ok: true };
           else if (action.action === 'join') result = await handleJoin(entry, action);
@@ -657,6 +662,8 @@ function startServer(supabase: SupabaseClient, secret: string) {
           else if (action.action === 'wait-for-big-blind') result = handlePostBlinds(entry, action, false);
           else if (action.action === 'emote') result = handleEmote(entry, action);
           else result = await handleAct(entry, action);
+          // Everyone sees them back, whatever the action did.
+          if (heard === 'reconnected') broadcastTable(entry);
 
           entry.channel.send({
             type: 'broadcast',

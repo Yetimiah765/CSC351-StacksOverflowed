@@ -188,6 +188,11 @@ export interface Seat {
    * sit it out and are dealt in free from the hand after.
    */
   waitingForButton: boolean;
+  /**
+   * SRS-9.5: hands in a row in which this player's turn timed out (counted
+   * once per hand), towards removal at CONSECUTIVE_TIMEOUT_LIMIT (SRS-NFR-014).
+   */
+  timeouts: number;
 }
 
 /** A main or side pot built from chips already collected (SRS-19). */
@@ -365,6 +370,8 @@ interface SeatRecord extends Omit<Seat, 'bustedMsRemaining' | 'waitingForButton'
   actedSinceFullRaise: boolean;
   /** Private: never part of getState() (SRS-6.1). Empty when not dealt in. */
   holeCards: Card[];
+  /** This hand's timeout has already been counted (SRS-9.5: once per hand). */
+  timedOutThisHand: boolean;
 }
 
 function emptySeat(seatNumber: number): SeatRecord {
@@ -390,6 +397,8 @@ function emptySeat(seatNumber: number): SeatRecord {
     missedBigBlind: false,
     postingMissedBlinds: false,
     newcomer: false,
+    timeouts: 0,
+    timedOutThisHand: false,
   };
 }
 
@@ -406,6 +415,7 @@ function resetHandFields(seat: SeatRecord) {
   seat.lastAction = null;
   seat.actedSinceFullRaise = false;
   seat.holeCards = [];
+  seat.timedOutThisHand = false;
 }
 
 export class PokerTable {
@@ -491,7 +501,14 @@ export class PokerTable {
       seatedCount: this.seats.filter((seat) => seat.playerId !== null).length,
       // Hole cards stay out of the public state (SRS-6.1).
       seats: this.seats.map((record) => {
-        const { actedSinceFullRaise: _internal, holeCards: _private, bustedAt, newcomer: _newcomer, ...seat } = record;
+        const {
+          actedSinceFullRaise: _internal,
+          holeCards: _private,
+          bustedAt,
+          newcomer: _newcomer,
+          timedOutThisHand: _counted,
+          ...seat
+        } = record;
         return {
           ...seat,
           bustedMsRemaining: bustedAt === null ? null : Math.max(0, bustedAt + BUSTED_DECISION_TIMEOUT_MS - now),
@@ -1465,6 +1482,11 @@ export class PokerTable {
     const seat = this.seats[(this.activeSeat as number) - 1] as SeatRecord;
     const options = getBettingOptions(seat, { currentBet: this.currentBet, minRaise: this.minRaise, bigBlind: this.bigBlind });
     const move: BettingMove = options.canCheck ? 'check' : 'fold';
+    // SRS-9.5: the first time it happens to them in a hand, it counts.
+    if (!seat.timedOutThisHand) {
+      seat.timedOutThisHand = true;
+      seat.timeouts += 1;
+    }
     if (move === 'fold') this.fold(seat, true);
     else this.recordAction(seat, 'check', true);
     this.advance();

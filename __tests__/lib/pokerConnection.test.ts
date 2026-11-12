@@ -17,7 +17,7 @@ const seat = (table: PokerTable, seatNumber: number) => table.getState().seats[s
 
 /** Every seated player heard from at `now`, as the server does on joining. */
 function heardFromAll(table: PokerTable, seatNumbers: number[], now: number) {
-  seatNumbers.forEach((seatNumber) => expect(table.heardFrom(p(seatNumber), now)).toBe(true));
+  seatNumbers.forEach((seatNumber) => expect(table.heardFrom(p(seatNumber), now)).toBe('heard'));
 }
 
 describe('disconnection detected by silence (SRS-10.1)', () => {
@@ -58,7 +58,7 @@ describe('disconnection detected by silence (SRS-10.1)', () => {
 
   it('ignores word from someone not seated here', () => {
     const table = tableWith([1, 2, 3]);
-    expect(table.heardFrom('someone-else', 0)).toBe(false);
+    expect(table.heardFrom('someone-else', 0)).toBeNull();
   });
 });
 
@@ -81,5 +81,34 @@ describe('disconnection detected when the connection ends (SRS-10.2)', () => {
     table.markDisconnected(p(2));
     expect(table.nextSilenceDeadline()).toBe(5_000 + SILENCE_DISCONNECT_MS);
     expect(table.markSilentDisconnected(5_000 + SILENCE_DISCONNECT_MS - 1)).toEqual([]);
+  });
+});
+
+describe('reconnection detected from a signed request (SRS-10.3)', () => {
+  it('marks a disconnected player reconnected when they are next heard from', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2));
+    expect(table.heardFrom(p(2), 40_000)).toBe('reconnected');
+    expect(seat(table, 2).disconnected).toBe(false);
+    // And watched for silence again from then.
+    table.heardFrom(p(1), 40_000);
+    table.heardFrom(p(3), 40_000);
+    expect(table.nextSilenceDeadline()).toBe(40_000 + SILENCE_DISCONNECT_MS);
+  });
+
+  it('also after going silent', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    expect(table.markSilentDisconnected(SILENCE_DISCONNECT_MS)).toEqual([p(1), p(2), p(3)]);
+    expect(table.heardFrom(p(3), SILENCE_DISCONNECT_MS + 5)).toBe('reconnected');
+    expect(seat(table, 3).disconnected).toBe(false);
+    expect(seat(table, 1).disconnected).toBe(true);
+  });
+
+  it('says nothing new for a player who never left', () => {
+    const table = tableWith([1, 2, 3]);
+    expect(table.heardFrom(p(1), 0)).toBe('heard');
+    expect(table.heardFrom(p(1), 1_000)).toBe('heard');
   });
 });

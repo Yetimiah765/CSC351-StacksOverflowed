@@ -1531,14 +1531,19 @@ export class PokerTable {
   }
 
   /**
-   * Something came from this player at `now` — any action their page sent,
-   * heartbeats included. Returns false if they aren't seated here.
+   * Something signed came from this player at `now` — any action their page
+   * sent, heartbeats included (the server only passes on what POST
+   * /api/poker/action signed for them). A disconnected player is marked
+   * reconnected (SRS-10.3). Returns 'reconnected' then, 'heard' otherwise,
+   * or null if they aren't seated here.
    */
-  heardFrom(playerId: string, now: number): boolean {
+  heardFrom(playerId: string, now: number): 'heard' | 'reconnected' | null {
     const seat = this.findSeatByPlayerId(playerId);
-    if (!seat) return false;
+    if (!seat) return null;
     seat.lastHeardAt = now;
-    return true;
+    if (!seat.disconnected) return 'heard';
+    seat.disconnected = false;
+    return 'reconnected';
   }
 
   /**

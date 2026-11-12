@@ -449,6 +449,15 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     };
   }, [seatedHere, token, config, connected, sendAction]);
 
+  // SRS-2.1: this page sees its own seat marked disconnected (the laptop
+  // slept, the network dropped): the seat is still held, so say so and send
+  // a heartbeat straight away, which marks the player back (SRS-10.3).
+  const myDisconnected = Boolean(mySeat?.disconnected);
+  useEffect(() => {
+    if (!myDisconnected || !token || !config || !connected) return;
+    void sendAction(token, { tableId: config.id, action: 'heartbeat' });
+  }, [myDisconnected, token, config, connected, sendAction]);
+
   // A busted player's seat disappearing without them clicking Leave means
   // the server removed them for not choosing in time (SRS-12.10).
   const wasBustedRef = useRef(false);
@@ -1729,6 +1738,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         : `Post ${myPostCost} and play next hand`}
                     </button>
                   </div>
+                ) : null}
+
+                {mySeat?.disconnected ? (
+                  // SRS-2.1: their seat was held while they were away.
+                  <p role="status" className="mb-3 rounded-lg border border-sky-400/40 bg-sky-500/10 px-3 py-2 text-sm text-sky-100">
+                    You were disconnected. Your seat and chips are held for you — reconnecting…
+                  </p>
                 ) : null}
 
                 {mySeat && timedOutHandsBeforeRemoval(mySeat) !== null ? (

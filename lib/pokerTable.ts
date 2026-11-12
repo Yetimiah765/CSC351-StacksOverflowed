@@ -938,6 +938,8 @@ export class PokerTable {
       return { ok: false, error: 'Unknown action.' };
     }
 
+    // SRS-9.6: acting for themselves wipes their run of timeouts.
+    seat.timeouts = 0;
     this.advance();
     return { ok: true };
   }

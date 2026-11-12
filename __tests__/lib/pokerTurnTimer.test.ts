@@ -252,3 +252,27 @@ describe('the timeout counter (SRS-9.5)', () => {
     }
   });
 });
+
+describe('resetting the timeout counter (SRS-9.6)', () => {
+  it('goes back to zero when the player acts for themselves', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    timeOut(table); // seat 3 checks automatically
+    expect(table.getState().seats[2].timeouts).toBe(1);
+    table.act(p(2), 'check');
+    table.act(p(1), 'check');
+    expect(table.act(p(3), 'check')).toEqual({ ok: true });
+    expect(table.getState().seats[2].timeouts).toBe(0);
+  });
+
+  it('is not reset by an action the table refused', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    timeOut(table);
+    // Seat 3 tries to act out of turn.
+    expect(table.act(p(3), 'check').ok).toBe(false);
+    expect(table.getState().seats[2].timeouts).toBe(1);
+  });
+});

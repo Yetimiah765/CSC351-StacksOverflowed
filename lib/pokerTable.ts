@@ -1587,9 +1587,29 @@ export class PokerTable {
    */
   nextDisconnectDeadline(): number | null {
     const deadlines = this.seats
-      .filter((seat) => seat.disconnectedAt !== null)
+      // (Not those whose removal is already waiting for the hand to end.)
+      .filter((seat) => seat.disconnectedAt !== null && seat.removalPending === null)
       .map((seat) => (seat.disconnectedAt as number) + DISCONNECT_REMOVAL_MS);
     return deadlines.length > 0 ? Math.min(...deadlines) : null;
+  }
+
+  /**
+   * SRS-9.4: removes every player whose disconnection timer has reached
+   * DISCONNECT_REMOVAL_MS (SRS-NFR-013) by `now` — once the hand ends, for a
+   * player still in it (SRS-9.13) — and returns their ids. Their stacks come
+   * out of drainRemovals() for the caller to pay back (SRS-9.9).
+   */
+  removeLongDisconnected(now: number): string[] {
+    const due = this.seats.filter(
+      (seat) =>
+        seat.playerId !== null &&
+        seat.disconnectedAt !== null &&
+        seat.removalPending === null &&
+        seat.disconnectedAt + DISCONNECT_REMOVAL_MS <= now
+    );
+    const ids = due.map((seat) => seat.playerId as string);
+    ids.forEach((playerId) => this.removePlayer(playerId, 'disconnected'));
+    return ids;
   }
 
   /**

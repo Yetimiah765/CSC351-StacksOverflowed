@@ -112,3 +112,41 @@ describe('reconnection detected from a signed request (SRS-10.3)', () => {
     expect(table.heardFrom(p(1), 1_000)).toBe('heard');
   });
 });
+
+describe('disconnected players are not dealt in (SRS-9.1)', () => {
+  it('leaves a disconnected player out of the hand', () => {
+    const table = tableWith([1, 2, 3, 4]);
+    heardFromAll(table, [1, 2, 3, 4], 0);
+    table.markDisconnected(p(4));
+    expect(table.startHand(() => 0)).toBe(true);
+    const state = table.getState();
+    expect(state.seats.slice(0, 4).map((s) => s.inHand)).toEqual([true, true, true, false]);
+    // Not given the button or a blind either.
+    expect([state.dealerSeat, state.smallBlindSeat, state.bigBlindSeat]).not.toContain(4);
+  });
+
+  it("doesn't start a hand that would be short because of it (SRS-20.1)", () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2));
+    expect(table.updateCountdown(0)).toBeNull();
+    expect(table.getState().phase).toBe('waiting');
+    expect(table.startHand(() => 0)).toBe(false);
+  });
+
+  it('a countdown already running stops if one of three disconnects', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    expect(table.updateCountdown(0)).toBe('started');
+    table.markDisconnected(p(3));
+    expect(table.updateCountdown(1_000)).toBe('cancelled');
+  });
+
+  it('a disconnected player keeps their cards in a hand already under way', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0);
+    table.markDisconnected(p(1));
+    expect(seat(table, 1).inHand).toBe(true);
+  });
+});

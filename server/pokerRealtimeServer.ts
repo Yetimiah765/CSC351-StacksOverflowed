@@ -288,7 +288,10 @@ function startServer(supabase: SupabaseClient, secret: string) {
           if (marked.length > 0) {
             // eslint-disable-next-line no-console
             console.log(`${entry.config.name}: no word from player(s) ${marked.join(', ')}; marked disconnected`);
+            // They won't be dealt in (SRS-9.1), which may stop the countdown.
+            refreshCountdown(entry);
             broadcastTable(entry);
+            broadcastLobby();
           } else {
             scheduleSilenceCheck(entry);
           }
@@ -619,7 +622,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
         if (marked.length === 0) return;
         // eslint-disable-next-line no-console
         console.log(`${entry.config.name}: player(s) ${marked.join(', ')} disconnected`);
+        refreshCountdown(entry);
         broadcastTable(entry);
+        broadcastLobby();
       })
       .catch((error) => {
         // eslint-disable-next-line no-console
@@ -662,8 +667,13 @@ function startServer(supabase: SupabaseClient, secret: string) {
           else if (action.action === 'wait-for-big-blind') result = handlePostBlinds(entry, action, false);
           else if (action.action === 'emote') result = handleEmote(entry, action);
           else result = await handleAct(entry, action);
-          // Everyone sees them back, whatever the action did.
-          if (heard === 'reconnected') broadcastTable(entry);
+          // Everyone sees them back, whatever the action did, and they may
+          // complete the players needed to start a hand.
+          if (heard === 'reconnected') {
+            refreshCountdown(entry);
+            broadcastTable(entry);
+            broadcastLobby();
+          }
 
           entry.channel.send({
             type: 'broadcast',

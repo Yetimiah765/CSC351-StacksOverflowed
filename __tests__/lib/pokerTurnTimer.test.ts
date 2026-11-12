@@ -206,3 +206,49 @@ describe('the consecutive-timeout threshold (SRS-NFR-014)', () => {
     expect(CONSECUTIVE_TIMEOUT_LIMIT).toBe(4);
   });
 });
+
+/** Starts the turn's clock at `now` and lets it run out; returns when it did. */
+function timeOut(table: PokerTable, now = 0) {
+  table.trackTurn(now);
+  const at = table.nextTurnDeadline() as number;
+  expect(table.timeOutTurn(at)).not.toBeNull();
+  return at;
+}
+
+describe('the timeout counter (SRS-9.5)', () => {
+  it('starts at zero', () => {
+    const table = handUnderWay();
+    expect(table.getState().seats.slice(0, 3).map((seat) => seat.timeouts)).toEqual([0, 0, 0]);
+  });
+
+  it('counts a hand in which the player timed out, once however many times', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'call');
+    timeOut(table); // seat 3 (big blind) checks
+    expect(table.getState().seats[2].timeouts).toBe(1);
+    // Flop: seats 2 and 1 check, seat 3 times out again.
+    table.act(p(2), 'check');
+    table.act(p(1), 'check');
+    expect(table.getState().activeSeat).toBe(3);
+    timeOut(table);
+    expect(table.getState().seats[2].timeouts).toBe(1);
+    // Only the player who timed out.
+    expect(table.getState().seats[0].timeouts).toBe(0);
+  });
+
+  it('adds one for each hand in a row', () => {
+    const table = tableWith([1, 2, 3]);
+    for (let hand = 1; hand <= 2; hand++) {
+      table.updateCountdown(0);
+      table.startHand(pick(0));
+      // Seat 1 is first to act in the first hand; time them out whenever it's them.
+      while (table.getState().phase === 'in-hand') {
+        const { activeSeat } = table.getState();
+        if (activeSeat === 1) timeOut(table);
+        else table.act(p(activeSeat as number), table.getState().currentBet > (table.getState().seats[(activeSeat as number) - 1].bet) ? 'call' : 'check');
+      }
+      expect(table.getState().seats[0].timeouts).toBe(hand);
+    }
+  });
+});

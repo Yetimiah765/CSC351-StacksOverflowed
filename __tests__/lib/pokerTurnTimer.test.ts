@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PokerTable, TURN_TIME_LIMIT_MS } from '../../lib/pokerTable';
+import { CONSECUTIVE_TIMEOUT_LIMIT, PokerTable, TURN_TIME_LIMIT_MS } from '../../lib/pokerTable';
 
 // The turn clock and what happens when it runs out (SRS-4.x, SRS-NFR-018).
 // Same set-up as pokerTableHand.test.ts: a 6-seat table with 5/10 blinds.
@@ -198,5 +198,11 @@ describe('the hand moves on after an automatic action (SRS-4.4)', () => {
     expect(state.lastHandResult?.reason).toBe('showdown');
     // And the table goes on to count down to the next hand.
     expect(table.updateCountdown(now)).toBe('started');
+  });
+});
+
+describe('the consecutive-timeout threshold (SRS-NFR-014)', () => {
+  it('is four hands', () => {
+    expect(CONSECUTIVE_TIMEOUT_LIMIT).toBe(4);
   });
 });

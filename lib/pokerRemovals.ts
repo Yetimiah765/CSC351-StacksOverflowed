@@ -8,6 +8,10 @@
 //
 // A busted player removed for not choosing in time (SRS-12.10) or choosing
 // to leave (SRS-12.3) has no chips, so there's nothing to pay.
+//
+// The table has already opened the seat by then (SRS-9.10): a removal
+// empties it, so it's free for anyone to sit in, and the server's next
+// table and lobby broadcasts show it open.
 
 import type { PokerTable, Removal } from './pokerTable';
 

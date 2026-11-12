@@ -75,3 +75,45 @@ describe('paying out removed players (SRS-9.9)', () => {
     expect(table.getState().seatedCount).toBe(3);
   });
 });
+
+describe('the seat is open again after a removal (SRS-9.10)', () => {
+  function expectOpen(table: PokerTable, seatNumber: number, seatedBefore: number) {
+    const state = table.getState();
+    expect(state.seats[seatNumber - 1]).toMatchObject({ playerId: null, username: null, chipStack: null });
+    expect(state.seatedCount).toBe(seatedBefore - 1);
+    // Someone else can sit there now.
+    expect(table.checkSeat(seatNumber)).toBeNull();
+    expect(table.join('9', 'P9', 500, null, seatNumber)).toEqual({ ok: true, seatNumber });
+  }
+
+  it('after a removal between hands', () => {
+    const table = tableWith([1, 2, 3, 4]);
+    table.removePlayer('4', 'timeouts');
+    expectOpen(table, 4, 4);
+  });
+
+  it('after a removal put off until the hand ended', () => {
+    const table = tableWith([1, 2, 3, 4]);
+    table.startHand(() => 0); // button 1, SB 2, BB 3; seat 4 first
+    table.removePlayer('4', 'disconnected');
+    expect(table.getState().seats[3].playerId).toBe('4');
+    table.act('4', 'fold');
+    table.act('1', 'fold');
+    table.act('2', 'fold');
+    expectOpen(table, 4, 4);
+  });
+
+  it('after a busted player runs out of time to choose (SRS-12.10)', () => {
+    const table = tableWith([1, 2, 3]);
+    table.startHand(() => 0);
+    table.act('1', 'raise', 1000); // all-in
+    table.act('2', 'call');
+    table.act('3', 'fold');
+    // Whoever lost the all-in is busted; remove them when their time is up.
+    const busted = table.getState().seats.find((seat) => seat.playerId !== null && seat.chipStack === 0);
+    expect(busted).toBeDefined();
+    table.trackBusted(0);
+    expect(table.removeTimedOutBusted(Number.MAX_SAFE_INTEGER)).toEqual([busted?.playerId]);
+    expectOpen(table, busted?.seatNumber as number, 3);
+  });
+});

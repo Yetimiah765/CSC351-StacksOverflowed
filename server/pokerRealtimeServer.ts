@@ -618,7 +618,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
     const stillHere = presentPlayers(entry, new Set(left.map((presence) => presence.presence_ref)), now);
     entry.queue = entry.queue
       .then(() => {
-        const marked = [...gone].filter((playerId) => !stillHere.has(playerId) && entry.table.markDisconnected(String(playerId)));
+        const marked = [...gone].filter(
+          (playerId) => !stillHere.has(playerId) && entry.table.markDisconnected(String(playerId), now)
+        );
         if (marked.length === 0) return;
         // eslint-disable-next-line no-console
         console.log(`${entry.config.name}: player(s) ${marked.join(', ')} disconnected`);

@@ -210,6 +210,12 @@ export interface Seat {
   removalPending: RemovalReason | null;
   /** SRS-10.1/10.2: marked disconnected, until they're heard from again (SRS-10.3). */
   disconnected: boolean;
+  /**
+   * SRS-9.2: ms a disconnected player has left before they're removed
+   * (DISCONNECT_REMOVAL_MS, SRS-NFR-013); null when connected. Relative,
+   * like countdownMsRemaining.
+   */
+  disconnectedMsRemaining: number | null;
 }
 
 /**
@@ -400,7 +406,7 @@ export function isBustedSeat(seat: Pick<Seat, 'playerId' | 'chipStack' | 'inHand
 }
 
 // Internal bookkeeping that clients don't need to see.
-interface SeatRecord extends Omit<Seat, 'bustedMsRemaining' | 'waitingForButton'> {
+interface SeatRecord extends Omit<Seat, 'bustedMsRemaining' | 'waitingForButton' | 'disconnectedMsRemaining'> {
   /** Sat down after the first hand and hasn't been through a hand start yet. */
   newcomer: boolean;
   /** When this player was first seen busted (trackBusted()); null when not busted. */
@@ -413,6 +419,8 @@ interface SeatRecord extends Omit<Seat, 'bustedMsRemaining' | 'waitingForButton'
   timedOutThisHand: boolean;
   /** When the server last heard from this player (heardFrom()); null until it has. */
   lastHeardAt: number | null;
+  /** SRS-9.2: when this player was marked disconnected, starting their disconnection timer; null when connected. */
+  disconnectedAt: number | null;
 }
 
 function emptySeat(seatNumber: number): SeatRecord {
@@ -443,6 +451,7 @@ function emptySeat(seatNumber: number): SeatRecord {
     removalPending: null,
     disconnected: false,
     lastHeardAt: null,
+    disconnectedAt: null,
   };
 }
 
@@ -552,10 +561,13 @@ export class PokerTable {
           newcomer: _newcomer,
           timedOutThisHand: _counted,
           lastHeardAt: _heard,
+          disconnectedAt,
           ...seat
         } = record;
         return {
           ...seat,
+          disconnectedMsRemaining:
+            disconnectedAt === null ? null : Math.max(0, disconnectedAt + DISCONNECT_REMOVAL_MS - now),
           bustedMsRemaining: bustedAt === null ? null : Math.max(0, bustedAt + BUSTED_DECISION_TIMEOUT_MS - now),
           waitingForButton: waitingForButton.includes(record),
         };
@@ -1550,14 +1562,32 @@ export class PokerTable {
   }
 
   /**
-   * SRS-10.2: this player's connection has ended. Returns true if that marked
-   * them disconnected (false if they weren't seated, or already were).
+   * SRS-10.2: this player's connection ended at `now`. Returns true if that
+   * marked them disconnected (false if they weren't seated, or already were).
    */
-  markDisconnected(playerId: string): boolean {
+  markDisconnected(playerId: string, now: number): boolean {
     const seat = this.findSeatByPlayerId(playerId);
     if (!seat || seat.disconnected) return false;
-    seat.disconnected = true;
+    this.disconnect(seat, now);
     return true;
+  }
+
+  /** SRS-9.2: marked disconnected, which starts their disconnection timer. */
+  private disconnect(seat: SeatRecord, now: number) {
+    seat.disconnected = true;
+    seat.disconnectedAt = now;
+  }
+
+  /**
+   * SRS-9.2: when the next disconnected player's timer reaches
+   * DISCONNECT_REMOVAL_MS (SRS-NFR-013), or null if nobody's disconnected.
+   * The caller runs the timer, as for the other clocks.
+   */
+  nextDisconnectDeadline(): number | null {
+    const deadlines = this.seats
+      .filter((seat) => seat.disconnectedAt !== null)
+      .map((seat) => (seat.disconnectedAt as number) + DISCONNECT_REMOVAL_MS);
+    return deadlines.length > 0 ? Math.min(...deadlines) : null;
   }
 
   /**
@@ -1570,7 +1600,7 @@ export class PokerTable {
     for (const seat of this.seats) {
       if (seat.playerId === null || seat.disconnected || seat.lastHeardAt === null) continue;
       if (now - seat.lastHeardAt < SILENCE_DISCONNECT_MS) continue;
-      seat.disconnected = true;
+      this.disconnect(seat, now);
       marked.push(seat.playerId);
     }
     return marked;

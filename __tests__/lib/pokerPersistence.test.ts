@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { PokerTable } from '../../lib/pokerTable';
 import {
   POKER_MIGRATION,
+  clearHandInProgress,
   loadSavedTables,
   persistHandFinished,
+  persistHandStarted,
   persistJoin,
   persistLeave,
   persistRebuy,
@@ -207,11 +209,12 @@ describe('restoring the saved stacks when the server starts (SRS-7.3)', () => {
 });
 
 describe('reading the saved tables (SRS-7.3)', () => {
-  const row = (tableKey: string, seats: unknown[] = []) => ({
+  const row = (tableKey: string, seats: unknown[] = [], handInProgress = false) => ({
     table_key: tableKey,
     dealer_button_seat: seats.length ? 2 : null,
     last_small_blind_seat: seats.length ? 3 : null,
     last_big_blind_seat: seats.length ? 4 : null,
+    hand_in_progress: handInProgress,
     poker_seats: seats,
   });
   function fakeTables(rows: unknown[]) {
@@ -235,6 +238,7 @@ describe('reading the saved tables (SRS-7.3)', () => {
       dealerSeat: 2,
       smallBlindSeat: 3,
       bigBlindSeat: 4,
+      handInProgress: false,
       seats: [{ seatNumber: 2, playerId: '7', chipStack: 1250, missedSmallBlind: false, missedBigBlind: true, timeouts: 1 }],
     });
     expect(loaded.tables.get('low-2')?.seats).toEqual([]);
@@ -246,5 +250,71 @@ describe('reading the saved tables (SRS-7.3)', () => {
     if (loaded.ok) return;
     expect(loaded.error).toContain('mid-1');
     expect(loaded.error).toContain(POKER_MIGRATION);
+  });
+});
+
+describe('voiding a hand a restart interrupted (SRS-7.4)', () => {
+  it('marks each hand under way, with its button and blinds', async () => {
+    const { client, rpc } = fakeSupabase([{ status: 'started' }]);
+    await persistHandStarted(client, 'low-1', { dealerSeat: 1, smallBlindSeat: 2, bigBlindSeat: 3 });
+    expect(rpc).toHaveBeenCalledWith('fn_poker_hand_started', {
+      p_table_key: 'low-1',
+      p_dealer_seat: 1,
+      p_small_blind_seat: 2,
+      p_big_blind_seat: 3,
+    });
+  });
+
+  it('gives every dealt-in player back their stack from before the hand', () => {
+    // Saved when the last hand ended (stacks are never written mid-hand).
+    const table = tableWith([1, 2, 3]);
+    const beforeHand = seatsToSave(table.getState());
+    // A hand starts and chips go in; then the server stops.
+    table.startHand(() => 0);
+    table.act('1', 'raise', 300);
+    table.act('2', 'call');
+    expect(table.getState().seats.slice(0, 3).map((seat) => seat.chipStack)).toEqual([700, 700, 990]);
+    // Restarted from what was saved: the hand is gone, and so is everything bet in it.
+    const restarted = new PokerTable('table-1', 6, 10, 5);
+    restarted.restore(
+      {
+        dealerSeat: 1,
+        smallBlindSeat: 2,
+        bigBlindSeat: 3,
+        seats: beforeHand.map((seat) => ({ ...seat, playerId: String(seat.playerId), username: `P${seat.playerId}` })),
+      },
+      0
+    );
+    const state = restarted.getState();
+    expect(state.phase).not.toBe('in-hand');
+    expect(state.pot).toBe(0);
+    expect(state.seats.slice(0, 3).map((seat) => seat.chipStack)).toEqual([1000, 1000, 1000]);
+  });
+
+  it('reads the hand-in-progress mark, and clears it once the hand is voided', async () => {
+    const builder = {
+      select: vi.fn(() => builder),
+      in: vi.fn(async () => ({
+        data: [
+          {
+            table_key: 'low-1',
+            dealer_button_seat: 1,
+            last_small_blind_seat: 2,
+            last_big_blind_seat: 3,
+            hand_in_progress: true,
+            poker_seats: [],
+          },
+        ],
+        error: null,
+      })),
+      update: vi.fn(() => builder),
+      eq: vi.fn(async () => ({ error: null })),
+    };
+    const client = { from: vi.fn(() => builder) } as never;
+    const loaded = await loadSavedTables(client, ['low-1']);
+    expect(loaded.ok && loaded.tables.get('low-1')?.handInProgress).toBe(true);
+    await clearHandInProgress(client, 'low-1');
+    expect(builder.update).toHaveBeenCalledWith({ hand_in_progress: false });
+    expect(builder.eq).toHaveBeenCalledWith('table_key', 'low-1');
   });
 });

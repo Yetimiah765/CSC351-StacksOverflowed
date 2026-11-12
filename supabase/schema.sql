@@ -61,6 +61,7 @@ DROP FUNCTION IF EXISTS fn_poker_tables_seat_capacity() CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_join(VARCHAR, INTEGER, INTEGER, BIGINT) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_rebuy(VARCHAR, INTEGER, BIGINT) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_leave(VARCHAR, INTEGER, BIGINT) CASCADE;
+DROP FUNCTION IF EXISTS fn_poker_hand_started(VARCHAR, INTEGER, INTEGER, INTEGER) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_hand_finished(VARCHAR, JSONB) CASCADE;
 DROP FUNCTION IF EXISTS fn_open_daily_login_box(INTEGER, INTEGER) CASCADE;
 DROP FUNCTION IF EXISTS fn_make_wish(INTEGER, INTEGER) CASCADE;
@@ -1494,9 +1495,30 @@ BEGIN
 END;
 $$;
 
+-- SRS-7.4 / SRS-13.3: a hand has been dealt. Marks it in progress (so a
+-- restart before it ends voids it) and records the button and blind seats.
+CREATE OR REPLACE FUNCTION fn_poker_hand_started(p_table_key VARCHAR, p_dealer_seat INTEGER,
+                                                 p_small_blind_seat INTEGER, p_big_blind_seat INTEGER)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE poker_tables
+       SET hand_in_progress      = TRUE,
+           dealer_button_seat    = p_dealer_seat,
+           last_small_blind_seat = p_small_blind_seat,
+           last_big_blind_seat   = p_big_blind_seat
+     WHERE table_key = p_table_key;
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('status', 'no_table');
+    END IF;
+    RETURN jsonb_build_object('status', 'started');
+END;
+$$;
+
 -- SRS-7.2 / SRS-NFR-019: a hand has ended. Saves every listed seat's stack,
 -- missed blinds and timeout count, marks a player busted when their stack is
--- 0 (SRS-12.1), all in one transaction. p_seats is a JSON array of
+-- 0 (SRS-12.1), and clears hand_in_progress (SRS-7.4), all in one transaction. p_seats is a JSON array of
 -- { seatNumber, playerId, chipStack, owesSmallBlind, owesBigBlind,
 -- consecutiveTimeouts }.
 CREATE OR REPLACE FUNCTION fn_poker_hand_finished(p_table_key VARCHAR, p_seats JSONB)
@@ -1530,6 +1552,7 @@ BEGIN
         END IF;
     END LOOP;
 
+    UPDATE poker_tables SET hand_in_progress = FALSE WHERE table_id = v_table_id;
     RETURN jsonb_build_object('status', 'saved', 'seats', v_saved);
 END;
 $$;
@@ -1539,6 +1562,7 @@ $$;
 REVOKE EXECUTE ON FUNCTION fn_poker_join(VARCHAR, INTEGER, INTEGER, BIGINT) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION fn_poker_rebuy(VARCHAR, INTEGER, BIGINT) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION fn_poker_leave(VARCHAR, INTEGER, BIGINT) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION fn_poker_hand_started(VARCHAR, INTEGER, INTEGER, INTEGER) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION fn_poker_hand_finished(VARCHAR, JSONB) FROM PUBLIC;
 DO $$
 BEGIN
@@ -1546,10 +1570,12 @@ BEGIN
         EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_poker_join(VARCHAR, INTEGER, INTEGER, BIGINT) FROM anon, authenticated';
         EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_poker_rebuy(VARCHAR, INTEGER, BIGINT) FROM anon, authenticated';
         EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_poker_leave(VARCHAR, INTEGER, BIGINT) FROM anon, authenticated';
+        EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_poker_hand_started(VARCHAR, INTEGER, INTEGER, INTEGER) FROM anon, authenticated';
         EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_poker_hand_finished(VARCHAR, JSONB) FROM anon, authenticated';
         EXECUTE 'GRANT EXECUTE ON FUNCTION fn_poker_join(VARCHAR, INTEGER, INTEGER, BIGINT) TO service_role';
         EXECUTE 'GRANT EXECUTE ON FUNCTION fn_poker_rebuy(VARCHAR, INTEGER, BIGINT) TO service_role';
         EXECUTE 'GRANT EXECUTE ON FUNCTION fn_poker_leave(VARCHAR, INTEGER, BIGINT) TO service_role';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION fn_poker_hand_started(VARCHAR, INTEGER, INTEGER, INTEGER) TO service_role';
         EXECUTE 'GRANT EXECUTE ON FUNCTION fn_poker_hand_finished(VARCHAR, JSONB) TO service_role';
     END IF;
 END;

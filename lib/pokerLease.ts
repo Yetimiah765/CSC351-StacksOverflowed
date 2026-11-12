@@ -82,3 +82,15 @@ export async function waitForLease(
     await sleep(retryMs);
   }
 }
+
+/**
+ * SRS-NFR-024: whether a poker server is up, from the lease row: someone
+ * holds it and has renewed it within the last LEASE_TTL_MS. The renewal is
+ * the server's heartbeat, so a stopped server shows as down within 15 seconds.
+ */
+export function isServerUp(lease: { renewed_at: string; expires_at: string } | null, now: number): boolean {
+  if (!lease) return false;
+  const renewed = Date.parse(lease.renewed_at);
+  const expires = Date.parse(lease.expires_at);
+  return Number.isFinite(renewed) && Number.isFinite(expires) && expires > now && now - renewed <= LEASE_TTL_MS;
+}

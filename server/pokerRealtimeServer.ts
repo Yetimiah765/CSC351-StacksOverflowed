@@ -50,6 +50,7 @@ import {
 import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
+import { payOutRemovals } from '../lib/pokerRemovals';
 import { EMOTE_COOLDOWN_MS, canSendEmote, isEmoteId } from '../lib/emotes';
 import {
   POKER_EVENT_ACTION,
@@ -294,13 +295,12 @@ function startServer(supabase: SupabaseClient, secret: string) {
     }, Math.max(0, deadline - now));
   }
 
-  // Players who asked to leave during a hand are removed when it ends
-  // (SRS-21.3) — refund what they had left. Call after anything that can end
-  // a hand.
+  // Players removed from their seats — asked to leave during a hand
+  // (SRS-21.3), timed out too often (SRS-9.7), and so on — get what they had
+  // left paid back into their balance (SRS-9.9). Call after anything that can
+  // end a hand or remove a player.
   async function settleRemovals(entry: TableEntry) {
-    for (const removal of entry.table.drainRemovals()) {
-      await refundBalance(supabase, Number(removal.playerId), removal.chipStack);
-    }
+    return payOutRemovals(entry.table, (playerId, chips) => refundBalance(supabase, playerId, chips));
   }
 
   // Starts or cancels this table's countdown to match who's seated now (see

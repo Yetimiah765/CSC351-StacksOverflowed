@@ -59,6 +59,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import { noticeReason, payOutRemovals, type RemovalNoticeReason } from '../lib/pokerRemovals';
 import { LEASE_RENEW_MS, LEASE_TTL_MS, afterRenewal, claimLease, releaseLease, waitForLease } from '../lib/pokerLease';
+import { RECOVERY_LIMIT_MS, recoveredInTime } from '../lib/pokerRecovery';
 import {
   clearHandInProgress,
   loadSavedTables,
@@ -893,6 +894,9 @@ async function startServer(supabase: SupabaseClient, secret: string) {
     }
   });
 
+  // SRS-NFR-025: once every table's channel is subscribed the tables take
+  // joins again; say how long that took from the process starting.
+  const waitingFor = new Set(entries.map(({ config }) => config.id));
   for (const { config, channel } of entries) {
     channel.subscribe((status) => {
       if (status === 'SUBSCRIBED') {
@@ -900,10 +904,31 @@ async function startServer(supabase: SupabaseClient, secret: string) {
         console.log(
           `Poker realtime server subscribed to "${pokerTableChannelName(config.id)}" (${config.name}: ${config.maxSeats} seats, blinds ${config.smallBlind}/${config.bigBlind}, buy-in ${MIN_BUY_IN_MULTIPLIER * config.bigBlind}-${MAX_BUY_IN_MULTIPLIER * config.bigBlind})`
         );
+        if (waitingFor.delete(config.id) && waitingFor.size === 0) {
+          const readyMs = Math.round(process.uptime() * 1000);
+          // eslint-disable-next-line no-console
+          (recoveredInTime(readyMs) ? console.log : console.warn)(
+            `Poker tables ready ${readyMs} ms after the server started (limit ${RECOVERY_LIMIT_MS} ms, SRS-NFR-025)`
+          );
+        }
       }
     });
   }
 }
+
+// SRS-NFR-025: a crash stops the process, and the host starts a fresh one,
+// which restores the tables from the database. Carrying on after an
+// unexpected error could leave tables half-updated.
+process.on('uncaughtException', (error) => {
+  // eslint-disable-next-line no-console
+  console.error('The poker server hit an unexpected error and is stopping, to be restarted:', error);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  // eslint-disable-next-line no-console
+  console.error('The poker server hit an unexpected error and is stopping, to be restarted:', reason);
+  process.exit(1);
+});
 
 const supabase = getSupabaseClient();
 const secret = getPokerServerSecret();

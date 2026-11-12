@@ -193,7 +193,19 @@ export interface Seat {
    * once per hand), towards removal at CONSECUTIVE_TIMEOUT_LIMIT (SRS-NFR-014).
    */
   timeouts: number;
+  /**
+   * SRS-9.13: why this player is to be removed once the hand ends (they met
+   * a removal condition while still in it); null otherwise.
+   */
+  removalPending: RemovalReason | null;
 }
+
+/**
+ * Why a player was removed from their seat: they asked to leave (SRS-21),
+ * their turn timed out too many hands in a row (SRS-9.7), or they stayed
+ * disconnected too long (SRS-9.4).
+ */
+export type RemovalReason = 'left' | 'timeouts' | 'disconnected';
 
 /** A main or side pot built from chips already collected (SRS-19). */
 export interface Pot {
@@ -305,10 +317,15 @@ export interface ActionResult {
   error?: string;
 }
 
-/** A player removed at the end of a hand after asking to leave during it. */
+/**
+ * A player removed from their seat since the caller last asked
+ * (drainRemovals()): `chipStack` is what they had left, not counting chips
+ * already in a pot, for the caller to pay back into their balance.
+ */
 export interface Removal {
   playerId: string;
   chipStack: number;
+  reason: RemovalReason;
 }
 
 /** What the acting player may do right now; shared with the client to draw its buttons. */
@@ -399,6 +416,7 @@ function emptySeat(seatNumber: number): SeatRecord {
     newcomer: false,
     timeouts: 0,
     timedOutThisHand: false,
+    removalPending: null,
   };
 }
 
@@ -1243,8 +1261,10 @@ export class PokerTable {
     };
 
     this.seats.forEach((seat) => {
-      if (seat.leaveRequested && seat.playerId !== null) {
-        this.pendingRemovals.push({ playerId: seat.playerId, chipStack: seat.chipStack ?? 0 });
+      // SRS-21.3, and SRS-9.13: removals put off until the hand was over.
+      const reason: RemovalReason | null = seat.leaveRequested ? 'left' : seat.removalPending;
+      if (reason && seat.playerId !== null) {
+        this.pendingRemovals.push({ playerId: seat.playerId, chipStack: seat.chipStack ?? 0, reason });
         Object.assign(seat, emptySeat(seat.seatNumber));
       } else {
         resetHandFields(seat);
@@ -1286,10 +1306,11 @@ export class PokerTable {
   }
 
   /**
-   * Players removed when a hand ended because they asked to leave during it
-   * (SRS-21.3), since the last call. The caller refunds each chipStack to
-   * the player's balance. Call after anything that can end a hand: act(),
-   * leave(), and startHand().
+   * Players removed since the last call: when a hand ended, those who asked
+   * to leave during it (SRS-21.3) or met a removal condition in it
+   * (SRS-9.13), and anyone removePlayer() took straight out. The caller
+   * refunds each chipStack to the player's balance. Call after anything that
+   * can end a hand or remove a player.
    */
   drainRemovals(): Removal[] {
     const removals = this.pendingRemovals;
@@ -1350,6 +1371,31 @@ export class PokerTable {
     });
 
     return { ok: true, seatNumber: seat.seatNumber };
+  }
+
+  /**
+   * Takes a player out of their seat for `reason` (SRS-9.4, SRS-9.7). A
+   * player still in the hand in progress isn't removed until it ends
+   * (SRS-9.13) and keeps playing it meanwhile; anyone else is removed now,
+   * anything they'd already put into this hand staying in the pot. Either
+   * way the removal comes out of drainRemovals(). Returns false if they
+   * aren't seated.
+   */
+  removePlayer(playerId: string, reason: RemovalReason): boolean {
+    const seat = this.findSeatByPlayerId(playerId);
+    if (!seat) return false;
+    if (this.phase === 'in-hand' && seat.inHand) {
+      if (!seat.removalPending) seat.removalPending = reason;
+      return true;
+    }
+    if (this.phase === 'in-hand' && seat.totalBet > 0) {
+      this.deadContributions.push(seat.totalBet);
+      this.deadRoundBets.push(seat.bet);
+    }
+    this.pendingRemovals.push({ playerId, chipStack: seat.chipStack ?? 0, reason });
+    Object.assign(seat, emptySeat(seat.seatNumber));
+    this.resetIfEmpty();
+    return true;
   }
 
   /**

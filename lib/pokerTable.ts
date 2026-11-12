@@ -368,6 +368,16 @@ export function getBettingOptions(
 }
 
 /**
+ * SRS-9.8: how many more timed-out hands a player has before they're removed
+ * (SRS-9.7), once that's down to one — the point at which they're warned —
+ * or null before then. Shared with the table page, which shows the warning.
+ */
+export function timedOutHandsBeforeRemoval(seat: Pick<Seat, 'timeouts'>): number | null {
+  const left = CONSECUTIVE_TIMEOUT_LIMIT - seat.timeouts;
+  return left === 1 ? left : null;
+}
+
+/**
  * SRS-12.1: busted — seated with no chips left after a hand. A player who
  * went all-in is still in the hand (inHand) until it ends, so they only
  * count as busted once it's over. Shared with the table page, which offers

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CONSECUTIVE_TIMEOUT_LIMIT, PokerTable, TURN_TIME_LIMIT_MS } from '../../lib/pokerTable';
+import { CONSECUTIVE_TIMEOUT_LIMIT, PokerTable, TURN_TIME_LIMIT_MS, timedOutHandsBeforeRemoval } from '../../lib/pokerTable';
 import { createDeck } from '../../lib/pokerCards';
 
 // The turn clock and what happens when it runs out (SRS-4.x, SRS-NFR-018).
@@ -482,5 +482,31 @@ describe('removal after too many timeouts in a row (SRS-9.7)', () => {
     }
     playHands(table, CONSECUTIVE_TIMEOUT_LIMIT - 1);
     expect(table.getState().seats[0].playerId).toBe(p(1));
+  });
+});
+
+describe('the near-removal warning (SRS-9.8)', () => {
+  it('is given one timed-out hand before removal, saying how many are left', () => {
+    expect(timedOutHandsBeforeRemoval({ timeouts: 0 })).toBeNull();
+    expect(timedOutHandsBeforeRemoval({ timeouts: CONSECUTIVE_TIMEOUT_LIMIT - 2 })).toBeNull();
+    expect(timedOutHandsBeforeRemoval({ timeouts: CONSECUTIVE_TIMEOUT_LIMIT - 1 })).toBe(1);
+  });
+
+  it('shows in the state as soon as the hand that brings it times out', () => {
+    // The state is broadcast straight after the timeout, so the warning
+    // reaches the player's page with it (SRS-NFR-020).
+    const table = tableWith([1, 2, 3]);
+    for (let hand = 0; hand < CONSECUTIVE_TIMEOUT_LIMIT - 1; hand++) {
+      table.updateCountdown(0);
+      table.startHand(pick(0));
+      while (table.getState().phase === 'in-hand') {
+        const state = table.getState();
+        const active = state.activeSeat as number;
+        if (active === 1) timeOut(table);
+        else table.act(p(active), state.currentBet > state.seats[active - 1].bet ? 'call' : 'check');
+      }
+    }
+    expect(timedOutHandsBeforeRemoval(table.getState().seats[0])).toBe(1);
+    expect(timedOutHandsBeforeRemoval(table.getState().seats[1])).toBeNull();
   });
 });

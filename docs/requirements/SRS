@@ -60,7 +60,9 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *User story: As a player, I want to join an online table with other players in real time, so that I can play poker with people and friends regardless of physical location.*
 
-**SRS-1.1, Join open seat.** The system shall allow a player to occupy any open seat at a selected table when the table has fewer seated players than its configured maximum seat count (SRS-NFR-022), subject to SRS-1.2 and SRS-1.3.
+**SRS-1.1, Join open seat.** The system shall allow a player to occupy any open seat at a selected table when the table has fewer seated players than its configured maximum seat count (SRS-NFR-022) and the player is not already seated at any table, subject to SRS-1.2 and SRS-1.3.
+
+*Note added on 2026-11-12: a player can now sit at only one table at a time; the poker server refuses a join from a player already seated at another table.*
 
 *Traces to: UR-001*
 
@@ -80,7 +82,9 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *Traces to: UR-001*
 
-**SRS-1.6, Join rejection message.** Upon rejecting a join request under SRS-1.3, SRS-1.4, or SRS-1.5, the system shall display an error message stating the reason for rejection on the requesting player's client.
+**SRS-1.6, Join rejection message.** Upon rejecting a join request under SRS-1.3, SRS-1.4, or SRS-1.5, or because the player is already seated at a table (SRS-1.1), the system shall display an error message stating the reason for rejection on the requesting player's client.
+
+*Note added on 2026-11-12: added the message for a player already seated at another table, naming that table.*
 
 *Traces to: UR-001*
 
@@ -186,7 +190,9 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *User story: As a player, I want my cards to stay hidden from other players until showdown, so that no one can gain an unfair advantage by seeing cards they shouldn't.*
 
-**SRS-6.1, Hole-card confidentiality.** The system shall not transmit the values of a player's hole cards to any client other than that player's, from the deal until those cards are revealed per SRS-6.2 or SRS-6.4.
+**SRS-6.1, Hole-card confidentiality.** The system shall not transmit the values of a player's hole cards in a form readable by any client other than that player's, from the deal until those cards are revealed per SRS-6.2 or SRS-6.4.
+
+*Note added on 2026-11-12: the table's real-time channel is public, so every player's hole cards travel on it sealed (encrypted for that player and that hand) and only that player's client can have them opened, rather than being left out of what other clients receive.*
 
 *Traces to: UR-006*
 
@@ -198,7 +204,9 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *Traces to: UR-006*
 
-**SRS-6.4, Reveal on all-in run-out.** When SRS-17.8 applies, the system shall reveal the hole cards of every in-hand player to every seated player before dealing the remaining community cards.
+**SRS-6.4, Reveal on all-in run-out.** When SRS-17.8 applies, the system shall show the hole cards of every in-hand player to every seated player before showing the remaining community cards being dealt.
+
+*Note added on 2026-11-12: the server deals the run-out in one step; the table shows the hands revealed first, then deals the remaining streets one at a time (SRS-22.7).*
 
 *Traces to: UR-006*
 
@@ -234,11 +242,15 @@ Two items in the URD (the "view other players' profiles" item under Profile Page
 
 *Traces to: UR-008*
 
-**SRS-8.2, Default profile picture.** The system shall display a default profile picture at the table position of any seated player who has not uploaded a profile picture.
+**SRS-8.2, Default profile picture.** The system shall display the first letter of the player's username in place of a profile picture at the table position of any seated player who has not uploaded a profile picture.
+
+*Note added on 2026-11-12: seats without a profile picture show the first letter of the username, rather than a default picture.*
 
 *Traces to: UR-008*
 
-**SRS-8.3, Profile summary on selection.** When a seated player's profile picture is selected, the system shall display that player's username, profile picture, and bio text.
+**SRS-8.3, Profile summary on selection.** When a seated player's profile picture or username is selected, the system shall display that player's public profile (SRS-121.3 through SRS-121.13), including their username, profile picture, and bio text, in a window over the table as SRS-121.14 describes.
+
+*Note added on 2026-11-12: selecting a seat's picture or name now opens the player's whole public profile in a window that can be moved over the table, not just a summary of username, picture and bio.*
 
 *Traces to: UR-008*
 
@@ -494,11 +506,15 @@ flowchart LR
 
 *Traces to: UR-014*
 
-**SRS-14.3, Automatic small blind posting.** After hand setup per SRS-13.3, provided the minimum player count in SRS-20.1 is satisfied, and before any cards are dealt, the system shall move the configured small blind amount from the small blind seat's chip stack to the pot.
+**SRS-14.3, Automatic small blind posting.** After hand setup per SRS-13.3, provided the minimum player count in SRS-20.1 is satisfied, and before any cards are dealt, the system shall move the configured small blind amount from the small blind seat's chip stack into that seat's round contribution, which is collected into the pot when the betting round ends.
+
+*Note added on 2026-11-12: posted blinds count as the seat's round contribution, like any bet, and reach the pot with the round's other bets, rather than going straight into the pot.*
 
 *Traces to: UR-014*
 
-**SRS-14.4, Automatic big blind posting.** After hand setup per SRS-13.3, provided the minimum player count in SRS-20.1 is satisfied, and before any cards are dealt, the system shall move the configured big blind amount from the big blind seat's chip stack to the pot.
+**SRS-14.4, Automatic big blind posting.** After hand setup per SRS-13.3, provided the minimum player count in SRS-20.1 is satisfied, and before any cards are dealt, the system shall move the configured big blind amount from the big blind seat's chip stack into that seat's round contribution, which is collected into the pot when the betting round ends.
+
+*Note added on 2026-11-12: as for SRS-14.3; the big blind's contribution counts toward the current bet (SRS-14.7) and, not being an action (SRS-18.4), still leaves the big blind its option.*
 
 *Traces to: UR-014*
 
@@ -728,7 +744,9 @@ flowchart LR
 
 *Traces to: UR-021*
 
-**SRS-21.2, Fold on leave during a hand.** Upon receiving a leave request from an able-to-act player, the system shall fold that player's hand when action next reaches that player.
+**SRS-21.2, Fold on leave during a hand.** Upon receiving a leave request from an able-to-act player, the system shall fold that player's hand when action next reaches that player, or at once if it is already that player's turn.
+
+*Note added on 2026-11-12: made explicit that a player who asks to leave on their own turn is folded straight away.*
 
 *Traces to: UR-021*
 

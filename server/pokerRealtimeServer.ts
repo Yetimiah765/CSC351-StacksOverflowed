@@ -85,6 +85,8 @@ interface TableEntry {
   startTimer: ReturnType<typeof setTimeout> | null;
   /** Fires when the next busted player runs out of time (SRS-12.10); null when nobody is busted. */
   bustedTimer: ReturnType<typeof setTimeout> | null;
+  /** Fires when the player holding the turn runs out of time (SRS-4.2-4.4); null when no turn is timed. */
+  turnTimer: ReturnType<typeof setTimeout> | null;
   /**
    * This table's actions, handled one at a time in the order they arrive:
    * several await the database, and two interleaving at those awaits (a
@@ -162,6 +164,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     channel: supabase.channel(pokerTableChannelName(config.id), CHANNEL_CONFIG),
     startTimer: null,
     bustedTimer: null,
+    turnTimer: null,
     queue: Promise.resolve(),
   }));
 
@@ -215,7 +218,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     // clocks start and stop (SRS-12.10), and the turn's clock (SRS-NFR-018),
     // before the state that shows them.
     scheduleBustedTimeout(entry);
-    entry.table.trackTurn(Date.now());
+    scheduleTurnTimeout(entry);
     const state = entry.table.getState();
     // SRS-6.1: every player's hole cards ride along sealed for them alone.
     const holeCards: Record<string, string> = {};
@@ -251,6 +254,43 @@ function startServer(supabase: SupabaseClient, secret: string) {
         broadcastLobby();
       }
       broadcastTable(entry);
+    }, Math.max(0, deadline - now));
+  }
+
+  // SRS-4.2-4.4: one timer per table, for the turn in progress (SRS-NFR-018).
+  // When it fires the table checks or folds for the player and the hand
+  // moves on as after any action: the next player's turn (whose clock starts
+  // with the broadcast), the next street, the showdown, or the end of the
+  // hand and the next countdown. Queued with the table's other actions, so
+  // it can't interleave with one the player sent at the last moment (if that
+  // arrived first, the turn has moved on and the timeout does nothing).
+  function scheduleTurnTimeout(entry: TableEntry) {
+    const now = Date.now();
+    entry.table.trackTurn(now);
+    if (entry.turnTimer) {
+      clearTimeout(entry.turnTimer);
+      entry.turnTimer = null;
+    }
+    const deadline = entry.table.nextTurnDeadline();
+    if (deadline === null) return;
+
+    entry.turnTimer = setTimeout(() => {
+      entry.turnTimer = null;
+      entry.queue = entry.queue
+        .then(async () => {
+          const timedOut = entry.table.timeOutTurn(Date.now());
+          if (!timedOut) return;
+          // eslint-disable-next-line no-console
+          console.log(`${entry.config.name}: player ${timedOut.playerId} ran out of time (${timedOut.move})`);
+          refreshCountdown(entry);
+          broadcastTable(entry);
+          broadcastLobby();
+          await settleRemovals(entry);
+        })
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error(`${entry.config.name}: turn timeout failed`, error);
+        });
     }, Math.max(0, deadline - now));
   }
 

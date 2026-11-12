@@ -14,8 +14,8 @@
 // Sprint 1 scope: the fixed set of tables in lib/pokerTables.ts, each on its
 // own Realtime channel, plus a lobby channel summarizing all of them. A table
 // supports joining a chosen open seat, leaving a seat, a hard cap on seat
-// count, and a buy-in (SRS-1.2, SRS-1.3) deducted from/refunded to
-// players.balance. A player can be seated at only one table at a time. Once
+// count, and a buy-in (SRS-1.2, SRS-1.3) moved from players.balance to the
+// table and back. A player can be seated at only one table at a time. Once
 // three players are seated, a table counts down HAND_START_COUNTDOWN_MS and
 // then starts a hand (dealer button, blinds, cards — see lib/pokerTable.ts);
 // this process owns that countdown's timer. Seated players then take turns
@@ -24,6 +24,12 @@
 // connection (closing the tab does not free it or refund the stack) so a
 // player can reconnect and resume it later (SRS-2.1) — there is no
 // disconnection-timeout removal yet (SRS-9.x/10.x).
+//
+// Stacks are persistent (UR-007, lib/pokerPersistence.ts): poker_seats holds
+// every seat and its stack. Sitting down, buying back in and leaving move
+// coins between players.balance and the seat in one database transaction,
+// and every hand's stacks are saved when it ends (SRS-7.2) — never mid-hand.
+// Writes for a table run one at a time, in order.
 //
 // The channels are public (anyone with the anon key can read and send), so:
 // - join/leave/act are only accepted when signed with POKER_SERVER_SECRET by
@@ -51,6 +57,7 @@ import { POKER_TABLES, type PokerTableConfig } from '../lib/pokerTables';
 import { getSupabaseClient } from '../lib/supabase';
 import { getPlayerUsername } from '../lib/playerDisplay';
 import { noticeReason, payOutRemovals, type RemovalNoticeReason } from '../lib/pokerRemovals';
+import { persistHandFinished, persistJoin, persistLeave, persistRebuy, seatsToSave } from '../lib/pokerPersistence';
 import { EMOTE_COOLDOWN_MS, canSendEmote, isEmoteId } from '../lib/emotes';
 import {
   POKER_EVENT_ACTION,
@@ -95,6 +102,8 @@ interface TableEntry {
   silenceTimer: ReturnType<typeof setTimeout> | null;
   /** Fires when the next disconnected player has been gone too long (SRS-9.4); null when nobody's disconnected. */
   disconnectTimer: ReturnType<typeof setTimeout> | null;
+  /** This table's database writes, run one at a time in the order they happened (UR-007). */
+  writes: Promise<unknown>;
   /**
    * This table's actions, handled one at a time in the order they arrive:
    * several await the database, and two interleaving at those awaits (a
@@ -107,60 +116,6 @@ interface TableEntry {
 type AckResult = { ok: boolean; error?: string; seatNumber?: number; pending?: boolean };
 
 const BETTING_MOVES: BettingMove[] = ['fold', 'check', 'call', 'bet', 'raise'];
-
-// PostgREST calls can't share a transaction, so both of these use an
-// optimistic-lock read-then-conditional-update (matching the balance just
-// read), retried once on a lost race, instead of a raw increment/decrement.
-const BALANCE_WRITE_ATTEMPTS = 2;
-
-async function deductBalance(
-  supabase: SupabaseClient,
-  playerId: number,
-  amount: number
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  for (let attempt = 0; attempt < BALANCE_WRITE_ATTEMPTS; attempt++) {
-    const { data: player, error: readError } = await supabase
-      .from('players')
-      .select('balance')
-      .eq('player_id', playerId)
-      .maybeSingle();
-
-    if (readError || !player) return { ok: false, error: 'Unable to read your balance.' };
-    if (player.balance < amount) return { ok: false, error: 'That buy-in exceeds your balance.' };
-
-    const { data: updated, error: updateError } = await supabase
-      .from('players')
-      .update({ balance: player.balance - amount })
-      .eq('player_id', playerId)
-      .eq('balance', player.balance)
-      .select('balance');
-
-    if (updateError) return { ok: false, error: 'Unable to update your balance.' };
-    if (updated && updated.length > 0) return { ok: true };
-    // Balance changed between the read and the write — retry once.
-  }
-  return { ok: false, error: 'Please try again.' };
-}
-
-// Refunding has no ack to attach a failure to, so this just logs if it ever
-// exhausts its retries instead of returning a result.
-async function refundBalance(supabase: SupabaseClient, playerId: number, amount: number): Promise<void> {
-  for (let attempt = 0; attempt < BALANCE_WRITE_ATTEMPTS; attempt++) {
-    const { data: player } = await supabase.from('players').select('balance').eq('player_id', playerId).maybeSingle();
-    if (!player) return;
-
-    const { data: updated } = await supabase
-      .from('players')
-      .update({ balance: player.balance + amount })
-      .eq('player_id', playerId)
-      .eq('balance', player.balance)
-      .select('balance');
-
-    if (updated && updated.length > 0) return;
-  }
-  // eslint-disable-next-line no-console
-  console.error(`Failed to refund ${amount} to player ${playerId} after ${BALANCE_WRITE_ATTEMPTS} attempts.`);
-}
 
 const CHANNEL_CONFIG = { config: { broadcast: { self: false } } };
 // Table channels also carry presence: seated players' pages track a signed
@@ -178,6 +133,7 @@ function startServer(supabase: SupabaseClient, secret: string) {
     turnTimer: null,
     silenceTimer: null,
     disconnectTimer: null,
+    writes: Promise.resolve(),
     queue: Promise.resolve(),
   }));
 
@@ -261,15 +217,28 @@ function startServer(supabase: SupabaseClient, secret: string) {
 
     entry.bustedTimer = setTimeout(() => {
       entry.bustedTimer = null;
-      const removed = entry.table.removeTimedOutBusted(Date.now());
-      if (removed.length > 0) {
-        // eslint-disable-next-line no-console
-        console.log(`${entry.config.name}: removed busted player(s) ${removed.join(', ')} after the decision timeout`);
-        removed.forEach((playerId) => sendNotice(entry, playerId, 'busted'));
-        refreshCountdown(entry);
-        broadcastLobby();
-      }
-      broadcastTable(entry);
+      // Queued with the table's actions, so it can't land in the middle of
+      // the player's buy-back.
+      entry.queue = entry.queue
+        .then(() => {
+          const removed = entry.table.removeTimedOutBusted(Date.now());
+          if (removed.length > 0) {
+            // eslint-disable-next-line no-console
+            console.log(`${entry.config.name}: removed busted player(s) ${removed.join(', ')} after the decision timeout`);
+            // No chips to pay; free their seats in the database (SRS-9.10).
+            for (const playerId of removed) {
+              void queueWrite(entry, () => persistLeave(supabase, entry.config.id, Number(playerId), 0));
+            }
+            removed.forEach((playerId) => sendNotice(entry, playerId, 'busted'));
+            refreshCountdown(entry);
+            broadcastLobby();
+          }
+          broadcastTable(entry);
+        })
+        .catch((error) => {
+          // eslint-disable-next-line no-console
+          console.error(`${entry.config.name}: busted timeout failed`, error);
+        });
     }, Math.max(0, deadline - now));
   }
 
@@ -360,8 +329,10 @@ function startServer(supabase: SupabaseClient, secret: string) {
       entry.turnTimer = null;
       entry.queue = entry.queue
         .then(async () => {
+          const before = snapshot(entry);
           const timedOut = entry.table.timeOutTurn(Date.now());
           if (!timedOut) return;
+          saveChanges(entry, before);
           // eslint-disable-next-line no-console
           console.log(`${entry.config.name}: player ${timedOut.playerId} ran out of time (${timedOut.move})`);
           refreshCountdown(entry);
@@ -381,8 +352,11 @@ function startServer(supabase: SupabaseClient, secret: string) {
   // left paid back into their balance (SRS-9.9). Call after anything that can
   // end a hand or remove a player.
   // Each is then told why, unless they left of their own accord (SRS-9.11).
+  // Paying out also frees their seat in the database (fn_poker_leave).
   async function settleRemovals(entry: TableEntry) {
-    const removals = await payOutRemovals(entry.table, (playerId, chips) => refundBalance(supabase, playerId, chips));
+    const removals = await payOutRemovals(entry.table, (playerId, chips) =>
+      queueWrite(entry, () => persistLeave(supabase, entry.config.id, playerId, chips)).then(() => undefined)
+    );
     for (const removal of removals) {
       const reason = noticeReason(removal);
       if (reason) sendNotice(entry, removal.playerId, reason);
@@ -397,6 +371,33 @@ function startServer(supabase: SupabaseClient, secret: string) {
     entry.channel.send({ type: 'broadcast', event: POKER_EVENT_NOTICE, payload });
   }
 
+  // Runs one database write for this table after the ones before it, so
+  // writes land in the order things happened (a hand's stacks before the
+  // next buy-in, and so on). Resolves with the write's own result.
+  function queueWrite<T>(entry: TableEntry, write: () => Promise<T>): Promise<T> {
+    const run = entry.writes.then(write, write);
+    entry.writes = run.catch(() => undefined);
+    return run;
+  }
+
+  // What the table looked like before a change, for saveChanges().
+  function snapshot(entry: TableEntry) {
+    const state = entry.table.getState();
+    return { handNumber: state.handNumber, inHand: state.phase === 'in-hand' };
+  }
+
+  // SRS-7.2: call after anything that can end a hand (an action, a leave, a
+  // turn timing out, the start timer). A hand that has ended has every
+  // seat's stack saved, read now, before the next action can change it, and
+  // written in turn with the table's other writes.
+  function saveChanges(entry: TableEntry, before: { handNumber: number; inHand: boolean }) {
+    const state = entry.table.getState();
+    const ended = (before.inHand || state.handNumber !== before.handNumber) && state.phase !== 'in-hand';
+    if (!ended) return;
+    const seats = seatsToSave(state);
+    void queueWrite(entry, () => persistHandFinished(supabase, entry.config.id, seats));
+  }
+
   // Starts or cancels this table's countdown to match who's seated now (see
   // PokerTable.updateCountdown). Called after every successful join/leave,
   // before the resulting state is broadcast.
@@ -408,7 +409,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
         entry.startTimer = null;
         // SRS-13.1/16.1: crypto.randomInt picks the first hand's dealer and
         // shuffles the deck — the same RNG the Daily Login Box uses.
+        const before = snapshot(entry);
         const started = entry.table.startHand((n) => randomInt(n));
+        saveChanges(entry, before);
         void settleRemovals(entry);
         if (started) {
           const { handNumber, dealerSeat, smallBlindSeat, bigBlindSeat } = entry.table.getState();
@@ -451,9 +454,8 @@ function startServer(supabase: SupabaseClient, secret: string) {
       const username = await getPlayerUsername(supabase, playerId);
       if (!username) return { ok: false, error: 'Unable to load your profile.' };
 
-      // SRS-1.3: the server never trusts the client's chosen amount beyond
-      // this table's range — deductBalance() below re-checks it against the
-      // player's real, freshly-read balance regardless.
+      // SRS-1.3: refuse an amount outside this table's range straight away;
+      // the database re-checks it, and the player's balance, as it seats them.
       const minBuyIn = MIN_BUY_IN_MULTIPLIER * table.bigBlind;
       const maxBuyIn = MAX_BUY_IN_MULTIPLIER * table.bigBlind;
       if (!Number.isInteger(buyIn) || (buyIn as number) < minBuyIn || (buyIn as number) > maxBuyIn) {
@@ -467,14 +469,19 @@ function startServer(supabase: SupabaseClient, secret: string) {
         if (seatError) return { ok: false, error: seatError };
       }
 
-      const deduction = await deductBalance(supabase, playerId, buyIn as number);
-      if (!deduction.ok) return { ok: false, error: deduction.error };
+      // SRS-1.2 / SRS-1.3: the database takes the buy-in from the player's
+      // balance and gives them the seat in one transaction, re-checking the
+      // range, their balance, the seat, and that they aren't seated anywhere.
+      const seat = seatNumber ?? table.getState().seats.find((candidate) => !candidate.playerId)?.seatNumber;
+      if (seat === undefined) return { ok: false, error: 'This table is full.' };
+      const joined = await queueWrite(entry, () => persistJoin(supabase, entry.config.id, playerId, seat, buyIn as number));
+      if (!joined.ok) return { ok: false, error: joined.error };
 
       // Seats carry only a username here — avatars are fetched separately
       // by clients (GET /api/players/[playerId]/avatar) rather than carried
       // through this broadcast, since a profile photo as base64 can easily
       // exceed Realtime's broadcast payload size limit.
-      const result = table.join(String(playerId), username, buyIn as number, null, seatNumber);
+      const result = table.join(String(playerId), username, buyIn as number, null, seat);
       if (result.ok) {
         // Watching their connection from now on (SRS-10.1).
         table.heardFrom(String(playerId), Date.now());
@@ -482,9 +489,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
         broadcastTable(entry);
         broadcastLobby();
       } else {
-        // The seat was taken out from under us between the deduction above
-        // and this call (e.g. someone else sat there) — give the money back.
-        await refundBalance(supabase, playerId, buyIn as number);
+        // The table disagrees with the database (it shouldn't): undo the
+        // seat and give the buy-in back.
+        await queueWrite(entry, () => persistLeave(supabase, entry.config.id, playerId, buyIn as number));
       }
       return result;
     } finally {
@@ -511,15 +518,15 @@ function startServer(supabase: SupabaseClient, secret: string) {
       if (rebuyError) return { ok: false, error: rebuyError };
 
       // SRS-12.6: out of range. SRS-12.7 (more than the balance) is checked
-      // by deductBalance() against the freshly-read balance.
+      // by the database, against the balance it has locked.
       const minBuyIn = MIN_BUY_IN_MULTIPLIER * table.bigBlind;
       const maxBuyIn = MAX_BUY_IN_MULTIPLIER * table.bigBlind;
       if (!Number.isInteger(buyIn) || (buyIn as number) < minBuyIn || (buyIn as number) > maxBuyIn) {
         return { ok: false, error: `Buy-in must be between ${minBuyIn} and ${maxBuyIn}.` };
       }
 
-      const deduction = await deductBalance(supabase, playerId, buyIn as number);
-      if (!deduction.ok) return { ok: false, error: deduction.error };
+      const rebought = await queueWrite(entry, () => persistRebuy(supabase, entry.config.id, playerId, buyIn as number));
+      if (!rebought.ok) return { ok: false, error: rebought.error };
 
       const result = table.rebuy(String(playerId), buyIn as number);
       if (result.ok) {
@@ -528,8 +535,9 @@ function startServer(supabase: SupabaseClient, secret: string) {
         broadcastTable(entry);
         broadcastLobby();
       } else {
-        // They left (or were removed) while we awaited — give the money back.
-        await refundBalance(supabase, playerId, buyIn as number);
+        // The table disagrees with the database (it shouldn't, since the busted
+        // timeout is queued behind this): free the seat, paying the buy-back.
+        await queueWrite(entry, () => persistLeave(supabase, entry.config.id, playerId, buyIn as number));
       }
       return result;
     } finally {
@@ -554,8 +562,14 @@ function startServer(supabase: SupabaseClient, secret: string) {
   async function handleLeave(entry: TableEntry, action: RelayedAction): Promise<AckResult> {
     const { playerId } = action;
 
+    // A buy-in or buy-back still being saved would otherwise be lost.
+    if (joinsInFlight.has(playerId)) {
+      return { ok: false, error: 'Your buy-in is still being processed. Try again in a moment.' };
+    }
     // A player still in the hand gets `pending` back and stays seated until
-    // the hand ends (SRS-21.2/21.3); anyone else is removed and refunded now.
+    // the hand ends (SRS-21.2/21.3); anyone else is removed and paid out now —
+    // the stack the table holds, so chips already in a pot stay there.
+    const before = snapshot(entry);
     const result = entry.table.leave(String(playerId));
     if (result.ok) {
       // Leaving can cancel a countdown, or (folding a leaver whose turn it
@@ -567,9 +581,11 @@ function startServer(supabase: SupabaseClient, secret: string) {
       refreshCountdown(entry);
       broadcastTable(entry);
       broadcastLobby();
-      if (result.chipStack) {
-        await refundBalance(supabase, playerId, result.chipStack);
+      if (!result.pending) {
+        const chipStack = result.chipStack ?? 0;
+        await queueWrite(entry, () => persistLeave(supabase, entry.config.id, playerId, chipStack));
       }
+      saveChanges(entry, before);
       await settleRemovals(entry);
     }
     return result;
@@ -606,8 +622,10 @@ function startServer(supabase: SupabaseClient, secret: string) {
 
     if (!move || !BETTING_MOVES.includes(move)) return { ok: false, error: 'Unknown action.' };
 
+    const before = snapshot(entry);
     const result = entry.table.act(String(playerId), move, amount);
     if (result.ok) {
+      saveChanges(entry, before);
       // The hand may have just ended: start the next countdown (if there
       // are still enough players) before the state goes out and before
       // awaiting the refunds — see handleLeave.

@@ -24,6 +24,7 @@ import {
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { CHECK_IN_EVENT, canDraw3d, takeHandedOverCheckIn, type CheckInForm, type HandOver } from '../../lib/checkIn';
 import { formatCountdown } from '../../lib/dailyLoginBox';
+import { DRINK_KEY, EMPTY_METER, addSip, canOrder, meterAt, parseMeter, serializeMeter, sloshAmount, type DrinkMeter } from '../../lib/drinks';
 import { logOut, takeWalkOut } from '../../lib/logOut';
 import { WISH_COIN_KEY, parseCoinSpot, serializeCoinSpot, wishDay } from '../../lib/wishingFountain';
 import { playHref, useSignedIn } from '../useSignedIn';
@@ -71,7 +72,7 @@ const KEYS: Record<string, Exclude<keyof WalkInput, 'slow'>> = {
 
 function FloorMessage({ text }: { text: string }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-[#06030a] text-sm uppercase tracking-[0.3em] text-slate-400">
+    <div className="absolute inset-0 flex items-center justify-center bg-black text-sm uppercase tracking-[0.3em] text-slate-400">
       <span className="animate-pulse">{text}</span>
     </div>
   );
@@ -145,6 +146,24 @@ function forgetEntrance() {
     sessionStorage.setItem(VISITED_KEY, '1');
   } catch {
     // Nothing to forget.
+  }
+}
+
+// The drink meter lives in sessionStorage too, so it carries on (still going
+// down) across a game's page and a reload.
+function readDrinkMeter(): DrinkMeter {
+  try {
+    return parseMeter(sessionStorage.getItem(DRINK_KEY));
+  } catch {
+    return EMPTY_METER;
+  }
+}
+
+function saveDrinkMeter(meter: DrinkMeter) {
+  try {
+    sessionStorage.setItem(DRINK_KEY, serializeMeter(meter));
+  } catch {
+    // Not kept, then: it lasts as long as the page.
   }
 }
 
@@ -363,6 +382,52 @@ export default function CasinoFloor() {
   // (SRS-129.4); today's coin then lies on the fountain's bottom.
   const [nearFountain, setNearFountain] = useState(false);
   const nearFountainRef = useRef(false);
+
+  // Drinks at the bar: sat on a stool, Space (or the button) orders one, the
+  // player sips it, and each sip fills the meter, which goes down slowly
+  // over time (lib/drinks.ts). Maxed out, the view sloshes about until it's
+  // back down, and the bartender won't pour another until then.
+  const [drinkMeter, setDrinkMeter] = useState<DrinkMeter>(EMPTY_METER);
+  const [drinkNow, setDrinkNow] = useState(0);
+  const [barSeated, setBarSeated] = useState(false);
+  const barSeatedRef = useRef(false);
+  const [drinkOrder, setDrinkOrder] = useState(0);
+  const [drinking, setDrinking] = useState(false);
+  const drinkingRef = useRef(false);
+  useEffect(() => {
+    setDrinkMeter(readDrinkMeter());
+    setDrinkNow(Date.now());
+  }, []);
+  // Ticking while there's anything in it, so it goes down (and the sloshing eases off) on screen.
+  const drinkLevel = meterAt(drinkMeter, drinkNow).level;
+  useEffect(() => {
+    if (drinkLevel <= 0) return;
+    const timer = setInterval(() => setDrinkNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [drinkLevel > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  const drinkMeterRef = useRef(drinkMeter);
+  drinkMeterRef.current = drinkMeter;
+  const orderDrink = useRef<() => void>(() => {});
+  orderDrink.current = () => {
+    if (!barSeatedRef.current || drinkingRef.current || !canOrder(drinkMeterRef.current, Date.now())) return;
+    drinkingRef.current = true;
+    setDrinking(true);
+    setDrinkOrder((count) => count + 1);
+  };
+  const sipped = () => {
+    const now = Date.now();
+    const next = addSip(drinkMeterRef.current, now);
+    drinkMeterRef.current = next;
+    saveDrinkMeter(next);
+    setDrinkMeter(next);
+    setDrinkNow(now);
+  };
+  const drunk = () => {
+    drinkingRef.current = false;
+    setDrinking(false);
+  };
+  const cutOff = !canOrder(drinkMeter, drinkNow);
+  const slosh = sloshAmount(drinkMeter, drinkNow);
   const [makingWish, setMakingWish] = useState(false);
   const [wishNote, setWishNote] = useState<{ text: string; final: boolean } | null>(null);
   // When the next wish can be made, by this browser's clock (from the
@@ -506,15 +571,16 @@ export default function CasinoFloor() {
         // (like a game's back button after coming back from it), so
         // Space and Enter then go to the game in reach rather than to it.
         const focused = document.activeElement as HTMLElement | null;
-        if (focused?.closest('a, button')) focused.blur();
+        if (focused?.closest('a, button, summary')) focused.blur();
         input.current[key] = true;
         return;
       }
       if (event.key === ' ' || event.key === 'Enter') {
         // Only take over Space/Enter for the floor, not a focused link or button.
-        if ((event.target as HTMLElement | null)?.closest('a, button')) return;
+        if ((event.target as HTMLElement | null)?.closest('a, button, summary')) return;
         event.preventDefault();
-        if (nearKioskRef.current !== null || nearDoorsRef.current === 'lobby') checkIn.current();
+        if (barSeatedRef.current) orderDrink.current();
+        else if (nearKioskRef.current !== null || nearDoorsRef.current === 'lobby') checkIn.current();
         else if (nearDoorsRef.current === 'floor') leave.current();
         else if (nearFountainRef.current) wish.current();
         else if (nearRef.current) play.current(nearRef.current);
@@ -543,17 +609,16 @@ export default function CasinoFloor() {
 
   return (
     <>
-      <div className={`${display.className} flex min-h-0 flex-1 flex-col gap-3 px-3 py-3 sm:px-6`}>
-        {/* How to play, and (for guests) sign up or log in. The website's name
-            is in the nav bar now (SRS-107.5), so it's only named here for
-            screen readers. */}
-        <header className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300">
+      {/* The floor fills the page edge to edge, like a video game, with the
+          rest laid over it as a HUD. */}
+      <div className={`${display.className} relative flex min-h-0 flex-1 flex-col`}>
+        {/* Top right: (for guests) sign up or log in, and the games menu. The
+            website's name is in the nav bar (SRS-107.5), so it's only named
+            here for screen readers. */}
+        <header className="pointer-events-none absolute right-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-col items-end gap-2 text-sm text-slate-300 sm:right-5 sm:top-5">
           <h1 className="sr-only">Stacks Overflowed Casino</h1>
-          <p className="hidden flex-1 text-center uppercase tracking-[0.15em] text-slate-400 md:block">
-            WASD to move · Shift to walk · drag to look · Space to play
-          </p>
           {guest ? (
-            <div className="flex gap-2 uppercase tracking-wider">
+            <div className="pointer-events-auto flex gap-2 uppercase tracking-wider shadow-lg">
               {/* With the 3D lobby, to the front desk (SRS-103.16); without it, the plain pages. */}
               <Link
                 href="/register"
@@ -579,10 +644,40 @@ export default function CasinoFloor() {
               </Link>
             </div>
           ) : null}
+          {/* The same games as a plain list, for anyone who'd rather not walk
+              (SRS-107.1); open from the start without the 3D floor. */}
+          <details open={webgl === false} className="group pointer-events-auto flex flex-col items-end">
+            <summary className="ml-auto w-fit cursor-pointer list-none rounded bg-black/70 px-4 py-2 uppercase tracking-wider text-slate-100 shadow-lg backdrop-blur-sm transition hover:text-amber-200 [&::-webkit-details-marker]:hidden">
+              Games <span className="inline-block transition group-open:rotate-180">▾</span>
+            </summary>
+            <nav aria-label="Games" className="mt-2 flex w-56 flex-col gap-1 rounded-md bg-black/75 p-2 text-xs uppercase tracking-wider text-slate-400 shadow-lg backdrop-blur-sm">
+              {INTERACTIVE_OBJECTS.filter((object) => !object.interactive?.lounge).map((object) =>
+                object.interactive?.href ? (
+                  <Link
+                    key={object.id}
+                    href={playHref(member, object.interactive.href)}
+                    onClick={(event) => {
+                      // A guest checks in to play, with the 3D lobby (SRS-108.8).
+                      if (!guest || !webgl || !object.interactive?.href) return;
+                      event.preventDefault();
+                      checkIn.current('signup', object.interactive.href);
+                    }}
+                    className="rounded px-3 py-1.5 text-slate-200 transition hover:bg-white/10 hover:text-amber-200"
+                  >
+                    {object.interactive.name}
+                  </Link>
+                ) : (
+                  <span key={object.id} className="px-3 py-1.5 text-slate-600">
+                    {object.interactive?.name} (soon)
+                  </span>
+                )
+              )}
+            </nav>
+          </details>
         </header>
 
-        {/* The floor fills the rest of the window (on a phone, a fixed height). */}
-        <div className="relative h-[70vh] min-h-[320px] overflow-hidden rounded-xl border border-white/10 bg-[#06030a] shadow-[0_20px_60px_rgba(0,0,0,0.6)] lg:h-auto lg:min-h-0 lg:flex-1">
+        {/* The floor itself, filling the window below the nav bar. */}
+        <div className="relative min-h-0 flex-1 overflow-hidden bg-black">
           {webgl === null || returning === undefined ? (
             <FloorMessage text="Opening the casino…" />
           ) : webgl ? (
@@ -641,11 +736,21 @@ export default function CasinoFloor() {
                 tossAtOnce={prefersReducedMotion()}
                 onTossed={tossed}
                 restingCoin={restingCoin}
+                onBarSeated={(seated) => {
+                  barSeatedRef.current = seated;
+                  setBarSeated(seated);
+                }}
+                drinkOrder={drinkOrder}
+                drinkAtOnce={prefersReducedMotion()}
+                onSip={sipped}
+                onDrinkDone={drunk}
+                slosh={slosh}
+                sloshGentle={prefersReducedMotion()}
                 paused={opening || tabletOpen}
               />
             </div>
           ) : (
-            <FloorMessage text="This browser can't show the 3D floor — pick a game below." />
+            <FloorMessage text="This browser can't show the 3D floor — pick a game from the Games menu." />
           )}
 
           {nearKiosk !== null && guest && !checkingIn && !playing ? (
@@ -759,8 +864,30 @@ export default function CasinoFloor() {
           ) : null}
 
           {lounging ? (
-            // On a bar stool: how to get up (and a button for touch screens).
-            <div className="absolute inset-x-0 bottom-5 flex justify-center">
+            // On a bar stool: order a drink, and how to get up (buttons for touch screens too).
+            <div className="absolute inset-x-0 bottom-5 flex flex-wrap items-center justify-center gap-2 px-3">
+              {barSeated ? (
+                cutOff ? (
+                  <span className="rounded-full bg-black/70 px-4 py-2 text-sm uppercase tracking-[0.2em] text-rose-200 backdrop-blur-sm">
+                    The bartender&apos;s cut you off for now
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => orderDrink.current()}
+                    disabled={drinking}
+                    className="rounded-full bg-amber-400/90 px-4 py-2 text-sm font-bold uppercase tracking-[0.2em] text-slate-950 backdrop-blur-sm transition hover:bg-amber-300 disabled:bg-black/70 disabled:font-normal disabled:text-amber-200"
+                  >
+                    {drinking ? (
+                      'Drinking…'
+                    ) : (
+                      <>
+                        <Key>Space</Key> Order a drink
+                      </>
+                    )}
+                  </button>
+                )
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
@@ -787,33 +914,18 @@ export default function CasinoFloor() {
               </span>
             </div>
           ) : null}
-        </div>
 
-        {/* The same games as a plain list, for anyone who'd rather not walk. */}
-        <nav aria-label="Games" className="flex flex-wrap items-center justify-center gap-2 text-xs uppercase tracking-wider text-slate-400">
-          <span>Or go straight to:</span>
-          {INTERACTIVE_OBJECTS.filter((object) => !object.interactive?.lounge).map((object) =>
-            object.interactive?.href ? (
-              <Link
-                key={object.id}
-                href={playHref(member, object.interactive.href)}
-                onClick={(event) => {
-                  // A guest checks in to play, with the 3D lobby (SRS-108.8).
-                  if (!guest || !webgl || !object.interactive?.href) return;
-                  event.preventDefault();
-                  checkIn.current('signup', object.interactive.href);
-                }}
-                className="rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-slate-200 transition hover:border-amber-300 hover:text-amber-200"
-              >
-                {object.interactive.name}
-              </Link>
-            ) : (
-              <span key={object.id} className="rounded border border-slate-800 px-3 py-1.5 text-slate-600">
-                {object.interactive?.name} (soon)
-              </span>
-            )
-          )}
-        </nav>
+          {drinkLevel > 0.001 ? (
+            <DrinkGauge level={drinkLevel} maxed={meterAt(drinkMeter, drinkNow).maxed} />
+          ) : null}
+
+          {webgl ? (
+            // Bottom left: the controls, small, as a game shows them.
+            <p className="pointer-events-none absolute bottom-3 left-3 hidden text-xs uppercase tracking-[0.15em] text-white/50 [text-shadow:0_1px_2px_rgba(0,0,0,0.9)] md:block sm:bottom-5 sm:left-5">
+              WASD to move · Shift to walk · drag to look · Space to play
+            </p>
+          ) : null}
+        </div>
       </div>
 
       {/* Outside the floor's part of the page, so the tablet's screens are in
@@ -830,6 +942,38 @@ export default function CasinoFloor() {
         />
       ) : null}
     </>
+  );
+}
+
+/** The drink meter, bottom right: fills as the player drinks, goes down slowly over time. */
+function DrinkGauge({ level, maxed }: { level: number; maxed: boolean }) {
+  const percent = Math.round(level * 100);
+  return (
+    <div
+      role="meter"
+      aria-label="Drinks"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+      aria-valuetext={maxed ? `${percent}%, maxed out` : `${percent}%`}
+      className="pointer-events-none absolute bottom-16 right-3 w-44 rounded-md bg-black/70 px-3 py-2 text-white shadow-lg backdrop-blur-sm sm:bottom-5 sm:right-5"
+    >
+      <div className="mb-1.5 flex items-center justify-between text-xs uppercase tracking-[0.2em]">
+        <span className="flex items-center gap-1.5">
+          <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5 fill-amber-300">
+            <path d="M3 2h10l-1.2 10.2A2 2 0 0 1 9.8 14H6.2a2 2 0 0 1-2-1.8L3 2Zm1.6 4 .7 6c0 .3.3.5.6.5h4.2c.3 0 .5-.2.6-.5l.7-6H4.6Z" />
+          </svg>
+          Drinks
+        </span>
+        <span className={maxed ? 'font-bold text-rose-300' : 'text-amber-200'}>{maxed ? 'Maxed out' : `${percent}%`}</span>
+      </div>
+      <div className="h-2.5 overflow-hidden rounded-full bg-white/15">
+        <div
+          className={`h-full rounded-full transition-[width] duration-700 ease-out ${maxed ? 'animate-pulse bg-gradient-to-r from-amber-400 via-orange-500 to-rose-500' : 'bg-gradient-to-r from-amber-300 to-amber-500'}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
   );
 }
 

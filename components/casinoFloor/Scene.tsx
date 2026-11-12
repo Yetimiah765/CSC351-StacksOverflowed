@@ -66,6 +66,9 @@ import {
 import Person, { type Motion, type SeatPose, type TossPose } from './Person';
 import { compileInBackground } from './compile';
 import CoinToss, { noCoin, type CoinFx } from './CoinToss';
+import Slosh from './Slosh';
+import BarGlass, { GLASS_HEIGHT, GLASS_RADIUS, noGlass, type GlassFx } from './BarGlass';
+import { SIPS_PER_DRINK, STUMBLE_SPEED, noStumble, stepStumble } from '../../lib/drinks';
 import { BASIN_FLOOR, BASIN_WATER } from './Fountain';
 import CasinoFront, { CASINO_DOOR_HALF, CASINO_DOOR_HEIGHT, FRONT_WALL_Z } from './CasinoFront';
 import Lobby, { LOBBY_HALF_WIDTH, LOBBY_HEIGHT, LOBBY_NORTH_Z, LOBBY_SOUTH_Z, type LobbyState } from './Lobby';
@@ -170,6 +173,16 @@ interface Props {
   onSpot?: (spot: StoodSpot) => void;
   /** Stop drawing (while a game's page loads), so the page isn't held up. */
   paused?: boolean;
+  /** Sat on a bar stool (true), or got up from it (false). */
+  onBarSeated?: (seated: boolean) => void;
+  /** Counts the drinks ordered at the bar: each new count is a new drink, which the player sips (all at once with `drinkAtOnce`), calling `onSip` for each sip and `onDrinkDone` when it's finished (or they got up). */
+  drinkOrder?: number;
+  drinkAtOnce?: boolean;
+  onSip?: () => void;
+  onDrinkDone?: () => void;
+  /** How sloshed the view is (maxed out on drinks), 0 to 1; with `sloshGentle` (reduced motion) it holds still. */
+  slosh?: number;
+  sloshGentle?: boolean;
 }
 
 // ---------- the player and the camera ----------
@@ -208,6 +221,41 @@ interface Seating {
   zoomTo: { position: THREE.Vector3; look: THREE.Vector3 };
   /** At the bar: how far back the camera was before sitting, to put back on getting up. */
   cameraDistance?: number;
+}
+
+/** A drink at the bar: seconds in, and how many sips are taken. */
+interface DrinkPlan {
+  s: number;
+  sips: number;
+  atOnce: boolean;
+}
+/** The bartender pouring it (the glass fills on the counter), then each sip: reach for the glass, lift it, drink, put it down, let go. */
+const POUR_SECONDS = 0.9;
+const SIP = { reach: 0.45, lift: 1.0, drink: 1.8, lower: 2.3, end: 2.6 };
+/** Where the glass stands on the counter, in the seated player's own space (metres; +x their left, +z ahead). */
+const GLASS_ON_COUNTER = new THREE.Vector3(-0.2, 0, 0.5);
+/** The mouth, from the head's joint (at the top of the neck): this far up towards the top of the head, and this far ahead of it. */
+const MOUTH_UP = 0.28;
+const MOUTH_AHEAD = 0.1;
+
+/** How far the glass tips back to drink, radians, as it reaches the lips and at its deepest; and how far the head tips back then. */
+const SIP_TILT = 0.4;
+const SIP_TILT_DEEP = 1.15;
+const HEAD_BACK = 0.12;
+const HEAD_BACK_DEEP = 0.45;
+/** Which way the right elbow points while drinking, in the player's own space: down at their side, a little out. */
+const DRINK_ELBOW = new THREE.Vector3(-0.45, -0.88, 0.1);
+
+/** The glass's base, from the mouth, so that its near rim rests on the lips when it's tipped back by `tilt` (in the player's own space, where the glass tips about its own x axis). */
+function baseFromMouth(mouth: THREE.Vector3, tilt: number) {
+  const rimY = GLASS_HEIGHT * Math.cos(tilt) - GLASS_RADIUS * Math.sin(tilt);
+  const rimZ = -GLASS_HEIGHT * Math.sin(tilt) - GLASS_RADIUS * Math.cos(tilt);
+  return new THREE.Vector3(mouth.x, mouth.y - rimY, mouth.z - rimZ);
+}
+
+/** The middle of the glass, from its base, tipped back by `tilt`. */
+function glassMiddle(base: THREE.Vector3, tilt: number) {
+  return new THREE.Vector3(base.x, base.y + (GLASS_HEIGHT / 2) * Math.cos(tilt), base.z - (GLASS_HEIGHT / 2) * Math.sin(tilt));
 }
 
 /** Which side of the casino's doors the player is in reach of them from, if either. */
@@ -650,6 +698,12 @@ function Player({
   coinFx,
   onTossed,
   member,
+  drink,
+  glassFx,
+  onBarSeated,
+  onSip,
+  onDrinkDone,
+  drunk,
 }: {
   /** Where the player starts, in tiles (the middle of the start tile, if not given), and the way they face (into the room). */
   start?: Point;
@@ -685,11 +739,148 @@ function Player({
   onTossed?: (spot: { x: number; z: number }) => void;
   /** Logged in: the casino's doors open for them from the lobby (SRS-103.17). */
   member: boolean;
+  /** A drink at the bar: 'asked' (or 'asked at once') until Player starts it; and the glass it moves. */
+  drink: MutableRefObject<DrinkPlan | 'asked' | 'asked at once' | null>;
+  glassFx: MutableRefObject<GlassFx>;
+  onBarSeated?: (seated: boolean) => void;
+  onSip?: () => void;
+  onDrinkDone?: () => void;
+  /** How sloshed they are (maxed out on drinks), 0 to 1: they stumble now and then as they walk, and sway. */
+  drunk: MutableRefObject<number>;
 }) {
   const body = useRef<THREE.Group>(null);
   const motion = useRef<Motion>({ speed: 0 });
   const seat = useRef<SeatPose>({ amount: 0, handsY: 0.85, handsZ: 0.4 });
-  const tossPose = useRef<TossPose>({ amount: 0, hand: new THREE.Vector3(), at: new THREE.Vector3() });
+  const tossPose = useRef<TossPose>({ amount: 0, hand: new THREE.Vector3(), at: new THREE.Vector3(), head: new THREE.Vector3(), headTop: new THREE.Vector3(), lookUp: 0, gripAt: new THREE.Vector3() });
+
+  /**
+   * A drink at the bar, sat on the stool: the glass fills on the counter,
+   * then each sip the right arm reaches for it, lifts it to the mouth and
+   * tips it back (the drink going down, the meter going up as `onSip`),
+   * then puts it back. The arm is the coin toss's (`tossPose`).
+   */
+  function stepDrink(plan: DrinkPlan, delta: number) {
+    const holder = body.current;
+    const fx = glassFx.current;
+    if (!holder) return;
+    holder.updateMatrixWorld(true);
+    const counterY = seat.current.handsY;
+    const onCounter = holder.localToWorld(GLASS_ON_COUNTER.clone().setY(counterY));
+    fx.shown = true;
+    fx.heading = heading.current;
+    fx.tilt = 0;
+    if (plan.atOnce) {
+      for (; plan.sips < SIPS_PER_DRINK; plan.sips++) onSip?.();
+      fx.position.copy(onCounter);
+      fx.fill = 0;
+      tossPose.current.amount = 0;
+      tossPose.current.lookUp = 0;
+      tossPose.current.elbow = undefined;
+      tossPose.current.grip = null;
+      tossPose.current.afterPose = undefined;
+      drink.current = null;
+      onDrinkDone?.();
+      return;
+    }
+    plan.s += delta;
+    if (plan.s < POUR_SECONDS) {
+      fx.position.copy(onCounter);
+      fx.fill = smooth(plan.s / POUR_SECONDS);
+      tossPose.current.amount = 0;
+      return;
+    }
+    const into = plan.s - POUR_SECONDS;
+    const sip = Math.min(SIPS_PER_DRINK - 1, Math.floor(into / SIP.end));
+    const u = into - sip * SIP.end;
+    // Sips taken, as the meter has them: one as each comes down from its deepest.
+    while (plan.sips < Math.min(SIPS_PER_DRINK, sip + (u >= SIP.drink ? 1 : 0))) {
+      plan.sips++;
+      onSip?.();
+    }
+    // The drink: down a sip's worth while it's tipped back.
+    const drunk = sip + Math.min(1, Math.max(0, (u - SIP.lift) / (SIP.drink - SIP.lift)));
+    fx.fill = 1 - drunk / SIPS_PER_DRINK;
+    // The mouth, in their own space, from where Person put the head last frame.
+    const pose = tossPose.current;
+    let mouth = new THREE.Vector3(0, 1.4, 0.12);
+    if (pose.head && pose.headTop && pose.head.lengthSq() > 0 && pose.headTop.lengthSq() > 0) {
+      const neck = holder.worldToLocal(pose.head.clone());
+      const top = holder.worldToLocal(pose.headTop.clone());
+      mouth = neck.lerp(top, MOUTH_UP).add(new THREE.Vector3(0, 0, MOUTH_AHEAD));
+    }
+    // How far the glass is lifted (0 on the counter, 1 at the lips), tipped, and the arm's blend.
+    let lift = 0;
+    let arm = 1;
+    let tilt = 0;
+    let headBack = 0;
+    if (u < SIP.reach) arm = smooth(u / SIP.reach);
+    else if (u < SIP.lift) {
+      lift = smooth((u - SIP.reach) / (SIP.lift - SIP.reach));
+      tilt = lift * SIP_TILT;
+      headBack = lift * HEAD_BACK;
+    } else if (u < SIP.drink) {
+      lift = 1;
+      const deep = Math.sin(Math.PI * Math.min(1, ((u - SIP.lift) / (SIP.drink - SIP.lift)) * 1.1));
+      tilt = SIP_TILT + (SIP_TILT_DEEP - SIP_TILT) * deep;
+      headBack = HEAD_BACK + (HEAD_BACK_DEEP - HEAD_BACK) * deep;
+    } else if (u < SIP.lower) {
+      lift = 1 - smooth((u - SIP.drink) / (SIP.lower - SIP.drink));
+      tilt = lift * SIP_TILT;
+      headBack = lift * HEAD_BACK;
+    } else arm = 1 - smooth((u - SIP.lower) / (SIP.end - SIP.lower));
+    // Where the glass should be: from the counter up to the lips, its near
+    // rim on them once it's there, tipped back.
+    const counterBase = GLASS_ON_COUNTER.clone().setY(counterY);
+    const wanted = counterBase.clone().lerp(baseFromMouth(mouth, tilt), lift);
+    // The hand goes round it there (Person does the grip), and turns with it.
+    pose.amount = arm;
+    pose.grip = {
+      middle: glassMiddle(wanted, tilt),
+      up: new THREE.Vector3(0, Math.cos(tilt), -Math.sin(tilt)),
+      forward: new THREE.Vector3(0, Math.sin(tilt), Math.cos(tilt)),
+      radius: GLASS_RADIUS,
+    };
+    pose.lookUp = headBack;
+    pose.elbow = DRINK_ELBOW;
+    // The glass itself: on the counter until it's picked up, then in the
+    // hand, wherever the hand really got to last frame (so they never part).
+    // (Placed once Person has posed the hand this frame, so it doesn't lag a frame behind.)
+    const held = lift > 0 ? smooth(Math.min(1, lift / 0.15)) : 0;
+    fx.position.copy(holder.localToWorld(wanted.clone()));
+    pose.afterPose = () => {
+      if (held <= 0 || !pose.gripAt || pose.gripAt.lengthSq() === 0) return;
+      const inHand = holder.worldToLocal(pose.gripAt.clone()).sub(glassMiddle(new THREE.Vector3(), tilt));
+      fx.position.copy(holder.localToWorld(wanted.clone().lerp(inHand, held)));
+      fx.redraw?.();
+    };
+    fx.tilt = tilt;
+    if (into >= SIPS_PER_DRINK * SIP.end) {
+      // Finished: the empty glass stays on the counter.
+      tossPose.current.amount = 0;
+      tossPose.current.lookUp = 0;
+      tossPose.current.elbow = undefined;
+      tossPose.current.grip = null;
+      tossPose.current.afterPose = undefined;
+      fx.position.copy(onCounter);
+      fx.tilt = 0;
+      fx.fill = 0;
+      drink.current = null;
+      onDrinkDone?.();
+    }
+  }
+  /** Getting up from the stool: the drink's left (what's been sipped counts) and the glass is cleared away. */
+  function stopDrink() {
+    if (drink.current) {
+      drink.current = null;
+      onDrinkDone?.();
+    }
+    tossPose.current.amount = 0;
+    tossPose.current.lookUp = 0;
+    tossPose.current.elbow = undefined;
+    tossPose.current.grip = null;
+    tossPose.current.afterPose = undefined;
+    glassFx.current.shown = false;
+  }
   // Position in tiles (the middle of the start tile), and the way they face.
   const position = useRef<Point>(start ?? { x: START.x + 0.5, y: START.y + 0.5 });
   // The camera's put straight into place the first time it follows, rather
@@ -719,9 +910,14 @@ function Player({
   const justIn = useRef(false);
   const { camera: view } = useThree();
 
+  // Stumbling now and then, maxed out on drinks, and swaying a little.
+  const stumble = useRef(noStumble());
+  const swayTime = useRef(0);
   useFrame((_, rawDelta) => {
     // Capped, so a slow computer still walks at about the right speed.
     const delta = Math.min(rawDelta, 0.25);
+    // Upright, unless walking about drunk (below) leans them.
+    if (body.current) body.current.rotation.z = 0;
     const turnTowards = (target: number, rate: number) => {
       let turn = target - heading.current;
       turn = Math.atan2(Math.sin(turn), Math.cos(turn));
@@ -1076,6 +1272,7 @@ function Player({
             // closer (the slot machines are just behind the stools), so the
             // TVs over the bar fill the view. Getting up puts the distance back.
             plan.stage = 'seated';
+            onBarSeated?.(true);
             plan.cameraDistance = camera.current.distance;
             camera.current.yaw = plan.facing + Math.PI;
             camera.current.pitch = 0.2;
@@ -1088,10 +1285,22 @@ function Player({
         here.copy(plan.seatAt);
         heading.current = plan.facing;
         const keys = input.current;
+        let order = drink.current;
+        if (order === 'asked' || order === 'asked at once') {
+          order = { s: 0, sips: 0, atOnce: order === 'asked at once' };
+          drink.current = order;
+        }
+        if (body.current) {
+          body.current.position.set(here.x, 0, here.y);
+          body.current.rotation.y = heading.current;
+        }
+        if (order) stepDrink(order, delta);
         if (keys.forward || keys.back || keys.left || keys.right || keys.getUp) {
           // Getting up: the same as after a game, minus the camera pulling
           // back (it's already behind them).
           keys.getUp = false;
+          stopDrink();
+          onBarSeated?.(false);
           if (plan.cameraDistance !== undefined) camera.current.distance = plan.cameraDistance;
           plan.stage = 'stand';
           plan.t = 0;
@@ -1150,6 +1359,19 @@ function Player({
       move = { x: dx * scale * TILE_M, y: dy * scale * TILE_M };
     }
 
+    // Drunk: now and then a lurch to one side as they walk, slowing them,
+    // without turning them from the way they meant to go.
+    const meant = Math.hypot(move.x, move.y) > 1e-6 ? Math.atan2(move.x, move.y) : null;
+    const reel = stepStumble(stumble.current, delta, meant !== null, drunk.current);
+    stumble.current = reel.state;
+    if (reel.push !== 0) {
+      const across = heading.current;
+      move = {
+        x: move.x * reel.keep + Math.cos(across) * reel.push * STUMBLE_SPEED * delta,
+        y: move.y * reel.keep - Math.sin(across) * reel.push * STUMBLE_SPEED * delta,
+      };
+    }
+
     const before = position.current;
     const after = moveWithCollisions(before, { x: move.x / TILE_M, y: move.y / TILE_M }, undefined, member && casinoDoors.current >= CASINO_DOORS_PASSABLE);
     position.current = after;
@@ -1169,16 +1391,19 @@ function Player({
 
     if (moved > 1e-4) {
       // Turn to face the way they walk, smoothly.
-      turnTowards(Math.atan2(after.x - before.x, after.y - before.y), 12);
+      turnTowards(meant ?? Math.atan2(after.x - before.x, after.y - before.y), 12);
     } else if (path.current.length > 0 && !(forward || sideways) && !doorsOpening) {
       // Stuck on something (not just the casino's doors, still opening): give up on the walk.
       path.current = [];
     }
 
     const [wx, wz] = toWorld(after.x, after.y);
+    swayTime.current += delta;
     if (body.current) {
       body.current.position.set(wx, 0, wz);
       body.current.rotation.y = heading.current;
+      // Leaning into a stumble, and swaying gently while drunk.
+      body.current.rotation.z = reel.lean + drunk.current * 0.04 * Math.sin(swayTime.current * 1.5);
     }
 
     // The game in reach, and its chair (or screen) nearest the player.
@@ -1664,7 +1889,16 @@ function Floor({
   tossAtOnce,
   onTossed,
   restingCoin = null,
+  onBarSeated,
+  drinkOrder = 0,
+  drinkAtOnce,
+  onSip,
+  onDrinkDone,
+  slosh = 0,
+  sloshGentle = false,
 }: Props) {
+  const sloshAmount = useRef(slosh);
+  sloshAmount.current = slosh;
   const path = useRef<Point[]>([]);
   // The chair (or screen) nearest the player at the game in reach, outlined.
   const [nearSpot, setNearSpot] = useState<number | null>(null);
@@ -1745,6 +1979,16 @@ function Floor({
     if (tossing && !coinToss.current) coinToss.current = tossAtOnce ? 'asked at once' : 'asked';
   }, [tossing, tossAtOnce]);
   const coinFx = useRef<CoinFx>(noCoin());
+  // A drink at the bar, each time the page counts another ordered: Player
+  // plays it, moving the glass BarGlass draws.
+  const drink = useRef<DrinkPlan | 'asked' | 'asked at once' | null>(null);
+  const glassFx = useRef<GlassFx>(noGlass());
+  const drinkAtOnceRef = useRef(drinkAtOnce);
+  drinkAtOnceRef.current = drinkAtOnce;
+  useEffect(() => {
+    // Only a new order starts one.
+    if (drinkOrder > 0) drink.current = drinkAtOnceRef.current ? 'asked at once' : 'asked';
+  }, [drinkOrder]);
   useEffect(() => {
     if (coinToss.current) return;
     coinFx.current = restingCoin
@@ -1894,6 +2138,7 @@ function Floor({
         onFountainClick={handleFountainClick}
       />
       <CoinToss fx={coinFx} />
+      <BarGlass fx={glassFx} />
       <group onClick={handleFloorClick}>
         {/* What a click lands on: the floor, the foyer out to the front wall, and the lobby beyond (SRS-107.6). */}
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, (LOBBY_SOUTH_Z - (ROWS / 2) * TILE_M) / 2]} visible={false}>
@@ -1915,6 +2160,7 @@ function Floor({
           );
         })}
         <EffectComposer multisampling={4} enableNormalPass={false}>
+          <Slosh amount={sloshAmount} gentle={sloshGentle} />
           <Bloom mipmapBlur intensity={0.85} luminanceThreshold={0.82} luminanceSmoothing={0.25} />
           <Vignette offset={0.25} darkness={0.6} />
         </EffectComposer>
@@ -1956,6 +2202,12 @@ function Floor({
         coinFx={coinFx}
         onTossed={onTossed}
         member={!guest}
+        drink={drink}
+        glassFx={glassFx}
+        onBarSeated={onBarSeated}
+        onSip={onSip}
+        onDrinkDone={onDrinkDone}
+        drunk={sloshAmount}
       />
 
       {near?.interactive && !playing && !walkIn.current && !leaving ? (

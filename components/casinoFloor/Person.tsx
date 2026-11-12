@@ -89,7 +89,36 @@ export interface TossPose {
   hand: THREE.Vector3;
   /** Where the right hand's fingers are, world space: written every frame, for the coin to sit in. */
   at: THREE.Vector3;
+  /** Which way the right elbow points, in the body's own space; left out, out to the side and back, for the throw. */
+  elbow?: THREE.Vector3;
+  /**
+   * Holding a glass (the bar's drinks), instead of reaching the wrist to
+   * `hand`: the glass's middle, which way is up it and which way ahead of it
+   * (the body's own space; tipped back to drink, both turn with it), and its
+   * radius. The hand goes round its right side, palm on it, thumb up, fingers
+   * curled round the front, and turns with it.
+   */
+  grip?: { middle: THREE.Vector3; up: THREE.Vector3; forward: THREE.Vector3; radius: number } | null;
+  /** Where the held glass's middle is, given where the hand really got to, world space: written every frame while gripping, for the glass to be drawn in the hand. */
+  gripAt?: THREE.Vector3;
+  /** Called every frame once the arm is posed and `at`/`gripAt` written, so whatever's in the hand can be put there in the same frame rather than a frame behind. */
+  afterPose?: () => void;
+  /** Drinking at the bar: how far to tip the head back, radians (0 or left out for none). */
+  lookUp?: number;
+  /** Where the head's joint (at the top of the neck) and the top of the head are, world space: written every frame when given, for a glass to be lifted to the mouth. */
+  head?: THREE.Vector3;
+  headTop?: THREE.Vector3;
 }
+
+/** The right elbow's way for the coin toss: out to the side, down and back. */
+const THROW_ELBOW = new THREE.Vector3(-0.7, -0.35, -0.45);
+/** Holding a glass: how far the palm's middle is from the wrist along the hand, and how thick the hand is (from its bones to the palm). */
+const PALM_FROM_WRIST = 0.05;
+const PALM_DEPTH = 0.014;
+/** How far each finger's joints bend round a glass (knuckle, middle, tip), radians; and the thumb's. */
+const FINGER_CURL = [0.55, 0.75, 0.5];
+const THUMB_CURL = [0.15, 0.35, 0.3];
+const FINGERS = ['Index', 'Middle', 'Ring', 'Pinky'] as const;
 
 export interface SeatPose {
   /** 0 standing (the clips), 1 sitting; in between blends the two. */
@@ -371,20 +400,78 @@ function Body({ who, motion, idleOffset = 0, pose = 'idle', hands = { y: 0.9, z:
     const fore = bones.get('RightForeArm');
     const hand = bones.get('RightHand');
     if (tossing && upper && fore && hand) {
+      // Drinking: the head (and a little of the neck) tips back.
+      if (tossing.lookUp && tossing.lookUp > 0.001) {
+        const across = new THREE.Vector3(1, 0, 0).applyQuaternion(body.getWorldQuaternion(new THREE.Quaternion()));
+        const neck = bones.get('Neck');
+        const head = bones.get('Head');
+        if (neck) turnAbout(neck, across, -tossing.lookUp * 0.35);
+        if (head) turnAbout(head, across, -tossing.lookUp * 0.65);
+      }
+      const middle = bones.get('RightHandMiddle1');
+      const index = bones.get('RightHandIndex1');
+      const pinky = bones.get('RightHandPinky1');
+      // Every bone of the arm and hand this moves, to blend in by `amount`.
+      const fingers = [
+        ...FINGERS.flatMap((name) => [1, 2, 3].map((joint) => bones.get(`RightHand${name}${joint}`))),
+        ...[1, 2, 3].map((joint) => bones.get(`RightHandThumb${joint}`)),
+      ].filter((bone): bone is THREE.Object3D => Boolean(bone));
+      const moved = [upper, fore, hand, ...fingers];
       if (tossing.amount > 0.001) {
-        const before = [upper, fore, hand].map((bone) => bone.quaternion.clone());
+        const before = moved.map((bone) => bone.quaternion.clone());
         body.updateMatrixWorld(true);
         const facing = body.getWorldQuaternion(new THREE.Quaternion());
-        const target = tossing.hand.clone().divideScalar(SCALE[who]).applyMatrix4(body.matrixWorld);
-        reach(upper, fore, hand, target, new THREE.Vector3(-0.7, -0.35, -0.45).applyQuaternion(facing).normalize());
+        const point = (v: THREE.Vector3) => v.clone().divideScalar(SCALE[who]).applyMatrix4(body.matrixWorld);
+        const pole = (tossing.elbow ?? THROW_ELBOW).clone().applyQuaternion(facing).normalize();
+        const grip = tossing.grip;
+        // Once the arm's blended in: where the glass sits in the hand it got.
+        let gripped: (() => void) | null = null;
+        if (grip && middle) {
+          // Round the glass: the palm on its right side (their right), the
+          // hand pointing ahead across it, thumb up; the wrist re-aimed by
+          // however far the palm missed, then the fingers curled round it.
+          const centre = point(grip.middle);
+          const up = grip.up.clone().applyQuaternion(facing).normalize();
+          const ahead = grip.forward.clone().applyQuaternion(facing).normalize();
+          const inward = new THREE.Vector3().crossVectors(up, ahead).normalize(); // their left: from the palm to the glass
+          const palmWanted = centre.clone().addScaledVector(inward, -(grip.radius + PALM_DEPTH));
+          const wrist = palmWanted.clone().addScaledVector(ahead, -PALM_FROM_WRIST);
+          const palmNow = () => {
+            const at = hand.getWorldPosition(new THREE.Vector3());
+            const along = middle.getWorldPosition(new THREE.Vector3()).sub(at).normalize();
+            return at.addScaledVector(along, PALM_FROM_WRIST).addScaledVector(inward, PALM_DEPTH * 0.3);
+          };
+          for (let pass = 0; pass < 3; pass++) {
+            reach(upper, fore, hand, wrist, pole);
+            palmDown(fore, hand, middle, index, pinky, ahead, inward.clone().negate(), -1);
+            if (pass < 2) wrist.add(palmWanted.clone().sub(palmNow()));
+          }
+          for (const name of FINGERS) {
+            [1, 2, 3].forEach((joint, i) => {
+              const bone = bones.get(`RightHand${name}${joint}`);
+              if (bone) turnAbout(bone, up, FINGER_CURL[i]!);
+            });
+          }
+          [1, 2, 3].forEach((joint, i) => {
+            const bone = bones.get(`RightHandThumb${joint}`);
+            if (bone) turnAbout(bone, up, THUMB_CURL[i]!);
+          });
+          gripped = () => tossing.gripAt?.copy(palmNow()).addScaledVector(inward, grip.radius + PALM_DEPTH * 0.7);
+        } else {
+          reach(upper, fore, hand, point(tossing.hand), pole);
+        }
         const k = Math.min(1, tossing.amount);
-        [upper, fore, hand].forEach((bone, i) => {
-          const thrown = bone.quaternion.clone();
-          bone.quaternion.copy(before[i]!).slerp(thrown, k);
+        moved.forEach((bone, i) => {
+          const posed = bone.quaternion.clone();
+          bone.quaternion.copy(before[i]!).slerp(posed, k);
         });
         upper.updateMatrixWorld(true);
+        gripped?.();
       }
       (bones.get('RightHandMiddle1') ?? hand).getWorldPosition(tossing.at);
+      if (tossing.head) bones.get('Head')?.getWorldPosition(tossing.head);
+      if (tossing.headTop) bones.get('HeadTop_End')?.getWorldPosition(tossing.headTop);
+      tossing.afterPose?.();
     }
   });
 

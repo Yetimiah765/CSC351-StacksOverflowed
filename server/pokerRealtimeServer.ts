@@ -65,6 +65,7 @@ import {
   persistJoin,
   persistLeave,
   persistRebuy,
+  recordRemovalNotice,
   saveHandOnTime,
   seatsToSave,
 } from '../lib/pokerPersistence';
@@ -115,6 +116,12 @@ interface TableEntry {
   /** This table's database writes, run one at a time in the order they happened (UR-007). */
   writes: Promise<unknown>;
   /**
+   * Players whose seat was last seen marked disconnected (as of the latest
+   * broadcast), so a removal can tell whether they were there to be told
+   * why (SRS-9.11) or need telling when they're back (SRS-9.12).
+   */
+  lastSeenDisconnected: Set<string>;
+  /**
    * This table's actions, handled one at a time in the order they arrive:
    * several await the database, and two interleaving at those awaits (a
    * buy-back and a move, say) could each act on a table the other had
@@ -144,6 +151,7 @@ async function startServer(supabase: SupabaseClient, secret: string) {
     silenceTimer: null,
     disconnectTimer: null,
     writes: Promise.resolve(),
+    lastSeenDisconnected: new Set<string>(),
     queue: Promise.resolve(),
   }));
 
@@ -238,6 +246,12 @@ async function startServer(supabase: SupabaseClient, secret: string) {
     scheduleSilenceCheck(entry);
     scheduleDisconnectRemoval(entry);
     const state = entry.table.getState();
+    // Who's connected, as of now: kept for players removed later (SRS-9.12).
+    for (const seat of state.seats) {
+      if (!seat.playerId) continue;
+      if (seat.disconnected) entry.lastSeenDisconnected.add(seat.playerId);
+      else entry.lastSeenDisconnected.delete(seat.playerId);
+    }
     // SRS-6.1: every player's hole cards ride along sealed for them alone.
     const holeCards: Record<string, string> = {};
     for (const { playerId, cards } of entry.table.getHoleCards()) {
@@ -412,10 +426,15 @@ async function startServer(supabase: SupabaseClient, secret: string) {
   }
 
   // SRS-9.11: tells a removed player why, on the table's channel; their page
-  // shows it if it's open (it says so straight away, SRS-NFR-020).
+  // shows it if it's open (it says so straight away, SRS-NFR-020). SRS-9.12:
+  // it's also recorded, delivered already if they were connected, otherwise
+  // waiting to be shown when they next open the site.
   function sendNotice(entry: TableEntry, playerId: string, reason: RemovalNoticeReason) {
     const payload: PokerNoticePayload = { playerId, reason };
     entry.channel.send({ type: 'broadcast', event: POKER_EVENT_NOTICE, payload });
+    const wasConnected = !entry.lastSeenDisconnected.has(playerId);
+    entry.lastSeenDisconnected.delete(playerId);
+    void recordRemovalNotice(supabase, entry.config.id, Number(playerId), reason, wasConnected);
   }
 
   // Runs one database write for this table after the ones before it, so

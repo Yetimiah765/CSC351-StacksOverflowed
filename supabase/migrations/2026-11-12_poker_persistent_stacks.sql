@@ -58,6 +58,27 @@ ON CONFLICT (table_key) DO UPDATE
         small_blind = EXCLUDED.small_blind,
         big_blind   = EXCLUDED.big_blind;
 
+-- Removal notices (SRS-9.11, SRS-9.12): in schema.sql already; created here
+-- for a database built before it.
+CREATE TABLE IF NOT EXISTS poker_removal_notices (
+    notice_id       SERIAL       PRIMARY KEY,
+    player_id       INTEGER      NOT NULL
+                    REFERENCES players(player_id) ON DELETE CASCADE,
+    table_id        INTEGER
+                    REFERENCES poker_tables(table_id) ON DELETE SET NULL,
+    removal_reason  VARCHAR(30)  NOT NULL
+                    CHECK (removal_reason IN ('Disconnection timeout',
+                                              'Consecutive turn timeouts',
+                                              'No busted-player response')),
+    removed_at      TIMESTAMPTZ  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    delivered_at    TIMESTAMPTZ,
+    CONSTRAINT chk_poker_removal_notices_delivery
+        CHECK (delivered_at IS NULL OR delivered_at >= removed_at)
+);
+CREATE INDEX IF NOT EXISTS ix_poker_removal_notices_undelivered
+    ON poker_removal_notices (player_id)
+    WHERE delivered_at IS NULL;
+
 -- -----------------------------------------------------------------------------
 -- 2. Buy-ins are 50x - 200x the big blind (SRS-NFR-021)
 -- -----------------------------------------------------------------------------

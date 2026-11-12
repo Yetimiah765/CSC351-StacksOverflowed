@@ -11,6 +11,7 @@
     "start": "next start",
     "test": "vitest run",
     "realtime": "tsx server/pokerRealtimeServer.ts",
+    "test:shuffle": "tsx scripts/shuffleUniformity.ts",
     "sync:sports": "tsx scripts/syncSports.ts"
   },
   "dependencies": {

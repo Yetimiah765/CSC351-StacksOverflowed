@@ -1558,6 +1558,8 @@ export class PokerTable {
     seat.lastHeardAt = now;
     if (!seat.disconnected) return 'heard';
     seat.disconnected = false;
+    // SRS-9.3: back, so their disconnection timer goes back to zero.
+    seat.disconnectedAt = null;
     return 'reconnected';
   }
 

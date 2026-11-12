@@ -49,6 +49,7 @@ describe('PokerTable', () => {
       postingMissedBlinds: false,
       waitingForButton: false,
       timeouts: 0,
+      removalPending: null,
     });
   });
 
@@ -158,6 +159,7 @@ describe('PokerTable', () => {
       postingMissedBlinds: false,
       waitingForButton: false,
       timeouts: 0,
+      removalPending: null,
     });
   });
 

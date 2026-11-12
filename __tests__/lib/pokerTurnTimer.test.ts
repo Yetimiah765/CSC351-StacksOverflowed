@@ -276,3 +276,42 @@ describe('resetting the timeout counter (SRS-9.6)', () => {
     expect(table.getState().seats[2].timeouts).toBe(1);
   });
 });
+
+describe('putting off removing a player in the hand (SRS-9.13)', () => {
+  it('keeps a player who is still in the hand until it ends', () => {
+    const table = handUnderWay();
+    expect(table.removePlayer(p(1), 'timeouts')).toBe(true);
+    let state = table.getState();
+    expect(state.seats[0]).toMatchObject({ playerId: p(1), inHand: true, removalPending: 'timeouts' });
+    expect(table.drainRemovals()).toEqual([]);
+    // They keep playing it.
+    expect(table.act(p(1), 'call')).toEqual({ ok: true });
+    table.act(p(2), 'fold');
+    table.act(p(3), 'fold');
+    state = table.getState();
+    expect(state.phase).not.toBe('in-hand');
+    expect(state.seats[0].playerId).toBeNull();
+    expect(table.drainRemovals()).toEqual([{ playerId: p(1), chipStack: 1015, reason: 'timeouts' }]);
+  });
+
+  it('removes a player who has folded straight away, their bets staying in the pot', () => {
+    const table = handUnderWay();
+    table.act(p(1), 'call');
+    table.act(p(2), 'fold');
+    // Seat 2 put in the small blind (5) before folding.
+    expect(table.removePlayer(p(2), 'timeouts')).toBe(true);
+    expect(table.getState().seats[1].playerId).toBeNull();
+    expect(table.drainRemovals()).toEqual([{ playerId: p(2), chipStack: 995, reason: 'timeouts' }]);
+    table.act(p(3), 'check');
+    // The flop pot still has seat 2's small blind in it.
+    expect(table.getState().pot).toBe(25);
+  });
+
+  it('removes a player straight away between hands', () => {
+    const table = tableWith([1, 2, 3]);
+    expect(table.removePlayer(p(2), 'disconnected')).toBe(true);
+    expect(table.getState().seats[1].playerId).toBeNull();
+    expect(table.drainRemovals()).toEqual([{ playerId: p(2), chipStack: 1000, reason: 'disconnected' }]);
+    expect(table.removePlayer(p(2), 'disconnected')).toBe(false);
+  });
+});

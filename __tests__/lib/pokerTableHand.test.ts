@@ -797,7 +797,7 @@ describe('PokerTable leaving during a hand', () => {
 
     expect(table.getState().phase).toBe('waiting');
     expect(seat(table, 2).playerId).toBeNull();
-    expect(table.drainRemovals()).toEqual([{ playerId: p(2), chipStack: 995 }]);
+    expect(table.drainRemovals()).toEqual([{ playerId: p(2), chipStack: 995, reason: 'left' }]);
     expect(table.drainRemovals()).toEqual([]);
   });
 

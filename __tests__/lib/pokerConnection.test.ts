@@ -285,3 +285,39 @@ describe('checking for a disconnected player (SRS-2.2)', () => {
     expect(table.getState().lastHandResult?.reason).toBe('showdown');
   });
 });
+
+describe('folding for a disconnected player (SRS-2.3)', () => {
+  it('folds at once when the turn reaches them facing a bet', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0); // button 1, SB 2, BB 3; seat 1 first, facing the big blind
+    table.markDisconnected(p(2), 0);
+    table.act(p(1), 'raise', 40);
+    // Seat 2 faces the raise: folded, and the turn goes to seat 3.
+    const state = table.getState();
+    expect(state.seats[1]).toMatchObject({ inHand: false, folded: true });
+    expect(state.lastAction).toMatchObject({ seatNumber: 2, move: 'fold', automatic: true });
+    expect(state.activeSeat).toBe(3);
+  });
+
+  it('can end the hand, if that leaves one player', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0);
+    table.markDisconnected(p(2), 0);
+    table.markDisconnected(p(3), 0);
+    table.act(p(1), 'raise', 40);
+    const state = table.getState();
+    expect(state.phase).not.toBe('in-hand');
+    expect(state.lastHandResult?.awards).toEqual([expect.objectContaining({ seatNumber: 1 })]);
+  });
+
+  it("isn't counted as a timeout either (SRS-9.5)", () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0);
+    table.markDisconnected(p(2), 0);
+    table.act(p(1), 'raise', 40);
+    expect(seat(table, 2).timeouts).toBe(0);
+  });
+});

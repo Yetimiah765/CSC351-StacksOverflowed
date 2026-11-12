@@ -10,6 +10,7 @@ import {
   MAX_BUY_IN_MULTIPLIER,
   MIN_BUY_IN_MULTIPLIER,
   MIN_PLAYERS_TO_START,
+  TURN_TIME_LIMIT_MS,
   getBettingOptions,
   isBustedSeat,
   type BettingMove,
@@ -181,6 +182,9 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
   // When this player, busted, will be removed unless they buy back in or
   // leave (SRS-12.10) — rebuilt from their seat's bustedMsRemaining the same way.
   const [bustedEndsAt, setBustedEndsAt] = useState<number | null>(null);
+  // When the player holding the turn runs out of time (SRS-4.1, SRS-NFR-018),
+  // rebuilt from turnMsRemaining the same way.
+  const [turnEndsAt, setTurnEndsAt] = useState<number | null>(null);
   // Removed for not choosing in time; says why until they sit down again (SRS-9.11).
   const [removedForTimeout, setRemovedForTimeout] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -206,6 +210,7 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     (state) => {
       setTableState(state);
       setCountdownEndsAt(state.countdownMsRemaining === null ? null : Date.now() + state.countdownMsRemaining);
+      setTurnEndsAt(state.turnMsRemaining === null ? null : Date.now() + state.turnMsRemaining);
     },
     (emote) => {
       setSeatEmotes((shown) => ({ ...shown, [emote.seatNumber]: emote }));
@@ -318,14 +323,17 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
 
   // Tick while a countdown is running so the seconds left re-render.
   useEffect(() => {
-    if (countdownEndsAt === null && bustedEndsAt === null) return;
+    if (countdownEndsAt === null && bustedEndsAt === null && turnEndsAt === null) return;
     setNow(Date.now());
     const interval = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(interval);
-  }, [countdownEndsAt, bustedEndsAt]);
+  }, [countdownEndsAt, bustedEndsAt, turnEndsAt]);
 
   const countdownSeconds =
     countdownEndsAt === null ? null : Math.max(0, Math.ceil((countdownEndsAt - now) / 1000));
+  // SRS-4.1: the time the player holding the turn has left, for everyone to see.
+  const turnSeconds = turnEndsAt === null ? null : Math.max(0, Math.ceil((turnEndsAt - now) / 1000));
+  const turnLeft = turnEndsAt === null ? null : Math.max(0, Math.min(1, (turnEndsAt - now) / TURN_TIME_LIMIT_MS));
 
   // Avatars aren't carried through the table:state broadcast (a profile
   // photo as base64 can exceed Realtime's broadcast payload size limit), so
@@ -1311,10 +1319,31 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                         {shown.handName}
                       </p>
                     ) : isActive ? (
-                      // SRS-3.2: active turn indicator.
-                      <p key="to-act" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-amber-300">
-                        To act
-                      </p>
+                      // SRS-3.2: active turn indicator; SRS-4.1: the time
+                      // they have left, as seconds and a draining bar.
+                      <div key="to-act" className="poker-pop-in">
+                        <p
+                          className={`text-[10px] font-bold uppercase tracking-wider ${
+                            turnSeconds !== null && turnSeconds <= 5 ? 'text-red-300' : 'text-amber-300'
+                          }`}
+                        >
+                          To act{turnSeconds !== null ? ` · ${turnSeconds}s` : ''}
+                        </p>
+                        {turnLeft !== null ? (
+                          <div
+                            role="timer"
+                            aria-label={`${seat.username ?? 'This player'} has ${turnSeconds} seconds left to act`}
+                            className="mx-auto mt-0.5 h-1 w-14 overflow-hidden rounded-full bg-white/15"
+                          >
+                            <div
+                              className={`h-full rounded-full transition-[width] duration-200 ease-linear ${
+                                turnSeconds !== null && turnSeconds <= 5 ? 'bg-red-400' : 'bg-amber-300'
+                              }`}
+                              style={{ width: `${turnLeft * 100}%` }}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
                     ) : seat.allIn ? (
                       <p key="all-in" className="poker-pop-in text-[10px] font-bold uppercase tracking-wider text-red-300">
                         All-in
@@ -1646,7 +1675,13 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
                     <div>
                       {isMyTurn && bettingOptions && tableState ? (
                         <div className="rounded-2xl border border-amber-300/40 bg-amber-300/[0.06] p-3 shadow-[0_0_28px_rgba(252,211,77,0.12)]">
-                          <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-amber-200">Your turn</p>
+                          <p className="mb-2 flex items-baseline justify-between text-xs font-bold uppercase tracking-[0.2em] text-amber-200">
+                            <span>Your turn</span>
+                            {turnSeconds !== null ? (
+                              // SRS-4.1: the player's own time left.
+                              <span className={turnSeconds <= 5 ? 'text-red-300' : 'text-amber-100'}>{turnSeconds}s left</span>
+                            ) : null}
+                          </p>
                           <BettingControls
                             // Fresh controls (and amount) for every turn and every change in the bet to match.
                             key={`${tableState.handNumber}-${tableState.street}-${tableState.currentBet}-${mySeat.bet}`}

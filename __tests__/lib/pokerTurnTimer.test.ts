@@ -403,3 +403,84 @@ describe('a player whose removal is put off stays in the running (SRS-9.14)', ()
     expect(table.drainRemovals()).toEqual([{ playerId: p(1), chipStack: 1000, reason: 'timeouts' }]);
   });
 });
+
+describe('removal after too many timeouts in a row (SRS-9.7)', () => {
+  /**
+   * Plays hands at seats 1-3, timing out seat 1 whenever it's their turn and
+   * having everyone else call or check, until `hands` hands have been dealt.
+   */
+  function playHands(table: PokerTable, hands: number) {
+    for (let hand = 0; hand < hands; hand++) {
+      table.updateCountdown(0);
+      if (!table.startHand(pick(0))) return;
+      while (table.getState().phase === 'in-hand') {
+        const state = table.getState();
+        const active = state.activeSeat as number;
+        if (active === 1) timeOut(table);
+        else table.act(p(active), state.currentBet > state.seats[active - 1].bet ? 'call' : 'check');
+      }
+    }
+  }
+
+  it('keeps the player seated below the threshold', () => {
+    const table = tableWith([1, 2, 3]);
+    playHands(table, CONSECUTIVE_TIMEOUT_LIMIT - 1);
+    expect(table.getState().seats[0]).toMatchObject({ playerId: p(1), timeouts: CONSECUTIVE_TIMEOUT_LIMIT - 1 });
+    expect(table.drainRemovals()).toEqual([]);
+  });
+
+  it('removes the player when the counter reaches the threshold', () => {
+    const table = tableWith([1, 2, 3]);
+    playHands(table, CONSECUTIVE_TIMEOUT_LIMIT);
+    expect(table.getState().seats[0].playerId).toBeNull();
+    expect(table.drainRemovals()).toEqual([expect.objectContaining({ playerId: p(1), reason: 'timeouts' })]);
+  });
+
+  it('waits for the hand to end if the player is still in it (SRS-9.13)', () => {
+    const table = tableWith([1, 2, 3]);
+    // Hand 1: everyone acts for themselves.
+    table.updateCountdown(0);
+    table.startHand(pick(0));
+    while (table.getState().phase === 'in-hand') {
+      const state = table.getState();
+      const active = state.activeSeat as number;
+      table.act(p(active), state.currentBet > state.seats[active - 1].bet ? 'call' : 'check');
+    }
+    // Hands 2-4: seat 1 times out.
+    playHands(table, CONSECUTIVE_TIMEOUT_LIMIT - 1);
+    expect(table.getState().seats[0].timeouts).toBe(CONSECUTIVE_TIMEOUT_LIMIT - 1);
+    // Hand 5: seat 1 is the big blind; the others call, and seat 1's time
+    // runs out with nothing to call, so they're checked and still in the hand.
+    table.updateCountdown(0);
+    table.startHand(pick(0));
+    expect(table.getState().bigBlindSeat).toBe(1);
+    while (table.getState().activeSeat !== 1) table.act(p(table.getState().activeSeat as number), 'call');
+    expect(timeOut(table)).toBeGreaterThan(0);
+    expect(table.getState().seats[0]).toMatchObject({ playerId: p(1), inHand: true, removalPending: 'timeouts' });
+    expect(table.drainRemovals()).toEqual([]);
+    // The hand plays out; then they're removed.
+    while (table.getState().phase === 'in-hand') {
+      const state = table.getState();
+      const active = state.activeSeat as number;
+      if (active === 1) timeOut(table);
+      else table.act(p(active), state.currentBet > state.seats[active - 1].bet ? 'call' : 'check');
+    }
+    expect(table.getState().seats[0].playerId).toBeNull();
+    expect(table.drainRemovals()).toEqual([expect.objectContaining({ playerId: p(1), reason: 'timeouts' })]);
+  });
+
+  it('a voluntary action in between starts the count again (SRS-9.6)', () => {
+    const table = tableWith([1, 2, 3]);
+    playHands(table, CONSECUTIVE_TIMEOUT_LIMIT - 1);
+    // One hand where seat 1 acts for themselves.
+    table.updateCountdown(0);
+    table.startHand(pick(0));
+    while (table.getState().phase === 'in-hand') {
+      const state = table.getState();
+      const active = state.activeSeat as number;
+      table.act(p(active), state.currentBet > state.seats[active - 1].bet ? 'call' : 'check');
+    }
+    playHands(table, CONSECUTIVE_TIMEOUT_LIMIT - 1);
+    expect(table.getState().seats[0].playerId).toBe(p(1));
+  });
+});

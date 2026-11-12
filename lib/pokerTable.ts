@@ -1539,8 +1539,14 @@ export class PokerTable {
     }
     if (move === 'fold') this.fold(seat, true);
     else this.recordAction(seat, 'check', true);
+    const playerId = seat.playerId as string;
     this.advance();
-    return { playerId: seat.playerId as string, move };
+    // SRS-9.7: too many hands in a row: removed (once the hand's over, if
+    // they're still in it, SRS-9.13); their stack comes out of drainRemovals().
+    if (seat.timeouts >= CONSECUTIVE_TIMEOUT_LIMIT && seat.playerId === playerId) {
+      this.removePlayer(playerId, 'timeouts');
+    }
+    return { playerId, move };
   }
 
   /** When the player holding the turn runs out of time, or null if no turn is being timed. */

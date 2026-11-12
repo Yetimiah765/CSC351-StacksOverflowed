@@ -321,3 +321,35 @@ describe('folding for a disconnected player (SRS-2.3)', () => {
     expect(seat(table, 2).timeouts).toBe(0);
   });
 });
+
+describe('playing again after reconnecting (SRS-2.4)', () => {
+  it('sits out the rest of a hand they missed the start of, then is dealt in', () => {
+    const table = tableWith([1, 2, 3, 4]);
+    heardFromAll(table, [1, 2, 3, 4], 0);
+    table.markDisconnected(p(4), 0);
+    table.startHand(() => 0); // seats 1-3 only
+    table.heardFrom(p(4), 1_000); // back mid-hand
+    expect(seat(table, 4).inHand).toBe(false);
+    while (table.getState().phase === 'in-hand') {
+      const { activeSeat } = table.getState();
+      table.act(p(activeSeat as number), 'fold');
+    }
+    table.updateCountdown(2_000);
+    table.startHand(() => 0);
+    // Eligible again: dealt in, or (having been passed by a blind while
+    // away) waiting to post or for the big blind like anyone else (SRS-11).
+    const four = seat(table, 4);
+    expect(four.inHand || four.missedBigBlind || four.missedSmallBlind).toBe(true);
+  });
+
+  it('can complete the players a hand needs (SRS-20.3)', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(3), 0);
+    expect(table.updateCountdown(0)).toBeNull();
+    table.heardFrom(p(3), 5_000);
+    expect(table.updateCountdown(5_000)).toBe('started');
+    expect(table.startHand(() => 0)).toBe(true);
+    expect(seat(table, 3).inHand).toBe(true);
+  });
+});

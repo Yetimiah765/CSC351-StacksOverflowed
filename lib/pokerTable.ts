@@ -1557,8 +1557,9 @@ export class PokerTable {
    * Something signed came from this player at `now` — any action their page
    * sent, heartbeats included (the server only passes on what POST
    * /api/poker/action signed for them). A disconnected player is marked
-   * reconnected (SRS-10.3). Returns 'reconnected' then, 'heard' otherwise,
-   * or null if they aren't seated here.
+   * reconnected (SRS-10.3), and so is eligible again from the next hand start
+   * (SRS-2.4) — not dealt into one already under way. Returns 'reconnected'
+   * then, 'heard' otherwise, or null if they aren't seated here.
    */
   heardFrom(playerId: string, now: number): 'heard' | 'reconnected' | null {
     const seat = this.findSeatByPlayerId(playerId);

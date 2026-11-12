@@ -11,8 +11,10 @@ import {
   POKER_EVENT_ACTION,
   POKER_EVENT_ACK,
   POKER_EVENT_EMOTE,
+  POKER_EVENT_NOTICE,
   POKER_EVENT_STATE,
   type PokerEmotePayload,
+  type PokerNoticePayload,
   type PokerAckPayload,
   type PokerActionRequest,
   type PokerSyncPayload,
@@ -91,7 +93,9 @@ export function usePokerChannel<State>(
   enabled: boolean,
   onState: (state: State) => void,
   // A table's emotes (POKER_EVENT_EMOTE); the lobby has none.
-  onEmote?: (emote: PokerEmotePayload) => void
+  onEmote?: (emote: PokerEmotePayload) => void,
+  // A table's removal notices (POKER_EVENT_NOTICE, SRS-9.11).
+  onNotice?: (notice: PokerNoticePayload) => void
 ) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState('');
@@ -100,6 +104,8 @@ export function usePokerChannel<State>(
   onStateRef.current = onState;
   const onEmoteRef = useRef(onEmote);
   onEmoteRef.current = onEmote;
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
 
   useEffect(() => {
     if (!channelName || !enabled) return;
@@ -122,6 +128,9 @@ export function usePokerChannel<State>(
     nextChannel.on('broadcast', { event: POKER_EVENT_STATE }, ({ payload }) => onStateRef.current(payload as State));
     nextChannel.on('broadcast', { event: POKER_EVENT_EMOTE }, ({ payload }) =>
       onEmoteRef.current?.(payload as PokerEmotePayload)
+    );
+    nextChannel.on('broadcast', { event: POKER_EVENT_NOTICE }, ({ payload }) =>
+      onNoticeRef.current?.(payload as PokerNoticePayload)
     );
     nextChannel.on('broadcast', { event: POKER_EVENT_ACK }, ({ payload }: { payload: PokerAckPayload }) => {
       const mine = pendingRef.current.get(payload.requestId);

@@ -183,3 +183,23 @@ describe('the disconnection timer starts (SRS-9.2)', () => {
     expect(table.nextDisconnectDeadline()).toBe(5_000 + DISCONNECT_REMOVAL_MS);
   });
 });
+
+describe('the disconnection timer resets on reconnection (SRS-9.3)', () => {
+  it('goes back to zero when the player is back', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2), 10_000);
+    table.heardFrom(p(2), 100_000);
+    expect(table.nextDisconnectDeadline()).toBeNull();
+    expect(seat(table, 2).disconnectedMsRemaining).toBeNull();
+  });
+
+  it('starts from zero again the next time they disconnect', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2), 10_000);
+    table.heardFrom(p(2), 100_000);
+    table.markDisconnected(p(2), 110_000);
+    expect(table.nextDisconnectDeadline()).toBe(110_000 + DISCONNECT_REMOVAL_MS);
+  });
+});

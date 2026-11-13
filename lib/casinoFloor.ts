@@ -94,12 +94,18 @@ function gameObject(
 // stools out in the room; opposite it the shop is a cashier's cage set into
 // the right wall (SHOP_ALCOVE). Dealers, the bartender and the shopkeeper
 // stand behind their tables and counters, as part of them (pieceLayout()).
+// Two rows of games, each on its own rug (RUG_MARGIN round it) with clear
+// floor between every two rugs: the tables at the back, poker in the middle
+// under the sign; the slots and the sports bar in front, under blackjack and
+// roulette, leaving a wide aisle up the middle from the door. Every walkway
+// is at least MIN_WALKWAY wide, and the bar's stools and the shop's counter
+// keep a clear column in front of them (tested in casinoFloor.test.ts).
 export const FLOOR_OBJECTS: FloorObject[] = [
-  gameObject('blackjack', 6, 4, 4, 3),
-  gameObject('poker', 14, 4, 6, 3),
-  gameObject('roulette', 21, 4, 5, 3),
+  gameObject('blackjack', 6, 3, 4, 3),
+  gameObject('poker', 13, 3, 6, 3),
+  gameObject('roulette', 22, 3, 5, 3),
   gameObject('slots', 6, 9, 5, 2),
-  gameObject('sports-betting', 21, 9, 5, 2),
+  gameObject('sports-betting', 22, 9, 5, 2),
   {
     id: 'bar',
     kind: 'bar',
@@ -129,14 +135,26 @@ export const FLOOR_OBJECTS: FloorObject[] = [
       href: '/shop',
     },
   },
-  // Plants in the corners, pillars between the rows of games.
+  // Plants in the corners; pillars against the back wall, in the gaps between
+  // the tables, out of every walkway and off the rugs.
   { id: 'plant-1', kind: 'plant', x: LEFT_WALL, y: 2, w: 1, h: 1 },
   { id: 'plant-2', kind: 'plant', x: RIGHT_WALL - 1, y: 2, w: 1, h: 1 },
   { id: 'plant-3', kind: 'plant', x: LEFT_WALL, y: 13, w: 1, h: 1 },
   { id: 'plant-4', kind: 'plant', x: RIGHT_WALL - 1, y: 13, w: 1, h: 1 },
-  { id: 'pillar-1', kind: 'pillar', x: 12, y: 7, w: 1, h: 1 },
-  { id: 'pillar-2', kind: 'pillar', x: 20, y: 7, w: 1, h: 1 },
+  { id: 'pillar-1', kind: 'pillar', x: 11, y: 2, w: 1, h: 1 },
+  { id: 'pillar-2', kind: 'pillar', x: 20, y: 2, w: 1, h: 1 },
 ];
+
+/** How far each game's rug reaches past its rectangle on every side, in tiles: enough to take in the chairs. */
+export const RUG_MARGIN = 0.6;
+/** The narrowest a walkway between two things on the floor may be, in metres (room for a wheelchair). */
+export const MIN_WALKWAY = 1.2;
+
+/** A game's rug, in tiles: its rectangle and RUG_MARGIN all round. The bar and the shop have none. */
+export function rugRect(object: FloorObject): { x: number; y: number; w: number; h: number } | null {
+  if (!object.interactive || object.kind === 'bar' || object.kind === 'shop') return null;
+  return { x: object.x - RUG_MARGIN, y: object.y - RUG_MARGIN, w: object.w + 2 * RUG_MARGIN, h: object.h + 2 * RUG_MARGIN };
+}
 
 /** Where the player appears: just inside the door, facing in. */
 export const START: Point & { direction: Direction } = { x: 16, y: 13, direction: 'up' };

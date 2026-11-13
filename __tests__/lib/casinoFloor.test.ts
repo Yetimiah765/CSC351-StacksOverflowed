@@ -56,6 +56,9 @@ import {
   nearestScreen,
   PLAYER_RADIUS,
   pieceLayout,
+  MIN_WALKWAY,
+  RUG_MARGIN,
+  rugRect,
   standingSpots,
   stepCasinoDoors,
   stepGate,
@@ -139,9 +142,9 @@ describe('moving freely (the 3D floor)', () => {
 
   it('slides along the poker table instead of stopping dead', () => {
     // Walking up and to the right into the front of the table, between two chairs.
-    const moved = moveWithCollisions({ x: 16.9, y: 7.0 }, { x: 0.2, y: -0.6 });
-    expect(moved.x).toBeCloseTo(17.1);
-    expect(moved.y).toBeCloseTo(7.0);
+    const moved = moveWithCollisions({ x: 15.9, y: 6.0 }, { x: 0.2, y: -0.6 });
+    expect(moved.x).toBeCloseTo(16.1);
+    expect(moved.y).toBeCloseTo(6.0);
   });
 
   it("blocks only a table's real shape: the poker table's square corners are open floor", () => {
@@ -884,6 +887,91 @@ describe('walking out after logging out on the profile (SRS-105.6)', () => {
     for (const spot of doorStandingSpots()) {
       const from = { x: spot.x + 0.5, y: spot.y + 0.5 };
       expect(exitWalk(from).length).toBeLessThanOrEqual(4);
+    }
+  });
+});
+
+// ---------- the floor's layout: rugs, spacing and getting everywhere ----------
+
+/** Where a piece's solid shapes reach, chairs and stools included, in tiles. */
+function footprint(object: (typeof FLOOR_OBJECTS)[number]) {
+  const cx = object.x + object.w / 2;
+  const cy = object.y + object.h / 2;
+  let x0 = Infinity;
+  let x1 = -Infinity;
+  let y0 = Infinity;
+  let y1 = -Infinity;
+  for (const shape of pieceLayout(object).solid) {
+    const halfW = shape.type === 'circle' ? shape.r : shape.type === 'ellipse' ? shape.rx : shape.w / 2;
+    const halfD = shape.type === 'circle' ? shape.r : shape.type === 'ellipse' ? shape.rz : shape.d / 2;
+    x0 = Math.min(x0, cx + (shape.x - halfW) / TILE_METRES);
+    x1 = Math.max(x1, cx + (shape.x + halfW) / TILE_METRES);
+    y0 = Math.min(y0, cy + (shape.z - halfD) / TILE_METRES);
+    y1 = Math.max(y1, cy + (shape.z + halfD) / TILE_METRES);
+  }
+  return { x0, x1, y0, y1 };
+}
+
+/** How much clear floor lies between two rectangles (tiles): the larger of the gaps across and down. */
+function clearance(a: { x0: number; x1: number; y0: number; y1: number }, b: typeof a) {
+  return Math.max(b.x0 - a.x1, a.x0 - b.x1, b.y0 - a.y1, a.y0 - b.y1);
+}
+
+const asBox = (rect: { x: number; y: number; w: number; h: number }) => ({
+  x0: rect.x,
+  x1: rect.x + rect.w,
+  y0: rect.y,
+  y1: rect.y + rect.h,
+});
+
+describe('the floor layout', () => {
+  const games = FLOOR_OBJECTS.filter((object) => rugRect(object));
+  const decorations = FLOOR_OBJECTS.filter((object) => object.kind === 'plant' || object.kind === 'pillar');
+  // Everything players walk between: the games, the bar's stools and the shop's counter.
+  const places = FLOOR_OBJECTS.filter((object) => object.interactive);
+
+  it('gives every game a rug, and no two rugs touch', () => {
+    expect(games.map((game) => game.id).sort()).toEqual(['blackjack', 'poker', 'roulette', 'slots', 'sports-betting']);
+    for (const [i, a] of games.entries()) {
+      for (const b of games.slice(i + 1)) {
+        expect(clearance(asBox(rugRect(a)!), asBox(rugRect(b)!)), `${a.id} and ${b.id}`).toBeGreaterThan(0.5);
+      }
+    }
+  });
+
+  it("covers each game's chairs with its rug", () => {
+    for (const game of games) {
+      const rug = asBox(rugRect(game)!);
+      const solid = footprint(game);
+      expect(solid.x0, game.id).toBeGreaterThanOrEqual(rug.x0);
+      expect(solid.x1, game.id).toBeLessThanOrEqual(rug.x1);
+      expect(solid.y1, game.id).toBeLessThanOrEqual(rug.y1);
+    }
+    expect(RUG_MARGIN).toBeGreaterThan(0);
+  });
+
+  it('keeps the plants and pillars off the rugs', () => {
+    for (const decoration of decorations) {
+      for (const game of games) {
+        expect(clearance(footprint(decoration), asBox(rugRect(game)!)), `${decoration.id} on ${game.id}'s rug`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it(`leaves at least ${MIN_WALKWAY} m of clear floor between every two places to go`, () => {
+    for (const [i, a] of places.entries()) {
+      for (const b of places.slice(i + 1)) {
+        const metres = clearance(footprint(a), footprint(b)) * TILE_METRES;
+        expect(metres, `between ${a.id} and ${b.id}`).toBeGreaterThanOrEqual(MIN_WALKWAY);
+      }
+    }
+  });
+
+  it('can walk from the door to every game, the bar and the shop', () => {
+    for (const place of places) {
+      const spots = standingSpots(place);
+      expect(spots.length, place.id).toBeGreaterThan(0);
+      expect(findPath(START, spots, true), place.id).not.toBeNull();
     }
   });
 });

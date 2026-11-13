@@ -36,6 +36,7 @@ import {
   isInLobby,
   moveWithCollisions,
   nearbyObjectAt,
+  rugRect,
   nearestChair,
   nearestScreen,
   objectAt,
@@ -1797,8 +1798,10 @@ function Sconce({ position, rotation }: { position: [number, number, number]; ro
 
 /** A patterned carpet under a game, a little bigger than it. */
 function Rug({ object }: { object: FloorObject }) {
-  const w = (object.w + 1.4) * TILE_M;
-  const d = (object.h + 1.4) * TILE_M;
+  // The size the layout gives it (rugRect()), so rugs never overlap.
+  const rect = rugRect(object) as { w: number; h: number };
+  const w = rect.w * TILE_M;
+  const d = rect.h * TILE_M;
   const map = useMemo(() => carpetTexture([w / 1.6, d / 1.6]), [w, d]);
   const [x, z] = toWorld(object.x + object.w / 2, object.y + object.h / 2);
   return (

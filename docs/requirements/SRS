@@ -2210,7 +2210,7 @@ Traces to: UR-216
 
 Traces to: UR-216
 
-**SRS-216.3, Calculate net winnings.** The system shall calculate a player's net winnings for a week as the total payouts minus the total amounts wagered for that player's sports wagers and public bets decided during that week. Cancelled and refunded bets shall count as zero.
+**SRS-216.3, Calculate net winnings.** The system shall calculate a player's net winnings for a week as the total payouts minus the total amounts wagered for that player's decided sports wagers and public bets on sports events that started during that week, however long after the event the bet is settled. Cancelled and refunded bets shall count as zero.
 
 Traces to: UR-216
 
@@ -2218,7 +2218,7 @@ Traces to: UR-216
 
 Traces to: UR-216
 
-**SRS-216.5, Display biggest single win.** The system shall display the players with the largest payouts from a single sports wager or public bet decided during the week.
+**SRS-216.5, Display biggest single win.** The system shall display the players with the largest payouts from a single decided sports wager or public bet on a sports event that started during the week.
 
 Traces to: UR-216
 

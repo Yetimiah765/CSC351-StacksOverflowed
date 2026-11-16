@@ -5,9 +5,12 @@ import {
   biggestWins,
   buildLeaderboard,
   leaderboardWeek,
+  loadDecidedBets,
+  playedInWeek,
   rankEarners,
   type DecidedBet,
 } from '../../lib/sports/leaderboard';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const bet = (playerId: number, stake: number, payout: number, extra: Partial<DecidedBet> = {}): DecidedBet => ({
   playerId,
@@ -120,5 +123,88 @@ describe('buildLeaderboard', () => {
 
   it('gives a player with no decided bets no rank and zero winnings', () => {
     expect(buildLeaderboard([bet(2, 100, 200)], names, week, 1).me).toEqual({ rank: null, net: 0, bets: 0 });
+  });
+});
+
+// Bug #1004: bets were put in the week the sync settled them, so a Sunday game
+// (scored the next morning) landed in the following week.
+describe('a bet counts in the week its game was played (SRS-216.2, SRS-216.3)', () => {
+  const nov2to8 = leaderboardWeek(new Date('2026-11-05T17:00:00Z'));
+  const nov9to15 = leaderboardWeek(new Date('2026-11-10T17:00:00Z'));
+  // The Packers Showdown from the bug report: played Sun Nov 8, 4:25 PM ET,
+  // settled Mon Nov 9, 10:10 AM ET.
+  const SUNDAY_GAME = '2026-11-08T21:25:34Z';
+  const MONDAY_SETTLE = '2026-11-09T15:10:20Z';
+
+  it('puts a game in the week it started, in Eastern time', () => {
+    expect(playedInWeek(SUNDAY_GAME, nov2to8)).toBe(true);
+    expect(playedInWeek(SUNDAY_GAME, nov9to15)).toBe(false);
+    // Sun 11:59 PM ET is still that week; Mon 12:00 AM ET is the next.
+    expect(playedInWeek('2026-11-09T04:59:00Z', nov2to8)).toBe(true);
+    expect(playedInWeek('2026-11-09T05:00:00Z', nov2to8)).toBe(false);
+    expect(playedInWeek(null, nov2to8)).toBe(false);
+  });
+
+  // A stand-in for supabase-js: each table answers with its rows, whatever
+  // the filters, and records the settled_at range it was asked for.
+  function fakeSupabase(tables: Record<string, unknown[]>) {
+    const ranges: Record<string, { from?: string; to?: string }> = {};
+    const client = {
+      from(table: string) {
+        ranges[table] = {};
+        const query = {
+          select: () => query,
+          in: () => query,
+          eq: () => query,
+          gte: (_column: string, value: string) => ((ranges[table].from = value), query),
+          lt: (_column: string, value: string) => ((ranges[table].to = value), query),
+          then: (resolve: (r: unknown) => unknown) => resolve({ data: tables[table] ?? [], error: null }),
+        };
+        return query;
+      },
+    };
+    return { client: client as unknown as SupabaseClient, ranges };
+  }
+
+  const event = (start_time: string) => ({
+    start_time,
+    home_team_id: 1,
+    away_team_id: 2,
+    home: { team_name: 'New England Patriots' },
+    away: { team_name: 'Green Bay Packers' },
+  });
+  const tables = {
+    wagers: [
+      { player_id: 2, amount: 10000, payout: 0, settled_at: MONDAY_SETTLE, option: { option_label: 'Seattle Seahawks', market: { event: event(SUNDAY_GAME) } } },
+      { player_id: 3, amount: 100, payout: 200, settled_at: '2026-11-11T12:00:00Z', option: { option_label: 'Bulls', market: { event: event('2026-11-10T23:00:00Z') } } },
+    ],
+    public_bets: [
+      { settled_at: MONDAY_SETTLE, event: event(SUNDAY_GAME), entries: [{ player_id: 22, team_id: 2, amount: 100000, payout: 505000 }] },
+    ],
+  };
+
+  it("counts Sunday's games on that week's board, even though they were settled on Monday", async () => {
+    const { client } = fakeSupabase(tables);
+    const bets = await loadDecidedBets(client, nov2to8);
+    expect(bets.map((b) => [b.kind, b.playerId, b.payout])).toEqual([
+      ['wager', 2, 0],
+      ['showdown', 22, 505000],
+    ]);
+  });
+
+  it("leaves last Sunday's games off the next week's board", async () => {
+    const { client } = fakeSupabase(tables);
+    const bets = await loadDecidedBets(client, nov9to15);
+    expect(bets.map((b) => b.playerId)).toEqual([3]);
+  });
+
+  it('looks for settled bets from the week start until well after it ends', async () => {
+    const { client, ranges } = fakeSupabase(tables);
+    await loadDecidedBets(client, nov2to8);
+    expect(ranges.wagers.from).toBe(nov2to8.start.toISOString());
+    // A game with no result is refunded 3 days after it starts, so Sunday's
+    // games can be settled as late as Wednesday; the range reaches past that.
+    expect(Date.parse(ranges.wagers.to!)).toBeGreaterThan(nov2to8.end.getTime() + 3 * 24 * 60 * 60 * 1000);
+    expect(ranges.public_bets).toEqual(ranges.wagers);
   });
 });

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashSessionToken } from '../../lib/auth';
 import { MIN_WAGER, canWinCoins, checkWagerAmount } from '../../lib/sports/wagers';
-import { splitBets, toMyBet, type WagerRow } from '../../lib/sports/myBets';
+import { MY_BETS_LIMIT, splitBets, toMyBet, type WagerRow } from '../../lib/sports/myBets';
 
 // Same builder shape as __tests__/api/dailyLoginBox.test.ts: chain methods
 // return the builder and `.maybeSingle()` resolves to the configured result.
@@ -20,14 +20,37 @@ const sessions = {
   lastHash: '',
 };
 
-// The wagers query used by GET; `.limit()` ends the chain.
+// The wagers queries used by GET: the player's open bets
+// (`.is('result', null)`) and their settled history (`.not('result', 'is',
+// null)`, ended by `.limit()`). Each answers from `wagers.result`, filtered
+// the same way the database would, in the order the rows are listed.
 const wagers = {
-  select: vi.fn(() => wagers),
-  eq: vi.fn(() => wagers),
-  order: vi.fn(() => wagers),
-  limit: vi.fn(() => Promise.resolve(wagers.result)),
+  eq: vi.fn(),
+  limit: vi.fn(),
   result: { data: [] as unknown, error: null as { message: string } | null },
 };
+
+function wagerQuery() {
+  let want: 'open' | 'settled' | 'all' = 'all';
+  let cap = Infinity;
+  const query = {
+    select: () => query,
+    eq: (...args: unknown[]) => (wagers.eq(...args), query),
+    is: () => ((want = 'open'), query),
+    not: () => ((want = 'settled'), query),
+    order: () => query,
+    limit: (n: number) => (wagers.limit(n), (cap = n), query),
+    then: (resolve: (r: unknown) => unknown, reject?: (e: unknown) => unknown) => {
+      const { data, error } = wagers.result;
+      if (error || !Array.isArray(data)) return Promise.resolve({ data, error }).then(resolve, reject);
+      const rows = (data as { result: string | null }[])
+        .filter((row) => want === 'all' || (want === 'open') === (row.result === null))
+        .slice(0, cap);
+      return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+    },
+  };
+  return query;
+}
 
 // The player's Showdown entries (none in these tests).
 const showdownEntries = {
@@ -42,7 +65,7 @@ const rpc = vi.fn();
 
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(() => ({
-    from: vi.fn((table: string) => (table === 'wagers' ? wagers : table === 'public_bet_entries' ? showdownEntries : sessions)),
+    from: vi.fn((table: string) => (table === 'wagers' ? wagerQuery() : table === 'public_bet_entries' ? showdownEntries : sessions)),
     rpc,
   })),
 }));
@@ -315,6 +338,7 @@ describe('GET /api/sports/wagers', () => {
   beforeEach(() => {
     wagers.result = { data: [wagerRow()], error: null };
     wagers.eq.mockClear();
+    wagers.limit.mockClear();
   });
 
   it('requires a logged-in player', async () => {
@@ -330,6 +354,30 @@ describe('GET /api/sports/wagers', () => {
     expect(body.open).toHaveLength(1);
     expect(body.settled).toEqual([]);
     expect(body.showdowns).toEqual({ open: [], settled: [], unseen: [] });
+  });
+
+  // Bug #1061: only the 100 most recently placed bets were loaded, so an older
+  // bet that was still open dropped out of the open list.
+  it('lists every open bet, however many bets the player has placed (SRS-207.1)', async () => {
+    const settled = Array.from({ length: 100 }, (_, i) =>
+      wagerRow({
+        wager_id: 200 + i,
+        placed_at: '2026-10-20T18:00:00Z',
+        result: i % 2 ? 'Won' : 'Lost',
+        payout: i % 2 ? 185 : 0,
+        settled_at: '2026-10-21T06:00:00Z',
+      }),
+    );
+    // Placed first, on a game weeks away, and still open: the 101st newest bet.
+    const longShot = wagerRow({ wager_id: 31, placed_at: '2026-10-01T18:00:00Z' });
+    wagers.result = { data: [...settled, longShot], error: null };
+
+    const body = await (await getBets()).json();
+
+    expect(body.open.map((bet: { id: number }) => bet.id)).toEqual([31]);
+    expect(body.settled).toHaveLength(100);
+    // The history is still capped, so the page stays quick.
+    expect(wagers.limit).toHaveBeenCalledWith(MY_BETS_LIMIT);
   });
 
   it('returns 500 when the query fails', async () => {

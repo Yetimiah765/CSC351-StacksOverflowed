@@ -94,7 +94,9 @@ export const WAGER_SELECT = `
   )
 `;
 
-// Enough for a player's open bets plus recent history.
+// How much settled history My bets shows. Open bets are never capped
+// (SRS-207.1): they're loaded separately, so an old open bet can't drop off
+// the list behind a player's newer bets (bug #1061).
 export const MY_BETS_LIMIT = 100;
 
 export function toMyBet(row: WagerRow, now: Date = new Date()): MyBet {
@@ -148,13 +150,25 @@ export function splitBets(bets: MyBet[]): MyBets {
 }
 
 export async function fetchMyBets(supabase: SupabaseClient, playerId: number, now: Date = new Date()): Promise<MyBets> {
-  const { data, error } = await supabase
-    .from('wagers')
-    .select(WAGER_SELECT)
-    .eq('player_id', playerId)
-    .order('placed_at', { ascending: false })
-    .limit(MY_BETS_LIMIT);
+  // Every open bet, and the most recently settled ones for the history.
+  const [open, settled] = await Promise.all([
+    supabase
+      .from('wagers')
+      .select(WAGER_SELECT)
+      .eq('player_id', playerId)
+      .is('result', null)
+      .order('placed_at', { ascending: false }),
+    supabase
+      .from('wagers')
+      .select(WAGER_SELECT)
+      .eq('player_id', playerId)
+      .not('result', 'is', null)
+      .order('settled_at', { ascending: false })
+      .limit(MY_BETS_LIMIT),
+  ]);
 
-  if (error) throw new Error(error.message);
-  return splitBets((data as unknown as WagerRow[]).map((row) => toMyBet(row, now)));
+  if (open.error) throw new Error(open.error.message);
+  if (settled.error) throw new Error(settled.error.message);
+  const rows = [...(open.data as unknown as WagerRow[]), ...(settled.data as unknown as WagerRow[])];
+  return splitBets(rows.map((row) => toMyBet(row, now)));
 }

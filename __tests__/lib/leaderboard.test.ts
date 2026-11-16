@@ -3,6 +3,8 @@ import {
   BIGGEST_WINS_LIMIT,
   TOP_EARNERS_LIMIT,
   biggestWins,
+  PAGE_ROWS,
+  allRows,
   buildLeaderboard,
   leaderboardWeek,
   loadDecidedBets,
@@ -146,24 +148,39 @@ describe('a bet counts in the week its game was played (SRS-216.2, SRS-216.3)', 
   });
 
   // A stand-in for supabase-js: each table answers with its rows, whatever
-  // the filters, and records the settled_at range it was asked for.
+  // the filters, at most PAGE_ROWS of them per request like the real API,
+  // and records the settled_at range and the pages it was asked for.
   function fakeSupabase(tables: Record<string, unknown[]>) {
     const ranges: Record<string, { from?: string; to?: string }> = {};
+    const pages: Record<string, [number, number][]> = {};
     const client = {
       from(table: string) {
         ranges[table] = {};
+        pages[table] ??= [];
+        let first = 0;
+        let last = Infinity;
         const query = {
           select: () => query,
           in: () => query,
           eq: () => query,
+          order: () => query,
           gte: (_column: string, value: string) => ((ranges[table].from = value), query),
           lt: (_column: string, value: string) => ((ranges[table].to = value), query),
-          then: (resolve: (r: unknown) => unknown) => resolve({ data: tables[table] ?? [], error: null }),
+          range: (from: number, to: number) => {
+            first = from;
+            last = to;
+            pages[table].push([from, to]);
+            return query;
+          },
+          then: (resolve: (r: unknown) => unknown) => {
+            const rows = (tables[table] ?? []).slice(first, Math.min(last + 1, first + PAGE_ROWS));
+            return resolve({ data: rows, error: null });
+          },
         };
         return query;
       },
     };
-    return { client: client as unknown as SupabaseClient, ranges };
+    return { client: client as unknown as SupabaseClient, ranges, pages };
   }
 
   const event = (start_time: string) => ({
@@ -206,5 +223,51 @@ describe('a bet counts in the week its game was played (SRS-216.2, SRS-216.3)', 
     // games can be settled as late as Wednesday; the range reaches past that.
     expect(Date.parse(ranges.wagers.to!)).toBeGreaterThan(nov2to8.end.getTime() + 3 * 24 * 60 * 60 * 1000);
     expect(ranges.public_bets).toEqual(ranges.wagers);
+  });
+
+  // Bug #1015: the API returns at most PAGE_ROWS rows per request, so a week
+  // with more decided bets than that lost the rest.
+  it('counts every bet in a week with more than 1,000 of them (SRS-216.3)', async () => {
+    const many = Array.from({ length: 2500 }, (_, i) => ({
+      player_id: 1 + (i % 50),
+      amount: 100,
+      payout: i % 2 ? 200 : 0,
+      settled_at: MONDAY_SETTLE,
+      option: { option_label: 'Pick', market: { event: event(SUNDAY_GAME) } },
+    }));
+    const { client, pages } = fakeSupabase({ wagers: many, public_bets: [] });
+    const bets = await loadDecidedBets(client, nov2to8);
+    expect(bets).toHaveLength(2500);
+    expect(pages.wagers).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+    // The totals come from all 2,500: 1,250 wins of +100 and 1,250 losses of -100.
+    expect(rankEarners(bets).reduce((sum, row) => sum + row.net, 0)).toBe(0);
+    expect(rankEarners(bets).reduce((sum, row) => sum + row.bets, 0)).toBe(2500);
+  });
+});
+
+describe('allRows', () => {
+  it('keeps asking for pages until one comes back short', async () => {
+    const asked: [number, number][] = [];
+    const rows = await allRows<number>((from, to) => {
+      asked.push([from, to]);
+      const page = Array.from({ length: Math.max(0, Math.min(PAGE_ROWS, 2000 - from)) }, (_, i) => from + i);
+      return Promise.resolve({ data: page, error: null });
+    });
+    expect(rows).toHaveLength(2000);
+    expect(rows[1999]).toBe(1999);
+    // Exactly 2,000 rows: the third page comes back empty, which ends it.
+    expect(asked).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+  });
+
+  it('stops at a database error instead of returning part of the rows', async () => {
+    await expect(allRows(() => Promise.resolve({ data: null, error: { message: 'timeout' } }))).rejects.toThrow('timeout');
   });
 });

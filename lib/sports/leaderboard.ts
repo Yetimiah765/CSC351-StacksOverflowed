@@ -7,6 +7,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NO_RESULT_REFUND_MS } from './settle';
+import { allRows } from './paging';
 
 export const LEADERBOARD_TIME_ZONE = 'America/New_York';
 export const TOP_EARNERS_LIMIT = 10;
@@ -229,23 +230,6 @@ const SHOWDOWN_SELECT = `
   ),
   entries:public_bet_entries(player_id, team_id, amount, payout)
 `;
-
-// Supabase's API returns at most this many rows per request, so a busy week's
-// bets are read a page at a time (bug #1015: past it, the rest were dropped).
-export const PAGE_ROWS = 1000;
-
-type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
-
-/** Every row of a query, fetched PAGE_ROWS at a time until a page comes back short. */
-export async function allRows<T>(page: (from: number, to: number) => Page<T>): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += PAGE_ROWS) {
-    const { data, error } = await page(from, from + PAGE_ROWS - 1);
-    if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_ROWS) return rows;
-  }
-}
 
 export async function loadDecidedBets(supabase: SupabaseClient, week: LeaderboardWeek): Promise<DecidedBet[]> {
   // A bet is settled after its game starts, so its settle time is between the

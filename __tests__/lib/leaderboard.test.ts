@@ -3,8 +3,6 @@ import {
   BIGGEST_WINS_LIMIT,
   TOP_EARNERS_LIMIT,
   biggestWins,
-  PAGE_ROWS,
-  allRows,
   buildLeaderboard,
   leaderboardWeek,
   loadDecidedBets,
@@ -12,6 +10,7 @@ import {
   rankEarners,
   type DecidedBet,
 } from '../../lib/sports/leaderboard';
+import { PAGE_ROWS, allRows } from '../../lib/sports/paging';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 const bet = (playerId: number, stake: number, payout: number, extra: Partial<DecidedBet> = {}): DecidedBet => ({

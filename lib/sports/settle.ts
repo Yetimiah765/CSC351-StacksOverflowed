@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { MarketTypeCode } from './normalize';
+import { allRows } from './paging';
 
 export type GradedResult = 'Won' | 'Lost' | 'Refunded';
 export type WagerSide = 'home' | 'away' | 'over' | 'under' | 'draw';
@@ -143,13 +144,19 @@ export type SettleSummary = {
 export async function settleWagers(supabase: SupabaseClient, now: Date = new Date()): Promise<SettleSummary> {
   const summary: SettleSummary = { settled: 0, won: 0, lost: 0, refunded: 0, errors: [] };
 
-  const { data, error } = await supabase.from('wagers').select(PENDING_SELECT).is('result', null).limit(1000);
-  if (error) {
-    summary.errors.push(`Loading open wagers failed: ${error.message}`);
+  // Every open wager, a page at a time in wager order, so none is left out
+  // however many are open (bug #1060).
+  let open: PendingRow[];
+  try {
+    open = (await allRows((first, last) =>
+      supabase.from('wagers').select(PENDING_SELECT).is('result', null).order('wager_id').range(first, last)
+    )) as unknown as PendingRow[];
+  } catch (error) {
+    summary.errors.push(`Loading open wagers failed: ${error instanceof Error ? error.message : String(error)}`);
     return summary;
   }
 
-  for (const row of data as unknown as PendingRow[]) {
+  for (const row of open) {
     const result = decideWager(row, now);
     if (!result) continue;
 

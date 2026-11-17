@@ -563,6 +563,14 @@ export default function PokerTablePage({ params }: { params: { tableId: string }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [amBusted]);
 
+  // SRS-9.9: the table removed this player and paid their stack back into
+  // their balance, so show the new balance here and in the nav bar.
+  useEffect(() => {
+    if (removedBecause) void refreshBalance();
+    // Only when a removal is first noticed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [removedBecause]);
+
   // When the player clicks away from a blank/non-numeric buy-in, put the
   // minimum back rather than leaving the field empty.
   function resetEmptyBuyIn() {

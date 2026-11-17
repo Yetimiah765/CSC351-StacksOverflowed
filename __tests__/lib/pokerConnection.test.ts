@@ -204,6 +204,37 @@ describe('the disconnection timer resets on reconnection (SRS-9.3)', () => {
   });
 });
 
+describe('removal when the disconnection timer runs out (SRS-9.4)', () => {
+  it('removes a player still disconnected after two minutes, with their stack, freeing the seat', () => {
+    const table = tableWith([1, 2, 3], { 2: 870 });
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2), 10_000);
+    expect(table.removeLongDisconnected(10_000 + DISCONNECT_REMOVAL_MS - 1)).toEqual([]);
+    expect(table.removeLongDisconnected(10_000 + DISCONNECT_REMOVAL_MS)).toEqual([p(2)]);
+    expect(seat(table, 2).playerId).toBeNull();
+    expect(table.drainRemovals()).toEqual([expect.objectContaining({ playerId: p(2), chipStack: 870, reason: 'disconnected' })]);
+  });
+
+  it('never removes a player who came back in time', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.markDisconnected(p(2), 10_000);
+    table.heardFrom(p(2), 60_000);
+    expect(table.removeLongDisconnected(10_000 + DISCONNECT_REMOVAL_MS * 2)).toEqual([]);
+    expect(seat(table, 2).playerId).toBe(p(2));
+  });
+
+  it('waits for the hand to end if the player is still in it (SRS-9.13)', () => {
+    const table = tableWith([1, 2, 3]);
+    heardFromAll(table, [1, 2, 3], 0);
+    table.startHand(() => 0); // button 1, SB 2, BB 3; seat 1 first
+    table.markDisconnected(p(2), 0);
+    expect(table.removeLongDisconnected(DISCONNECT_REMOVAL_MS)).toEqual([p(2)]);
+    expect(seat(table, 2)).toMatchObject({ playerId: p(2), removalPending: 'disconnected' });
+    expect(table.drainRemovals()).toEqual([]);
+  });
+});
+
 describe('reconnecting to the held seat (SRS-2.1)', () => {
   it('gets the same seat and stack back', () => {
     const table = tableWith([1, 2, 3], { 2: 870 });

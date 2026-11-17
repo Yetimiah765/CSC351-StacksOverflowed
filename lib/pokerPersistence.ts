@@ -11,7 +11,7 @@
 // from before any hand in progress.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { SavedSeat, TableState } from './pokerTable';
+import type { HandOutcome, SavedSeat, TableState } from './pokerTable';
 import type { RemovalNoticeReason } from './pokerRemovals';
 
 export type PersistResult = { ok: true } | { ok: false; error: string };
@@ -172,6 +172,24 @@ export function seatsToSave(state: Pick<TableState, 'seats'>): SeatToSave[] {
         ]
       : []
   );
+}
+
+/**
+ * SRS-117 / SRS-118: adds how each player did in their hands to their poker
+ * money won and lost (fn_poker_record_results, migration
+ * 2026-11-13_poker_results.sql), like sports betting's settlement does. Tried
+ * twice; resolves with whether it was recorded.
+ */
+export async function persistHandOutcomes(supabase: SupabaseClient, outcomes: HandOutcome[]): Promise<boolean> {
+  if (outcomes.length === 0) return true;
+  const results = outcomes.map(({ playerId, net }) => ({ playerId: Number(playerId), net }));
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const reply = await callFunction(supabase, 'fn_poker_record_results', { p_results: results });
+    if (reply?.status === 'recorded') return true;
+  }
+  // eslint-disable-next-line no-console
+  console.error(`Could not record poker results for ${results.map((result) => result.playerId).join(', ')}.`);
+  return false;
 }
 
 /** SRS-NFR-019: a hand's stacks must be saved within this long of it ending. */

@@ -64,6 +64,7 @@ import {
   clearHandInProgress,
   loadSavedTables,
   persistHandFinished,
+  persistHandOutcomes,
   persistHandStarted,
   persistJoin,
   persistLeave,
@@ -456,6 +457,7 @@ async function startServer(supabase: SupabaseClient, secret: string) {
   // Each is then told why, unless they left of their own accord (SRS-9.11).
   // Paying out also frees their seat in the database (fn_poker_leave).
   async function settleRemovals(entry: TableEntry) {
+    recordOutcomes(entry);
     const removals = await payOutRemovals(entry.table, (playerId, chips) =>
       queueWrite(entry, () => persistLeave(supabase, entry.config.id, playerId, chips)).then(() => undefined)
     );
@@ -476,6 +478,15 @@ async function startServer(supabase: SupabaseClient, secret: string) {
     const wasConnected = !entry.lastSeenDisconnected.has(playerId);
     entry.lastSeenDisconnected.delete(playerId);
     void recordRemovalNotice(supabase, entry.config.id, Number(playerId), reason, wasConnected);
+  }
+
+  // SRS-117 / SRS-118: adds how each player did in every hand finished (or
+  // left part-way) since last time to their poker money won and lost, in turn
+  // with the table's other writes. Call after anything that can end a hand or
+  // take a player out of one.
+  function recordOutcomes(entry: TableEntry) {
+    const outcomes = entry.table.drainHandOutcomes();
+    if (outcomes.length > 0) void queueWrite(entry, () => persistHandOutcomes(supabase, outcomes));
   }
 
   // Runs one database write for this table after the ones before it, so
@@ -511,6 +522,8 @@ async function startServer(supabase: SupabaseClient, secret: string) {
       void queueWrite(entry, () => persistHandStarted(supabase, entry.config.id, positions));
     }
     const ended = (before.inHand || startedHand) && state.phase !== 'in-hand';
+    // Anyone who left the hand part-way, or everyone if it's over.
+    recordOutcomes(entry);
     if (!ended) return;
     const seats = seatsToSave(state);
     // SRS-NFR-019: saved within a second of the hand ending; timed from now,

@@ -59,6 +59,7 @@ DROP TABLE IF EXISTS players                   CASCADE;
 DROP TABLE IF EXISTS games                     CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_seats_rules()          CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_tables_seat_capacity() CASCADE;
+DROP FUNCTION IF EXISTS fn_poker_record_results(JSONB) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_claim_lease(VARCHAR, INTEGER) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_release_lease(VARCHAR) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_join(VARCHAR, INTEGER, INTEGER, BIGINT) CASCADE;
@@ -1336,6 +1337,48 @@ CREATE TABLE poker_removal_notices (
 CREATE INDEX ix_poker_removal_notices_undelivered
     ON poker_removal_notices (player_id)
     WHERE delivered_at IS NULL;
+
+-- Poker money won and lost (SRS-117, SRS-118): how each player did in each
+-- hand, added to their poker row in player_game_stats by the realtime server.
+-- Buying in, buying back in and cashing out never count.
+-- Adds each hand's results to the players' poker row: a gain to money_won,
+-- a loss to money_lost. p_results is a JSON array of { playerId, net }.
+-- Returns { status: 'recorded', results: <how many> }.
+CREATE OR REPLACE FUNCTION fn_poker_record_results(p_results JSONB)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_result  JSONB;
+    v_net     BIGINT;
+    v_count   INTEGER := 0;
+BEGIN
+    FOR v_result IN SELECT value FROM jsonb_array_elements(COALESCE(p_results, '[]'::JSONB)) LOOP
+        v_net := (v_result->>'net')::BIGINT;
+        IF v_net IS NULL OR v_net = 0 THEN
+            CONTINUE;
+        END IF;
+        INSERT INTO player_game_stats (player_id, game_code, money_won, money_lost)
+        VALUES ((v_result->>'playerId')::INTEGER, 'poker', GREATEST(v_net, 0), GREATEST(-v_net, 0))
+        ON CONFLICT (player_id, game_code) DO UPDATE
+           SET money_won  = player_game_stats.money_won  + EXCLUDED.money_won,
+               money_lost = player_game_stats.money_lost + EXCLUDED.money_lost;
+        v_count := v_count + 1;
+    END LOOP;
+    RETURN jsonb_build_object('status', 'recorded', 'results', v_count);
+END;
+$$;
+
+-- Only the server may call it: the anon key is public.
+REVOKE EXECUTE ON FUNCTION fn_poker_record_results(JSONB) FROM PUBLIC;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE 'REVOKE EXECUTE ON FUNCTION fn_poker_record_results(JSONB) FROM anon, authenticated';
+        EXECUTE 'GRANT EXECUTE ON FUNCTION fn_poker_record_results(JSONB) TO service_role';
+    END IF;
+END;
+$$;
 
 -- Table: poker_server_lease
 -- Reviewed by: JN (Jeremiah Nicols)

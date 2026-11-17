@@ -30,7 +30,7 @@ export const GAMES: Game[] = [
     href: '/poker',
     tag: 'Live multiplayer',
     statsCode: 'poker',
-    recordsResults: false,
+    recordsResults: true,
   },
   {
     id: 'blackjack',

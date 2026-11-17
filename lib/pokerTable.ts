@@ -357,6 +357,16 @@ export interface Removal {
   reason: RemovalReason;
 }
 
+/**
+ * How a player did in one hand (SRS-117/118): their stack when it ended (or
+ * when they left it), less their stack when it was dealt, blinds included.
+ * Positive is money won, negative money lost.
+ */
+export interface HandOutcome {
+  playerId: string;
+  net: number;
+}
+
 /** What the acting player may do right now; shared with the client to draw its buttons. */
 export interface BettingOptions {
   canCheck: boolean;
@@ -516,6 +526,10 @@ export class PokerTable {
   private nextCountdownMs: number | null = null;
   /** Actions taken at this table so far, for LastAction.id. */
   private actionCount = 0;
+  /** Each dealt-in player's stack when the hand in progress was dealt, before the blinds. */
+  private handStartStacks = new Map<string, number>();
+  /** How each player did in hands (or parts of hands) finished since drainHandOutcomes(). */
+  private handOutcomes: HandOutcome[] = [];
   /**
    * The turn clock (SRS-NFR-018): turnSerial counts every time the turn lands
    * on a player; trackTurn() starts the clock for a turn it hasn't seen yet.
@@ -891,6 +905,10 @@ export class PokerTable {
     this.lastHandResult = null;
     this.deadContributions = [];
     this.deadRoundBets = [];
+    // Where everyone dealt in starts, to tell what they won or lost (drainHandOutcomes()).
+    this.handStartStacks = new Map(
+      this.seats.filter((seat) => seat.inHand && seat.playerId !== null).map((seat) => [seat.playerId as string, seat.chipStack ?? 0])
+    );
     this.putIn(smallBlind, Math.min(this.smallBlind, smallBlind.chipStack ?? 0));
     this.putIn(bigBlind, Math.min(this.bigBlind, bigBlind.chipStack ?? 0));
     // SRS-11.7/11.8: posters put in a live big blind (it counts toward their
@@ -1307,6 +1325,12 @@ export class PokerTable {
     awards.forEach((amount, seat) => {
       seat.chipStack = (seat.chipStack ?? 0) + amount;
     });
+    // How each player still at the table did in it (anyone who left it
+    // part-way was counted then).
+    for (const seat of this.seats) {
+      if (seat.playerId !== null) this.recordOutcome(seat.playerId, seat.chipStack ?? 0);
+    }
+    this.handStartStacks.clear();
     this.lastHandResult = {
       handNumber: this.handNumber,
       reason,
@@ -1373,6 +1397,27 @@ export class PokerTable {
    * refunds each chipStack to the player's balance. Call after anything that
    * can end a hand or remove a player.
    */
+  /**
+   * How each player did in every hand finished since the last call (SRS-117,
+   * SRS-118): one entry per player per hand they were dealt into, including
+   * those who left it part-way (counted as they left). The caller adds them
+   * to the players' money won and lost. Never includes buying in or cashing
+   * out, which only move coins between the balance and the table.
+   */
+  drainHandOutcomes(): HandOutcome[] {
+    const outcomes = this.handOutcomes;
+    this.handOutcomes = [];
+    return outcomes;
+  }
+
+  /** A dealt-in player is done with the hand, with `stack` left: note how they did. */
+  private recordOutcome(playerId: string, stack: number) {
+    const start = this.handStartStacks.get(playerId);
+    if (start === undefined) return;
+    this.handStartStacks.delete(playerId);
+    if (stack !== start) this.handOutcomes.push({ playerId, net: stack - start });
+  }
+
   drainRemovals(): Removal[] {
     const removals = this.pendingRemovals;
     this.pendingRemovals = [];
@@ -1455,6 +1500,8 @@ export class PokerTable {
       this.deadContributions.push(seat.totalBet);
       this.deadRoundBets.push(seat.bet);
     }
+    // Out of the hand with what's left: what they put in is lost.
+    if (this.phase === 'in-hand' && seat.playerId !== null) this.recordOutcome(seat.playerId, seat.chipStack ?? 0);
     this.pendingRemovals.push({ playerId, chipStack: seat.chipStack ?? 0, reason });
     Object.assign(seat, emptySeat(seat.seatNumber));
     this.resetIfEmpty();
@@ -1489,6 +1536,8 @@ export class PokerTable {
       this.deadContributions.push(seat.totalBet);
       this.deadRoundBets.push(seat.bet);
     }
+    // Out of the hand with what's left: what they put in is lost.
+    if (this.phase === 'in-hand' && seat.playerId !== null) this.recordOutcome(seat.playerId, seat.chipStack ?? 0);
 
     const seatNumber = seat.seatNumber;
     const chipStack = seat.chipStack ?? 0;

@@ -36,15 +36,23 @@ export function symbolForRoll(roll: number): SlotSymbolName {
   throw new Error('Unreachable');
 }
 
-// SRS-309.2: the paytable, best row first, as bet multipliers.
-export const PAYTABLE: readonly { label: string; multiplier: number }[] = [
-  { label: 'Seven, Seven, Seven', multiplier: 200 },
-  { label: 'Bar, Bar, Bar', multiplier: 100 },
-  { label: 'Bell, Bell, Bell', multiplier: 50 },
-  { label: 'Orange, Orange, Orange', multiplier: 20 },
-  { label: 'Lemon, Lemon, Lemon', multiplier: 10 },
-  { label: 'Cherry, Cherry, Cherry', multiplier: 6 },
-  { label: 'Cherry on reels 1 and 2, any other symbol on reel 3', multiplier: 4 },
+/** One row of the paytable: the symbols on reels 1-3 (null = any other symbol) and what it pays. */
+export interface PaytableRow {
+  label: string;
+  reels: readonly [SlotSymbolName, SlotSymbolName, SlotSymbolName | null];
+  multiplier: number;
+}
+
+// SRS-309.2: the paytable, best row first, as bet multipliers. The slot
+// machine page shows it before the player spins (SRS-309.4).
+export const PAYTABLE: readonly PaytableRow[] = [
+  { label: 'Seven, Seven, Seven', reels: ['Seven', 'Seven', 'Seven'], multiplier: 200 },
+  { label: 'Bar, Bar, Bar', reels: ['Bar', 'Bar', 'Bar'], multiplier: 100 },
+  { label: 'Bell, Bell, Bell', reels: ['Bell', 'Bell', 'Bell'], multiplier: 50 },
+  { label: 'Orange, Orange, Orange', reels: ['Orange', 'Orange', 'Orange'], multiplier: 20 },
+  { label: 'Lemon, Lemon, Lemon', reels: ['Lemon', 'Lemon', 'Lemon'], multiplier: 10 },
+  { label: 'Cherry, Cherry, Cherry', reels: ['Cherry', 'Cherry', 'Cherry'], multiplier: 6 },
+  { label: 'Cherry on reels 1 and 2, any other symbol on reel 3', reels: ['Cherry', 'Cherry', null], multiplier: 4 },
 ];
 
 const THREE_OF_A_KIND: Record<SlotSymbolName, number> = {
@@ -62,6 +70,25 @@ export function payoutMultiplier(reels: readonly SlotSymbolName[]): number {
   if (a === b && b === c) return THREE_OF_A_KIND[a];
   if (a === 'Cherry' && b === 'Cherry') return 4;
   return 0;
+}
+
+/** The index in PAYTABLE of the row the reels win, or null for no win (SRS-309.3: at most one). */
+export function winningRow(reels: readonly SlotSymbolName[]): number | null {
+  const multiplier = payoutMultiplier(reels);
+  if (multiplier === 0) return null;
+  const row = PAYTABLE.findIndex((r) => r.multiplier === multiplier);
+  return row < 0 ? null : row;
+}
+
+/**
+ * The reels (0-2) whose symbols form the winning combination, for SRS-308.1's
+ * highlight: all three for three of a kind, only reels 1 and 2 for Cherry,
+ * Cherry, any other symbol; none for no win.
+ */
+export function winningReels(reels: readonly SlotSymbolName[]): number[] {
+  const row = winningRow(reels);
+  if (row === null) return [];
+  return PAYTABLE[row].reels.flatMap((symbol, i) => (symbol === null ? [] : [i]));
 }
 
 /** Coins a spin pays: the bet times the matched row's multiplier, or 0 (SRS-309.1). */

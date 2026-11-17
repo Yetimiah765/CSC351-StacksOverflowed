@@ -5,9 +5,13 @@ import {
   biggestWins,
   buildLeaderboard,
   leaderboardWeek,
+  loadDecidedBets,
+  playedInWeek,
   rankEarners,
   type DecidedBet,
 } from '../../lib/sports/leaderboard';
+import { PAGE_ROWS, allRows } from '../../lib/sports/paging';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const bet = (playerId: number, stake: number, payout: number, extra: Partial<DecidedBet> = {}): DecidedBet => ({
   playerId,
@@ -120,5 +124,149 @@ describe('buildLeaderboard', () => {
 
   it('gives a player with no decided bets no rank and zero winnings', () => {
     expect(buildLeaderboard([bet(2, 100, 200)], names, week, 1).me).toEqual({ rank: null, net: 0, bets: 0 });
+  });
+});
+
+// Bug #1004: bets were put in the week the sync settled them, so a Sunday game
+// (scored the next morning) landed in the following week.
+describe('a bet counts in the week its game was played (SRS-216.2, SRS-216.3)', () => {
+  const nov2to8 = leaderboardWeek(new Date('2026-11-05T17:00:00Z'));
+  const nov9to15 = leaderboardWeek(new Date('2026-11-10T17:00:00Z'));
+  // The Packers Showdown from the bug report: played Sun Nov 8, 4:25 PM ET,
+  // settled Mon Nov 9, 10:10 AM ET.
+  const SUNDAY_GAME = '2026-11-08T21:25:34Z';
+  const MONDAY_SETTLE = '2026-11-09T15:10:20Z';
+
+  it('puts a game in the week it started, in Eastern time', () => {
+    expect(playedInWeek(SUNDAY_GAME, nov2to8)).toBe(true);
+    expect(playedInWeek(SUNDAY_GAME, nov9to15)).toBe(false);
+    // Sun 11:59 PM ET is still that week; Mon 12:00 AM ET is the next.
+    expect(playedInWeek('2026-11-09T04:59:00Z', nov2to8)).toBe(true);
+    expect(playedInWeek('2026-11-09T05:00:00Z', nov2to8)).toBe(false);
+    expect(playedInWeek(null, nov2to8)).toBe(false);
+  });
+
+  // A stand-in for supabase-js: each table answers with its rows, whatever
+  // the filters, at most PAGE_ROWS of them per request like the real API,
+  // and records the settled_at range and the pages it was asked for.
+  function fakeSupabase(tables: Record<string, unknown[]>) {
+    const ranges: Record<string, { from?: string; to?: string }> = {};
+    const pages: Record<string, [number, number][]> = {};
+    const client = {
+      from(table: string) {
+        ranges[table] = {};
+        pages[table] ??= [];
+        let first = 0;
+        let last = Infinity;
+        const query = {
+          select: () => query,
+          in: () => query,
+          eq: () => query,
+          order: () => query,
+          gte: (_column: string, value: string) => ((ranges[table].from = value), query),
+          lt: (_column: string, value: string) => ((ranges[table].to = value), query),
+          range: (from: number, to: number) => {
+            first = from;
+            last = to;
+            pages[table].push([from, to]);
+            return query;
+          },
+          then: (resolve: (r: unknown) => unknown) => {
+            const rows = (tables[table] ?? []).slice(first, Math.min(last + 1, first + PAGE_ROWS));
+            return resolve({ data: rows, error: null });
+          },
+        };
+        return query;
+      },
+    };
+    return { client: client as unknown as SupabaseClient, ranges, pages };
+  }
+
+  const event = (start_time: string) => ({
+    start_time,
+    home_team_id: 1,
+    away_team_id: 2,
+    home: { team_name: 'New England Patriots' },
+    away: { team_name: 'Green Bay Packers' },
+  });
+  const tables = {
+    wagers: [
+      { player_id: 2, amount: 10000, payout: 0, settled_at: MONDAY_SETTLE, option: { option_label: 'Seattle Seahawks', market: { event: event(SUNDAY_GAME) } } },
+      { player_id: 3, amount: 100, payout: 200, settled_at: '2026-11-11T12:00:00Z', option: { option_label: 'Bulls', market: { event: event('2026-11-10T23:00:00Z') } } },
+    ],
+    public_bets: [
+      { settled_at: MONDAY_SETTLE, event: event(SUNDAY_GAME), entries: [{ player_id: 22, team_id: 2, amount: 100000, payout: 505000 }] },
+    ],
+  };
+
+  it("counts Sunday's games on that week's board, even though they were settled on Monday", async () => {
+    const { client } = fakeSupabase(tables);
+    const bets = await loadDecidedBets(client, nov2to8);
+    expect(bets.map((b) => [b.kind, b.playerId, b.payout])).toEqual([
+      ['wager', 2, 0],
+      ['showdown', 22, 505000],
+    ]);
+  });
+
+  it("leaves last Sunday's games off the next week's board", async () => {
+    const { client } = fakeSupabase(tables);
+    const bets = await loadDecidedBets(client, nov9to15);
+    expect(bets.map((b) => b.playerId)).toEqual([3]);
+  });
+
+  it('looks for settled bets from the week start until well after it ends', async () => {
+    const { client, ranges } = fakeSupabase(tables);
+    await loadDecidedBets(client, nov2to8);
+    expect(ranges.wagers.from).toBe(nov2to8.start.toISOString());
+    // A game with no result is refunded 3 days after it starts, so Sunday's
+    // games can be settled as late as Wednesday; the range reaches past that.
+    expect(Date.parse(ranges.wagers.to!)).toBeGreaterThan(nov2to8.end.getTime() + 3 * 24 * 60 * 60 * 1000);
+    expect(ranges.public_bets).toEqual(ranges.wagers);
+  });
+
+  // Bug #1015: the API returns at most PAGE_ROWS rows per request, so a week
+  // with more decided bets than that lost the rest.
+  it('counts every bet in a week with more than 1,000 of them (SRS-216.3)', async () => {
+    const many = Array.from({ length: 2500 }, (_, i) => ({
+      player_id: 1 + (i % 50),
+      amount: 100,
+      payout: i % 2 ? 200 : 0,
+      settled_at: MONDAY_SETTLE,
+      option: { option_label: 'Pick', market: { event: event(SUNDAY_GAME) } },
+    }));
+    const { client, pages } = fakeSupabase({ wagers: many, public_bets: [] });
+    const bets = await loadDecidedBets(client, nov2to8);
+    expect(bets).toHaveLength(2500);
+    expect(pages.wagers).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+    // The totals come from all 2,500: 1,250 wins of +100 and 1,250 losses of -100.
+    expect(rankEarners(bets).reduce((sum, row) => sum + row.net, 0)).toBe(0);
+    expect(rankEarners(bets).reduce((sum, row) => sum + row.bets, 0)).toBe(2500);
+  });
+});
+
+describe('allRows', () => {
+  it('keeps asking for pages until one comes back short', async () => {
+    const asked: [number, number][] = [];
+    const rows = await allRows<number>((from, to) => {
+      asked.push([from, to]);
+      const page = Array.from({ length: Math.max(0, Math.min(PAGE_ROWS, 2000 - from)) }, (_, i) => from + i);
+      return Promise.resolve({ data: page, error: null });
+    });
+    expect(rows).toHaveLength(2000);
+    expect(rows[1999]).toBe(1999);
+    // Exactly 2,000 rows: the third page comes back empty, which ends it.
+    expect(asked).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+  });
+
+  it('stops at a database error instead of returning part of the rows', async () => {
+    await expect(allRows(() => Promise.resolve({ data: null, error: { message: 'timeout' } }))).rejects.toThrow('timeout');
   });
 });

@@ -955,12 +955,35 @@ body {
 .slots-lever-pull { animation: slots-lever-pull 700ms ease-in-out; }
 .slots-coin { animation: slots-coin-drop 900ms cubic-bezier(0.3, 0.1, 0.4, 1) both; }
 .slots-win { animation: slots-win-flash 600ms ease-in-out 4; }
+/* SRS-308.1: once the last reel stops on a win, the payline glows gold and
+   the reels and symbols that form the combination pulse. */
+@keyframes slots-payline-win {
+  0%, 100% { box-shadow: 0 0 8px 1px #fbbf24; }
+  50% { box-shadow: 0 0 18px 5px #fde68a; }
+}
+/* The solid 4px ring is part of the shadow, since a Tailwind ring is a box-shadow too. */
+@keyframes slots-reel-win {
+  0%, 100% { box-shadow: 0 0 0 4px #fcd34d, 0 0 10px 6px rgba(251, 191, 36, 0.6); }
+  50% { box-shadow: 0 0 0 4px #fde68a, 0 0 24px 12px rgba(253, 230, 138, 0.9); }
+}
+@keyframes slots-symbol-win {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.14); }
+}
+.slots-payline-win { box-shadow: 0 0 12px 3px #fbbf24; animation: slots-payline-win 900ms ease-in-out infinite; }
+.slots-reel-win { box-shadow: 0 0 0 4px #fcd34d, 0 0 16px 8px rgba(251, 191, 36, 0.75); animation: slots-reel-win 900ms ease-in-out infinite; }
+.slots-symbol-win { display: inline-block; animation: slots-symbol-win 900ms ease-in-out infinite; }
+.slots-paytable-win { animation: slots-reel-win 900ms ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .slots-bulb,
   .slots-neon,
   .slots-lever-pull,
   .slots-coin,
-  .slots-win {
+  .slots-win,
+  .slots-payline-win,
+  .slots-reel-win,
+  .slots-symbol-win,
+  .slots-paytable-win {
     animation: none;
   }
   .slots-bulb { opacity: 0.9; }

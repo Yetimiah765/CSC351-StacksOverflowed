@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { NO_RESULT_REFUND_MS, decideWager, gradeWager, settleWagers } from '../../lib/sports/settle';
+import { PAGE_ROWS } from '../../lib/sports/paging';
 
 describe('gradeWager', () => {
   const game = (homeScore: number, awayScore: number) => ({ homeScore, awayScore });
@@ -122,11 +123,16 @@ describe('decideWager', () => {
 });
 
 describe('settleWagers', () => {
+  // Answers like the real API: at most PAGE_ROWS rows per request, from the
+  // asked-for range.
   function fakeSupabase(rows: unknown[], replies: Record<number, unknown> = {}) {
     const query = {
       select: vi.fn(() => query),
       is: vi.fn(() => query),
-      limit: vi.fn(() => Promise.resolve({ data: rows, error: null })),
+      order: vi.fn(() => query),
+      range: vi.fn((first: number, last: number) =>
+        Promise.resolve({ data: rows.slice(first, Math.min(last + 1, first + PAGE_ROWS)), error: null })
+      ),
     };
     const rpc = vi.fn(async (_fn: string, args: { p_wager_id: number }) => ({
       data: replies[args.p_wager_id] ?? { status: 'settled' },
@@ -157,5 +163,42 @@ describe('settleWagers', () => {
   it('does not count a wager another run already settled', async () => {
     const { client } = fakeSupabase([pending({ wagerId: 1 })], { 1: { status: 'already_settled', result: 'Won' } });
     expect((await settleWagers(client, AFTER_GAME)).settled).toBe(0);
+  });
+
+  // Bug #1060: only the first 1,000 open wagers were looked at, so a decided
+  // one further down the list was never settled or paid.
+  it('settles decided wagers however many are open (SRS-210.1)', async () => {
+    const upcoming = Array.from({ length: 2400 }, (_, i) =>
+      pending({ wagerId: i + 1, status: 'Upcoming', homeScore: null, awayScore: null, startTime: '2026-10-20T00:00:00Z' })
+    );
+    const decided = [pending({ wagerId: 2401 }), pending({ wagerId: 2402, teamId: AWAY, label: 'Tampa Bay Buccaneers' })];
+    const { client, rpc, query } = fakeSupabase([...upcoming, ...decided]);
+
+    const summary = await settleWagers(client, AFTER_GAME);
+
+    expect(query.order).toHaveBeenCalledWith('wager_id');
+    expect(query.range.mock.calls).toEqual([
+      [0, 999],
+      [1000, 1999],
+      [2000, 2999],
+    ]);
+    expect(rpc.mock.calls.map((call) => call[1])).toEqual([
+      { p_wager_id: 2401, p_result: 'Won' },
+      { p_wager_id: 2402, p_result: 'Lost' },
+    ]);
+    expect(summary).toEqual({ settled: 2, won: 1, lost: 1, refunded: 0, errors: [] });
+  });
+
+  it('reports a failure to load the open wagers without settling anything', async () => {
+    const { client, rpc, query } = fakeSupabase([]);
+    query.range.mockImplementation(() => Promise.resolve({ data: null, error: { message: 'timeout' } }) as never);
+    expect(await settleWagers(client, AFTER_GAME)).toEqual({
+      settled: 0,
+      won: 0,
+      lost: 0,
+      refunded: 0,
+      errors: ['Loading open wagers failed: timeout'],
+    });
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

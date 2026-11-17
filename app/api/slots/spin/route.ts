@@ -1,7 +1,7 @@
 import { randomInt } from 'crypto';
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../../lib/auth';
-import { REEL_ROLLS, type SlotSymbolName } from '../../../../lib/slots';
+import { REEL_ROLLS, winningReels, type SlotSymbolName } from '../../../../lib/slots';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -64,6 +64,10 @@ export async function POST(request: Request) {
           multiplier: result.multiplier,
           payout: result.payout,
           balance: result.balance,
+          // SRS-308.1: which reels form the win, for the page to highlight once
+          // the last reel stops. Worked out from the committed reels, so it
+          // always agrees with the payout.
+          winningReels: result.payout ? winningReels(result.reels ?? []) : [],
         },
         { status: 200 }
       );

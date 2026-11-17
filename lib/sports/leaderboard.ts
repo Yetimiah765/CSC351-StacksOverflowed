@@ -1,10 +1,13 @@
 // The weekly sports leaderboard (UR-216, SRS-216.1 – 216.6). Nothing is
-// stored and no coins ever move: each request adds up the bets decided in the
-// week, from regular wagers (`wagers.settled_at`) and Showdown entries (their
-// `public_bets.settled_at`). Refunded and cancelled bets are left out, since
-// they count as zero (SRS-216.3).
+// stored and no coins ever move: each request adds up the decided bets on
+// games played in the week, from regular wagers and Showdown entries. A bet
+// counts in the week its game started, not the week the sync settled it
+// (a Sunday game is only scored the next morning). Refunded and cancelled
+// bets are left out, since they count as zero (SRS-216.3).
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { NO_RESULT_REFUND_MS } from './settle';
+import { allRows } from './paging';
 
 export const LEADERBOARD_TIME_ZONE = 'America/New_York';
 export const TOP_EARNERS_LIMIT = 10;
@@ -67,6 +70,18 @@ export function leaderboardWeek(now: Date, weeksAgo = 0): LeaderboardWeek {
     end: easternMidnight(nextMonday.getUTCFullYear(), nextMonday.getUTCMonth() + 1, nextMonday.getUTCDate()),
   };
 }
+
+/** Whether a game that started at `startTime` belongs to `week`. */
+export function playedInWeek(startTime: string | null | undefined, week: LeaderboardWeek): boolean {
+  if (!startTime) return false;
+  const at = Date.parse(startTime);
+  return at >= week.start.getTime() && at < week.end.getTime();
+}
+
+// How long after a week ends one of its games can still be settled: the sync
+// scores games the next morning (or later, if a run is late), and a game with
+// no result is refunded after NO_RESULT_REFUND_MS. A day on top for slack.
+export const SETTLE_LAG_MS = NO_RESULT_REFUND_MS + 24 * 60 * 60 * 1000;
 
 // ------------------------------------------------------------ the rankings
 
@@ -166,7 +181,13 @@ export function buildLeaderboard(
 // ------------------------------------------------------------ loading
 
 type TeamName = { team_name: string } | null;
-type GameRow = { home: TeamName; away: TeamName; home_team_id?: number; away_team_id?: number } | null;
+type GameRow = {
+  start_time: string;
+  home: TeamName;
+  away: TeamName;
+  home_team_id?: number;
+  away_team_id?: number;
+} | null;
 
 type WagerRow = {
   player_id: number;
@@ -192,6 +213,7 @@ const WAGER_SELECT = `
     option_label,
     market:betting_markets(
       event:sports_events(
+        start_time,
         home:teams!fk_sports_events_home_team(team_name),
         away:teams!fk_sports_events_away_team(team_name)
       )
@@ -202,7 +224,7 @@ const WAGER_SELECT = `
 const SHOWDOWN_SELECT = `
   settled_at,
   event:sports_events(
-    home_team_id, away_team_id,
+    start_time, home_team_id, away_team_id,
     home:teams!fk_sports_events_home_team(team_name),
     away:teams!fk_sports_events_away_team(team_name)
   ),
@@ -210,28 +232,51 @@ const SHOWDOWN_SELECT = `
 `;
 
 export async function loadDecidedBets(supabase: SupabaseClient, week: LeaderboardWeek): Promise<DecidedBet[]> {
+  // A bet is settled after its game starts, so its settle time is between the
+  // week's start and SETTLE_LAG_MS past its end; which games were played in
+  // the week is then decided by their start time (SRS-216.2, SRS-216.3).
   const from = week.start.toISOString();
-  const to = week.end.toISOString();
+  const to = new Date(week.end.getTime() + SETTLE_LAG_MS).toISOString();
 
+  // Each query is ordered by its id, so its pages never overlap or skip a row.
   const [wagers, showdowns] = await Promise.all([
-    supabase.from('wagers').select(WAGER_SELECT).in('result', ['Won', 'Lost']).gte('settled_at', from).lt('settled_at', to),
+    allRows((first, last) =>
+      supabase
+        .from('wagers')
+        .select(WAGER_SELECT)
+        .in('result', ['Won', 'Lost'])
+        .gte('settled_at', from)
+        .lt('settled_at', to)
+        .order('wager_id')
+        .range(first, last)
+    ),
     // A Refunded Showdown paid everyone back, so only Settled ones count.
-    supabase.from('public_bets').select(SHOWDOWN_SELECT).eq('outcome', 'Settled').gte('settled_at', from).lt('settled_at', to),
+    allRows((first, last) =>
+      supabase
+        .from('public_bets')
+        .select(SHOWDOWN_SELECT)
+        .eq('outcome', 'Settled')
+        .gte('settled_at', from)
+        .lt('settled_at', to)
+        .order('public_bet_id')
+        .range(first, last)
+    ),
   ]);
-  if (wagers.error) throw new Error(wagers.error.message);
-  if (showdowns.error) throw new Error(showdowns.error.message);
 
-  const bets: DecidedBet[] = (wagers.data as unknown as WagerRow[]).map((row) => ({
-    playerId: row.player_id,
-    stake: Number(row.amount),
-    payout: Number(row.payout ?? 0),
-    settledAt: row.settled_at,
-    kind: 'wager',
-    pick: row.option?.option_label ?? 'Bet',
-    game: gameName(row.option?.market?.event ?? null),
-  }));
+  const bets: DecidedBet[] = (wagers as unknown as WagerRow[])
+    .filter((row) => playedInWeek(row.option?.market?.event?.start_time, week))
+    .map((row) => ({
+      playerId: row.player_id,
+      stake: Number(row.amount),
+      payout: Number(row.payout ?? 0),
+      settledAt: row.settled_at,
+      kind: 'wager',
+      pick: row.option?.option_label ?? 'Bet',
+      game: gameName(row.option?.market?.event ?? null),
+    }));
 
-  for (const showdown of showdowns.data as unknown as ShowdownRow[]) {
+  for (const showdown of showdowns as unknown as ShowdownRow[]) {
+    if (!playedInWeek(showdown.event?.start_time, week)) continue;
     for (const entry of showdown.entries ?? []) {
       const team = entry.team_id === showdown.event?.home_team_id ? showdown.event?.home : showdown.event?.away;
       bets.push({

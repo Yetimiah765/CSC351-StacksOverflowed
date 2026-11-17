@@ -36,15 +36,23 @@ export function symbolForRoll(roll: number): SlotSymbolName {
   throw new Error('Unreachable');
 }
 
-// SRS-309.2: the paytable, best row first, as bet multipliers.
-export const PAYTABLE: readonly { label: string; multiplier: number }[] = [
-  { label: 'Seven, Seven, Seven', multiplier: 200 },
-  { label: 'Bar, Bar, Bar', multiplier: 100 },
-  { label: 'Bell, Bell, Bell', multiplier: 50 },
-  { label: 'Orange, Orange, Orange', multiplier: 20 },
-  { label: 'Lemon, Lemon, Lemon', multiplier: 10 },
-  { label: 'Cherry, Cherry, Cherry', multiplier: 6 },
-  { label: 'Cherry on reels 1 and 2, any other symbol on reel 3', multiplier: 4 },
+/** One row of the paytable: the symbols on reels 1-3 (null = any other symbol) and what it pays. */
+export interface PaytableRow {
+  label: string;
+  reels: readonly [SlotSymbolName, SlotSymbolName, SlotSymbolName | null];
+  multiplier: number;
+}
+
+// SRS-309.2: the paytable, best row first, as bet multipliers. The slot
+// machine page shows it before the player spins (SRS-309.4).
+export const PAYTABLE: readonly PaytableRow[] = [
+  { label: 'Seven, Seven, Seven', reels: ['Seven', 'Seven', 'Seven'], multiplier: 200 },
+  { label: 'Bar, Bar, Bar', reels: ['Bar', 'Bar', 'Bar'], multiplier: 100 },
+  { label: 'Bell, Bell, Bell', reels: ['Bell', 'Bell', 'Bell'], multiplier: 50 },
+  { label: 'Orange, Orange, Orange', reels: ['Orange', 'Orange', 'Orange'], multiplier: 20 },
+  { label: 'Lemon, Lemon, Lemon', reels: ['Lemon', 'Lemon', 'Lemon'], multiplier: 10 },
+  { label: 'Cherry, Cherry, Cherry', reels: ['Cherry', 'Cherry', 'Cherry'], multiplier: 6 },
+  { label: 'Cherry on reels 1 and 2, any other symbol on reel 3', reels: ['Cherry', 'Cherry', null], multiplier: 4 },
 ];
 
 const THREE_OF_A_KIND: Record<SlotSymbolName, number> = {

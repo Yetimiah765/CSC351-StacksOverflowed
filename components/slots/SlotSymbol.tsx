@@ -12,11 +12,13 @@ const EMOJI: Partial<Record<SlotSymbolName, string>> = {
   Bell: '🔔',
 };
 
-export default function SlotSymbol({ name }: { name: SlotSymbolName }) {
+/** `size="small"` draws the symbol for the paytable instead of a reel. */
+export default function SlotSymbol({ name, size = 'reel' }: { name: SlotSymbolName; size?: 'reel' | 'small' }) {
+  const small = size === 'small';
   const emoji = EMOJI[name];
   if (emoji) {
     return (
-      <span role="img" aria-label={name} className="text-5xl leading-none sm:text-6xl">
+      <span role="img" aria-label={name} className={small ? 'text-xl leading-none sm:text-2xl' : 'text-5xl leading-none sm:text-6xl'}>
         {emoji}
       </span>
     );
@@ -24,8 +26,11 @@ export default function SlotSymbol({ name }: { name: SlotSymbolName }) {
   if (name === 'Bar') {
     return (
       <span
+        role="img"
         aria-label="Bar"
-        className="rounded-md border-2 border-slate-900 bg-slate-900 px-2 py-0.5 text-2xl font-black tracking-widest text-white sm:text-3xl"
+        className={`rounded-md border-2 border-slate-900 bg-slate-900 font-black text-white ${
+          small ? 'px-0.5 text-[0.55rem] tracking-wider sm:text-[0.65rem]' : 'px-2 py-0.5 text-2xl tracking-widest sm:text-3xl'
+        }`}
       >
         BAR
       </span>
@@ -33,8 +38,11 @@ export default function SlotSymbol({ name }: { name: SlotSymbolName }) {
   }
   return (
     <span
+      role="img"
       aria-label="Seven"
-      className="text-6xl font-black leading-none text-red-600 drop-shadow-[0_2px_0_#7f1d1d] sm:text-7xl"
+      className={`font-black leading-none text-red-600 ${
+        small ? 'text-2xl drop-shadow-[0_1px_0_#7f1d1d] sm:text-3xl' : 'text-6xl drop-shadow-[0_2px_0_#7f1d1d] sm:text-7xl'
+      }`}
     >
       7
     </span>

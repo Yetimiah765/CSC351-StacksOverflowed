@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import BackToHome from '../../components/BackToHome';
+import Paytable from '../../components/slots/Paytable';
 import SlotReels from '../../components/slots/SlotReels';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import { initialSlotBet, type SlotSymbolName } from '../../lib/slots';
@@ -279,6 +280,9 @@ export default function SlotsPage() {
             </button>
           </div>
         </div>
+
+        {/* SRS-309.4: the paytable, on show before the player spins. */}
+        <Paytable bet={bet} />
       </div>
     </main>
   );

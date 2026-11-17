@@ -65,6 +65,6 @@ describe('the paytable shown on the page (SRS-309.4)', () => {
   it('is on the slot machine page outside the spin result, so it shows before the first spin', () => {
     const page = readFileSync(join(ROOT, 'app/slots/page.tsx'), 'utf8');
     expect(page).toContain("import Paytable from '../../components/slots/Paytable'");
-    expect(page).toMatch(/<Paytable bet=\{bet\} \/>/);
+    expect(page).toMatch(/<Paytable bet=\{bet\}[^>]*\/>/);
   });
 });

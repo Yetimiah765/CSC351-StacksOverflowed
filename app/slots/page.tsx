@@ -6,7 +6,7 @@ import BackToHome from '../../components/BackToHome';
 import Paytable from '../../components/slots/Paytable';
 import SlotReels from '../../components/slots/SlotReels';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
-import { initialSlotBet, type SlotSymbolName } from '../../lib/slots';
+import { initialSlotBet, winningRow, type SlotSymbolName } from '../../lib/slots';
 
 // What POST /api/slots/spin returns once the spin is committed.
 interface SpinResponse {
@@ -15,6 +15,8 @@ interface SpinResponse {
   multiplier: number;
   payout: number;
   balance: number;
+  /** The reels (0-2) that form the winning combination (SRS-308.1). */
+  winningReels: number[];
 }
 
 // What the reels show before the first spin.
@@ -126,6 +128,9 @@ export default function SlotsPage() {
   }
 
   const won = !spinning && outcome !== null && outcome.payout > 0;
+  // SRS-308.1: outcome is only set once the last reel stops, so the win lights up then and not before.
+  const litReels = won && outcome ? outcome.winningReels ?? [] : [];
+  const litRow = won && outcome ? winningRow(outcome.reels) : null;
   // The marquee's bulbs chase faster while the reels spin and after a win.
   const bulbSpeed = spinning ? '0.5s' : won ? '0.35s' : '1.6s';
 
@@ -167,7 +172,7 @@ export default function SlotsPage() {
             className={`rounded-[2rem] bg-gradient-to-b from-amber-200 via-amber-500 to-amber-700 p-1.5 ${won ? 'slots-win' : 'shadow-[0_0_40px_rgba(251,191,36,0.35)]'}`}
           >
             <div className="rounded-[1.7rem] bg-gradient-to-b from-rose-700 via-rose-800 to-rose-950 p-5 shadow-[inset_0_2px_0_rgba(255,255,255,0.25),inset_0_-8px_20px_rgba(0,0,0,0.5)]">
-              <SlotReels from={reelsFrom} reels={reels} spinId={spinId} onStopped={handleStopped} />
+              <SlotReels from={reelsFrom} reels={reels} spinId={spinId} onStopped={handleStopped} winning={litReels} />
 
               {/* Displays: credits (the balance), the bet, and the last win. */}
               <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3">
@@ -282,7 +287,7 @@ export default function SlotsPage() {
         </div>
 
         {/* SRS-309.4: the paytable, on show before the player spins. */}
-        <Paytable bet={bet} />
+        <Paytable bet={bet} winningRow={litRow} />
       </div>
     </main>
   );

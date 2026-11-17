@@ -74,9 +74,24 @@ describe('POST /api/slots/spin', () => {
       multiplier: 200,
       payout: 1000,
       balance: 1995,
+      winningReels: [0, 1, 2],
     });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith('fn_spin_slots', { p_player_id: 1, p_bet: 5, p_rolls: [31, 31, 31] });
+  });
+
+  it('says which reels form the win, from the committed reels (SRS-308.1)', async () => {
+    rpc.mockResolvedValue({
+      data: { ...SPUN, reels: ['Cherry', 'Cherry', 'Lemon'], multiplier: 4, payout: 20 },
+      error: null,
+    });
+    expect((await (await POST(req({ bet: 5 }))).json()).winningReels).toEqual([0, 1]);
+
+    rpc.mockResolvedValue({
+      data: { ...SPUN, reels: ['Cherry', 'Seven', 'Cherry'], multiplier: 0, payout: 0 },
+      error: null,
+    });
+    expect((await (await POST(req({ bet: 5 }))).json()).winningReels).toEqual([]);
   });
 
   it('draws each reel separately with crypto.randomInt over the 32 rolls (SRS-307.1)', async () => {

@@ -13,18 +13,25 @@ import type { SlotSymbolName } from '../../lib/slots';
  * The animation is clock-timed CSS (reel-spin in app/globals.css), and the
  * last reel's animationend marks the stop, with a backup timer in case the tab
  * was hidden and the animation never ran.
+ *
+ * `winning` lists the reels (0-2) that form a winning combination. The page
+ * passes it only once the last reel has stopped (SRS-308.1); the payline then
+ * lights up gold and those reels' symbols glow.
  */
 export default function SlotReels({
   from,
   reels,
   spinId,
   onStopped,
+  winning = [],
 }: {
   from: SlotSymbolName[];
   reels: SlotSymbolName[];
   spinId: number;
   onStopped: () => void;
+  winning?: readonly number[];
 }) {
+  const won = winning.length > 0;
   const pending = useRef(false);
   const onStoppedRef = useRef(onStopped);
   onStoppedRef.current = onStopped;
@@ -47,11 +54,15 @@ export default function SlotReels({
       <div className="relative grid grid-cols-3 gap-2 rounded-xl bg-black p-2 shadow-[inset_0_6px_16px_rgba(0,0,0,0.9)]">
         {reels.map((symbol, i) => {
           const strip = spinId === 0 ? [symbol] : reelStrip(from[i], symbol, REEL_CYCLES[i]);
+          const lit = winning.includes(i);
           return (
             <div
               key={i}
-              aria-label={`Reel ${i + 1}: ${symbol}`}
-              className="relative h-32 overflow-hidden rounded-lg bg-gradient-to-b from-zinc-400 via-white to-zinc-400 sm:h-40"
+              aria-label={`Reel ${i + 1}: ${symbol}${lit ? ' (winning)' : ''}`}
+              data-winning={lit || undefined}
+              className={`relative h-32 overflow-hidden rounded-lg bg-gradient-to-b from-zinc-400 via-white to-zinc-400 sm:h-40 ${
+                lit ? 'slots-reel-win' : ''
+              }`}
             >
               <div
                 // Remounts each spin so the animation plays again.
@@ -71,7 +82,10 @@ export default function SlotReels({
               >
                 {strip.map((s, j) => (
                   <div key={j} className="flex h-32 items-center justify-center drop-shadow-[0_3px_2px_rgba(0,0,0,0.35)] sm:h-40">
-                    <SlotSymbol name={s} />
+                    {/* The symbol it stops on glows when it's part of the win. */}
+                    <span className={lit && j === strip.length - 1 ? 'slots-symbol-win' : undefined}>
+                      <SlotSymbol name={s} />
+                    </span>
                   </div>
                 ))}
               </div>
@@ -81,11 +95,27 @@ export default function SlotReels({
             </div>
           );
         })}
-        {/* The payline, with an arrow at each end. */}
-        <div aria-hidden className="pointer-events-none absolute inset-x-2 top-1/2 h-[3px] -translate-y-1/2 bg-red-500/80 shadow-[0_0_8px_#ef4444]" />
+        {/* The payline, with an arrow at each end; gold and glowing on a win (SRS-308.1). */}
+        <div
+          aria-hidden
+          data-payline={won ? 'win' : 'idle'}
+          className={`pointer-events-none absolute inset-x-2 top-1/2 -translate-y-1/2 ${
+            won ? 'slots-payline-win h-[5px] bg-amber-300' : 'h-[3px] bg-red-500/80 shadow-[0_0_8px_#ef4444]'
+          }`}
+        />
       </div>
-      <span aria-hidden className="absolute -left-3 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[10px] border-l-[12px] border-y-transparent border-l-red-500 drop-shadow-[0_0_4px_#ef4444]" />
-      <span aria-hidden className="absolute -right-3 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[10px] border-r-[12px] border-y-transparent border-r-red-500 drop-shadow-[0_0_4px_#ef4444]" />
+      <span
+        aria-hidden
+        className={`absolute -left-3 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[10px] border-l-[12px] border-y-transparent ${
+          won ? 'border-l-amber-300 drop-shadow-[0_0_6px_#fbbf24]' : 'border-l-red-500 drop-shadow-[0_0_4px_#ef4444]'
+        }`}
+      />
+      <span
+        aria-hidden
+        className={`absolute -right-3 top-1/2 h-0 w-0 -translate-y-1/2 border-y-[10px] border-r-[12px] border-y-transparent ${
+          won ? 'border-r-amber-300 drop-shadow-[0_0_6px_#fbbf24]' : 'border-r-red-500 drop-shadow-[0_0_4px_#ef4444]'
+        }`}
+      />
     </div>
   );
 }

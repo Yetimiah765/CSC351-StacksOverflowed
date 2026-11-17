@@ -72,6 +72,25 @@ export function payoutMultiplier(reels: readonly SlotSymbolName[]): number {
   return 0;
 }
 
+/** The index in PAYTABLE of the row the reels win, or null for no win (SRS-309.3: at most one). */
+export function winningRow(reels: readonly SlotSymbolName[]): number | null {
+  const multiplier = payoutMultiplier(reels);
+  if (multiplier === 0) return null;
+  const row = PAYTABLE.findIndex((r) => r.multiplier === multiplier);
+  return row < 0 ? null : row;
+}
+
+/**
+ * The reels (0-2) whose symbols form the winning combination, for SRS-308.1's
+ * highlight: all three for three of a kind, only reels 1 and 2 for Cherry,
+ * Cherry, any other symbol; none for no win.
+ */
+export function winningReels(reels: readonly SlotSymbolName[]): number[] {
+  const row = winningRow(reels);
+  if (row === null) return [];
+  return PAYTABLE[row].reels.flatMap((symbol, i) => (symbol === null ? [] : [i]));
+}
+
 /** Coins a spin pays: the bet times the matched row's multiplier, or 0 (SRS-309.1). */
 export function slotPayout(bet: number, reels: readonly SlotSymbolName[]): number {
   return bet * payoutMultiplier(reels);

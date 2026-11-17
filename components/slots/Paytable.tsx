@@ -5,8 +5,12 @@
 import { PAYTABLE } from '../../lib/slots';
 import SlotSymbol from './SlotSymbol';
 
-/** `bet` is the selected bet, or null while the bet amounts load (then only the multipliers show). */
-export default function Paytable({ bet }: { bet: number | null }) {
+/**
+ * `bet` is the selected bet, or null while the bet amounts load (then only the
+ * multipliers show). `winningRow` is the index of the row the last spin won,
+ * passed once the reels have stopped, which lights up with the reels (SRS-308.1).
+ */
+export default function Paytable({ bet, winningRow = null }: { bet: number | null; winningRow?: number | null }) {
   return (
     <section
       aria-labelledby="slots-paytable-heading"
@@ -29,11 +33,16 @@ export default function Paytable({ bet }: { bet: number | null }) {
           </tr>
         </thead>
         <tbody>
-          {PAYTABLE.map((row) => (
-            <tr key={row.label}>
+          {PAYTABLE.map((row, index) => {
+            const won = index === winningRow;
+            return (
+            <tr key={row.label} data-winning={won || undefined}>
               <th scope="row" className="py-0 text-left font-normal">
-                <span className="sr-only">{row.label}</span>
-                <span aria-hidden className="flex gap-1.5">
+                <span className="sr-only">
+                  {row.label}
+                  {won && ' (your win)'}
+                </span>
+                <span aria-hidden className={`flex w-fit gap-1.5 rounded-lg p-0.5 ${won ? 'slots-paytable-win' : ''}`}>
                   {row.reels.map((symbol, i) => (
                     <span
                       key={i}
@@ -52,16 +61,23 @@ export default function Paytable({ bet }: { bet: number | null }) {
                   ))}
                 </span>
               </th>
-              <td className="whitespace-nowrap px-2 text-right font-mono text-lg font-bold tabular-nums text-amber-300">
+              <td
+                className={`whitespace-nowrap px-2 text-right font-mono text-lg font-bold tabular-nums ${
+                  won ? 'text-emerald-300 [text-shadow:0_0_10px_#34d399]' : 'text-amber-300'
+                }`}
+              >
                 {row.multiplier}×
               </td>
               {bet !== null && (
-                <td className="whitespace-nowrap text-right font-mono tabular-nums text-amber-100/80">
+                <td
+                  className={`whitespace-nowrap text-right font-mono tabular-nums ${won ? 'text-emerald-200' : 'text-amber-100/80'}`}
+                >
                   {(row.multiplier * bet).toLocaleString()} coins
                 </td>
               )}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </section>

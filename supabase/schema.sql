@@ -55,9 +55,11 @@ DROP TABLE IF EXISTS cosmetics                 CASCADE;
 DROP TABLE IF EXISTS player_game_stats         CASCADE;
 DROP TABLE IF EXISTS player_sessions           CASCADE;
 DROP TABLE IF EXISTS usernames                 CASCADE;
+DROP TABLE IF EXISTS player_auth_links         CASCADE;
 DROP TABLE IF EXISTS players                   CASCADE;
 DROP TABLE IF EXISTS games                     CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_seats_rules()          CASCADE;
+DROP FUNCTION IF EXISTS current_player_id()             CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_tables_seat_capacity() CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_record_results(JSONB) CASCADE;
 DROP FUNCTION IF EXISTS fn_poker_claim_lease(VARCHAR, INTEGER) CASCADE;
@@ -1285,6 +1287,38 @@ CREATE TRIGGER trg_poker_seats_rules
     BEFORE INSERT OR UPDATE ON poker_seats
     FOR EACH ROW
     EXECUTE FUNCTION fn_poker_seats_rules();
+
+-- Row Level Security on poker_seats (Sprint 6, JN; same as
+-- supabase/rls-poker-seats.sql, which explains the rules). A logged-in
+-- player may read only their own seats; nobody may insert, update or delete
+-- through the public API, since a seat's chip stack is money that only the
+-- poker server (service role) moves. auth.uid() reaches a player through
+-- player_auth_links.
+CREATE TABLE player_auth_links (
+    auth_user_id  UUID     PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    player_id     INTEGER  NOT NULL UNIQUE REFERENCES players(player_id) ON DELETE CASCADE
+);
+ALTER TABLE player_auth_links ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON player_auth_links FROM anon, authenticated;
+
+CREATE OR REPLACE FUNCTION current_player_id()
+RETURNS INTEGER
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+    SELECT player_id FROM public.player_auth_links WHERE auth_user_id = auth.uid();
+$$;
+REVOKE ALL ON FUNCTION current_player_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION current_player_id() TO authenticated;
+
+ALTER TABLE poker_seats ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Players can read their own seats"
+    ON poker_seats
+    FOR SELECT
+    TO authenticated
+    USING ((SELECT auth.uid()) IS NOT NULL AND player_id = (SELECT current_player_id()));
 
 -- SRS-1.1 / SRS-NFR-022: a table cannot shrink below a seat that is in use.
 CREATE OR REPLACE FUNCTION fn_poker_tables_seat_capacity()

@@ -114,10 +114,12 @@ CREATE TABLE players (
     username_changed_at     TIMESTAMPTZ,
 
     -- SRS-101.2 / SRS-101.3: letters, spaces, apostrophes, hyphens only.
+    -- Letters include accented ones (José, García): the same ranges as
+    -- NAME_PATTERN in lib/auth.ts.
     CONSTRAINT chk_players_first_name
-        CHECK (first_name ~ '^[A-Za-z][A-Za-z'' -]*$'),
+        CHECK (first_name ~ '^[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF][A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF'' -]*$'),
     CONSTRAINT chk_players_last_name
-        CHECK (last_name ~ '^[A-Za-z][A-Za-z'' -]*$'),
+        CHECK (last_name ~ '^[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF][A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF'' -]*$'),
 
     -- SRS-102.1: at least 21 years old on the day the account was created.
     CONSTRAINT chk_players_minimum_age

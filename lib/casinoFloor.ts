@@ -11,6 +11,7 @@
 // drawing code (Furniture.tsx) places chairs and dealers from the same
 // layout, so what you see is what you bump into.
 
+import { DAILY_LOGIN_BOX_REWARDS } from './dailyLoginBox';
 import { GAMES } from './games';
 
 export const COLS = 32;
@@ -87,6 +88,13 @@ function gameObject(
   };
 }
 
+/** "250 to 1,000 coins": the Daily Login Box's smallest and largest rewards (SRS-128.5). */
+export function dailyLoginBoxRange(): string {
+  const amounts = DAILY_LOGIN_BOX_REWARDS.map((reward) => reward.amount);
+  const coins = (amount: number) => amount.toLocaleString('en-US');
+  return `${coins(Math.min(...amounts))} to ${coins(Math.max(...amounts))} coins`;
+}
+
 // The room: the top two rows are the back wall (with the sign), the columns
 // left of LEFT_WALL and from RIGHT_WALL on are walls, and the way in is at
 // the bottom middle, where the player starts. The bar is set into the left
@@ -131,7 +139,8 @@ export const FLOOR_OBJECTS: FloorObject[] = [
     h: SHOP_ALCOVE.h,
     interactive: {
       name: 'Cosmetic Shop',
-      description: 'Spin the free Daily Login Box and open blind boxes for card backs, chips and outlines.',
+      // SRS-107.4: the home page's prompt for the Daily Login Box gives its range of rewards.
+      description: `Spin the free Daily Login Box for ${dailyLoginBoxRange()} and open blind boxes for card backs, chips and outlines.`,
       href: '/shop',
     },
   },

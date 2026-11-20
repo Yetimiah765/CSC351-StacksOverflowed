@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomBytes } from 'crypto';
+import sharp from 'sharp';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // See __tests__/api/auth.test.ts for the rationale behind this builder shape.
 function makeTableMock() {
@@ -46,6 +48,18 @@ function resetTable(table: ReturnType<typeof makeTableMock>) {
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+// A real PNG, width x height, of random pixels, which hardly compress, so its
+// size can be chosen: about 3 bytes a pixel.
+function noisePng(width: number, height: number) {
+  return sharp(randomBytes(width * height * 3), { raw: { width, height, channels: 3 } }).png().toBuffer();
+}
+
+// The size of the PNG in a data URL the route sent back.
+async function shownSize(dataUrl: string) {
+  const { width, height } = await sharp(Buffer.from(dataUrl.split(',')[1], 'base64')).metadata();
+  return { width, height };
+}
+
 function makeRequest(file?: Blob, token: string | null = 'valid-token') {
   const formData = new FormData();
   if (file) formData.append('image', file, 'avatar.png');
@@ -63,18 +77,46 @@ describe('Avatar upload route', () => {
     tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
   });
 
-  it('stores a valid PNG and returns a data URL (SRS-115.1)', async () => {
-    const buffer = Buffer.concat([PNG_SIGNATURE, Buffer.from('rest-of-png-data')]);
-    const file = new Blob([buffer], { type: 'image/png' });
+  let photo: Buffer;
+  beforeAll(async () => {
+    photo = await noisePng(300, 200);
+  });
+
+  it('stores a valid PNG as it was sent and returns a data URL (SRS-115.1)', async () => {
+    const file = new Blob([photo], { type: 'image/png' });
 
     const response = await POST(makeRequest(file));
     const body = await response.json();
 
     expect(response.status).toBe(200);
-    expect(body.profilePhotoDataUrl).toBe(`data:image/png;base64,${buffer.toString('base64')}`);
+    expect(body.profilePhotoDataUrl).toMatch(/^data:image\/png;base64,/);
     expect(tables.players.update).toHaveBeenCalledWith({
-      profile_photo: `\\x${buffer.toString('hex')}`,
+      profile_photo: `\\x${photo.toString('hex')}`,
     });
+  });
+
+  it("replies with the profile's 256px copy, small enough for Vercel's 4.5 MB limit (SRS-115.3)", async () => {
+    // About 3.9 MB: as base64 the photo itself would be about 5.2 MB.
+    const big = await noisePng(1150, 1150);
+    expect(big.byteLength).toBeGreaterThan(3.5 * 1024 * 1024);
+
+    const response = await POST(makeRequest(new Blob([big], { type: 'image/png' })));
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text.length).toBeLessThan(1024 * 1024);
+    expect(await shownSize(JSON.parse(text).profilePhotoDataUrl)).toEqual({ width: 256, height: 256 });
+    expect(tables.players.update).toHaveBeenCalledWith({ profile_photo: `\\x${big.toString('hex')}` });
+  });
+
+  it('rejects a file that starts like a PNG but is not an image, storing nothing (SRS-115.1)', async () => {
+    const file = new Blob([Buffer.concat([PNG_SIGNATURE, Buffer.from('rest-of-png-data')])], { type: 'image/png' });
+
+    const response = await POST(makeRequest(file));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'Profile photos must be PNG images.' });
+    expect(tables.players.update).not.toHaveBeenCalled();
   });
 
   it('returns 401 without a token', async () => {
@@ -113,7 +155,7 @@ describe('Avatar upload route', () => {
 
   it('returns 400 when the database update fails', async () => {
     tables.players.defaultResult = { data: null, error: { message: 'Update failed' } };
-    const file = new Blob([PNG_SIGNATURE], { type: 'image/png' });
+    const file = new Blob([photo], { type: 'image/png' });
     const response = await POST(makeRequest(file));
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'Update failed' });

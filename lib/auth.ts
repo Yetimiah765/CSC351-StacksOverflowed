@@ -51,6 +51,18 @@ export function isValidName(value: string): boolean {
   return NAME_PATTERN.test(value);
 }
 
+// A first or last name as typed, at registration (SRS-104.1) and on the
+// profile (SRS-112.3), so both apply the same rules: trimmed, required, the
+// allowed characters (SRS-101.2, SRS-101.3), and short enough for its column.
+// Returns the trimmed name to store, or the error to show.
+export function checkName(value: unknown, label: string): { name: string; error: null } | { error: string } {
+  if (typeof value !== 'string' || !value.trim()) return { error: `${label} is required.` };
+  const name = value.trim();
+  if (name.length > NAME_MAX_LENGTH) return { error: `${label} must be ${NAME_MAX_LENGTH} characters or fewer.` };
+  if (!isValidName(name)) return { error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' };
+  return { name, error: null };
+}
+
 export function isValidUsername(value: string): boolean {
   return USERNAME_PATTERN.test(value);
 }

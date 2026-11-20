@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { notifyBalanceChanged } from '../lib/balanceEvents';
-import { DAILY_LOGIN_BOX_REWARDS, formatCountdown } from '../lib/dailyLoginBox';
+import { DAILY_LOGIN_BOX_REWARDS, formatCountdown, statusCheckDue } from '../lib/dailyLoginBox';
 import SlotReveal from './SlotReveal';
 
 type BoxState =
@@ -14,6 +14,7 @@ type BoxState =
   | { kind: 'cooldown'; readyAt: number };
 
 const OPEN_FAILED = 'Could not open the Daily Login Box. Please try again.';
+const LOAD_FAILED = 'Could not load the Daily Login Box.';
 
 // The Daily Login Box card on the Cosmetic Shop page (UR-128). Its state
 // always comes from the server, so after a refresh or a closed tab the page
@@ -26,23 +27,29 @@ export default function DailyLoginBox() {
   const [reward, setReward] = useState<number | null>(null);
   const [showSpin, setShowSpin] = useState(false);
   const [error, setError] = useState('');
+  // Why the box's status couldn't be loaded, kept apart from error so the
+  // next check that gets through can clear it.
+  const [loadError, setLoadError] = useState('');
   const [now, setNow] = useState(() => Date.now());
 
+  // Resolves true once the status is known, false if the server refused.
   const loadStatus = useCallback(async (playerToken: string) => {
     const res = await fetch('/api/daily-login-box', {
       headers: { Authorization: `Bearer ${playerToken}` },
     });
     if (res.status === 401) {
       setState({ kind: 'guest' });
-      return;
+      return true;
     }
     const data = await res.json();
     if (!res.ok) {
-      setError(data.error || 'Could not load the Daily Login Box.');
-      return;
+      setLoadError(data.error || LOAD_FAILED);
+      return false;
     }
+    setLoadError('');
     setNow(Date.now());
     setState(data.available ? { kind: 'available' } : { kind: 'cooldown', readyAt: Date.now() + data.msRemaining });
+    return true;
   }, []);
 
   useEffect(() => {
@@ -52,22 +59,42 @@ export default function DailyLoginBox() {
       setState({ kind: 'guest' });
       return;
     }
-    loadStatus(stored).catch(() => setError('Could not load the Daily Login Box.'));
+    loadStatus(stored).catch(() => setLoadError(LOAD_FAILED));
   }, [loadStatus]);
 
   // SRS-128.13 / SRS-128.14: tick the countdown each second, then re-check
-  // with the server when it reaches zero, without reloading the page.
+  // with the server when it reaches zero, without reloading the page. A
+  // check that fails is tried again every few seconds, and at once when the
+  // browser is back online, until one gets through.
   useEffect(() => {
     if (state.kind !== 'cooldown') return;
+    let checking = false;
+    let lastFailedAt: number | null = null;
+    const retryNow = () => {
+      lastFailedAt = null;
+    };
+    window.addEventListener('online', retryNow);
     const timer = setInterval(() => {
       const current = Date.now();
       setNow(current);
-      if (current >= state.readyAt && token) {
-        clearInterval(timer);
-        loadStatus(token).catch(() => setError('Could not load the Daily Login Box.'));
-      }
+      if (!token || checking || !statusCheckDue(current, state.readyAt, lastFailedAt)) return;
+      checking = true;
+      loadStatus(token)
+        .then((known) => {
+          if (!known) lastFailedAt = Date.now();
+        })
+        .catch(() => {
+          setLoadError(LOAD_FAILED);
+          lastFailedAt = Date.now();
+        })
+        .finally(() => {
+          checking = false;
+        });
     }, 1000);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', retryNow);
+    };
   }, [state, token, loadStatus]);
 
   async function handleOpen() {
@@ -173,8 +200,8 @@ export default function DailyLoginBox() {
         <SlotReveal reward={reward} onClose={() => setShowSpin(false)} />
       ) : null}
 
-      {error ? (
-        <p className="mt-4 rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{error}</p>
+      {error || loadError ? (
+        <p className="mt-4 rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{error || loadError}</p>
       ) : null}
     </article>
   );

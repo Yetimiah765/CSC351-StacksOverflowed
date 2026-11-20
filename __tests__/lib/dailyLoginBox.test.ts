@@ -4,6 +4,8 @@ import {
   formatCountdown,
   msUntilAvailable,
   pickDailyLoginBoxReward,
+  STATUS_RECHECK_MS,
+  statusCheckDue,
 } from '../../lib/dailyLoginBox';
 
 describe('Daily Login Box rules', () => {
@@ -54,5 +56,23 @@ describe('Daily Login Box rules', () => {
     expect(formatCountdown(1500)).toBe('00:00:02');
     expect(formatCountdown(3_661_000)).toBe('01:01:01');
     expect(formatCountdown(24 * 60 * 60 * 1000)).toBe('24:00:00');
+  });
+
+  it('checks with the server once the cooldown runs out, and keeps checking after a failure (SRS-128.14)', () => {
+    const readyAt = 1_000_000;
+
+    // Not before the countdown reaches zero.
+    expect(statusCheckDue(readyAt - 1, readyAt, null)).toBe(false);
+    expect(statusCheckDue(readyAt, readyAt, null)).toBe(true);
+
+    // A failed check waits a few seconds, then is tried again, however many
+    // times it fails, so the box never stays stuck at 00:00:00.
+    let failedAt = readyAt;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect(statusCheckDue(failedAt + STATUS_RECHECK_MS - 1, readyAt, failedAt)).toBe(false);
+      expect(statusCheckDue(failedAt + STATUS_RECHECK_MS, readyAt, failedAt)).toBe(true);
+      failedAt += STATUS_RECHECK_MS;
+    }
+    expect(STATUS_RECHECK_MS).toBeLessThanOrEqual(10_000);
   });
 });

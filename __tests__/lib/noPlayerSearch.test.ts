@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
-import { join, relative } from 'path';
+import { join, relative, sep } from 'path';
 import { describe, expect, it } from 'vitest';
 
 // SRS-121.2: there is no way to search for a player's profile by username.
@@ -15,7 +15,9 @@ function files(dir: string): string[] {
   });
 }
 
-const appFiles = files(APP).map((path) => relative(APP, path));
+// Written with '/' on every computer (relative() uses backslashes on Windows),
+// so the checks below match the same paths everywhere.
+const appFiles = files(APP).map((path) => relative(APP, path).split(sep).join('/'));
 
 describe('No player search (SRS-121.2)', () => {
   it('has no search page or route', () => {

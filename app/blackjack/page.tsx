@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import BackToHome from "../../components/BackToHome";
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import { APPEARANCE_CHANGED_EVENT, BALANCE_CHANGED_EVENT, notifyBalanceChanged } from "../../lib/balanceEvents";
@@ -268,8 +269,12 @@ function getToken() {
 }
 
 // Reads the player's balance the same way the nav bar does; null while
-// loading, 0 for guests (SRS-109.4).
+// loading. Only logged-in players can play, so a guest, or a session that has
+// run out, is sent to log in (SRS-108.3), like roulette and the slots: the
+// login page hands them to a check-in tablet and brings them back here once
+// they've logged in (SRS-108.8).
 function usePlayerBalance() {
+  const router = useRouter();
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [version, setVersion] = useState(0);
@@ -285,6 +290,7 @@ function usePlayerBalance() {
     if (!token) {
       setSignedIn(false);
       setBalance(0);
+      router.replace("/login");
       return;
     }
     setSignedIn(true);
@@ -293,8 +299,10 @@ function usePlayerBalance() {
       .then(async (res) => {
         if (cancelled) return;
         if (res.status === 401) {
+          localStorage.removeItem("player_token");
           setSignedIn(false);
           setBalance(0);
+          router.replace("/login");
           return;
         }
         if (res.ok) setBalance((await res.json()).balance);
@@ -303,7 +311,7 @@ function usePlayerBalance() {
     return () => {
       cancelled = true;
     };
-  }, [version]);
+  }, [version, router]);
 
   return { signedIn, balance };
 }

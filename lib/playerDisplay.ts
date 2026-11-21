@@ -35,6 +35,22 @@ export async function photoToAvatarDataUrl(hexBytea: string | null, size = AVATA
   return `data:image/png;base64,${thumbnail.toString('base64')}`;
 }
 
+// The player's own photo on their profile page, drawn 112px across. A 256px
+// copy is sharp on any screen, and keeps the profile's replies far under
+// Vercel's 4.5 MB limit on what a function sends back, which the full photo
+// (up to 5 MB, a third more as base64) can go over (SRS-115.3).
+export const PROFILE_PHOTO_SIZE = 256;
+
+/** The profile page's copy of a player's photo, or null (the blank icon,
+ * SRS-115.5) if there's none or it can't be read. */
+export async function profilePhotoDataUrl(hexBytea: string | null): Promise<string | null> {
+  try {
+    return await photoToAvatarDataUrl(hexBytea, PROFILE_PHOTO_SIZE);
+  } catch {
+    return null;
+  }
+}
+
 export interface PlayerDisplay {
   username: string | null;
   profilePhotoDataUrl: string | null;

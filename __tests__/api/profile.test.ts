@@ -1,3 +1,4 @@
+import sharp from 'sharp';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // See __tests__/api/auth.test.ts for the rationale behind this builder shape:
@@ -120,16 +121,32 @@ describe('Profile API routes', () => {
     expect(response.status).toBe(401);
   });
 
-  it('GET returns a data URL for a stored profile photo', async () => {
+  it("GET returns a 256px copy of the stored photo, so the reply stays under Vercel's 4.5 MB limit (SRS-115.3)", async () => {
+    const photo = await sharp({ create: { width: 1200, height: 900, channels: 3, background: '#3366cc' } }).png().toBuffer();
     tables.players.maybeSingleResult = {
-      data: { ...playerRow, profile_photo: '\\x89504e470d0a1a0a' },
+      data: { ...playerRow, profile_photo: `\\x${photo.toString('hex')}` },
       error: null,
     };
 
     const response = await GET(req('GET'));
     const body = await response.json();
 
-    expect(body.profile.profilePhotoDataUrl).toMatch(/^data:image\/png;base64,/);
+    const dataUrl: string = body.profile.profilePhotoDataUrl;
+    expect(dataUrl).toMatch(/^data:image\/png;base64,/);
+    const shown = await sharp(Buffer.from(dataUrl.split(',')[1], 'base64')).metadata();
+    expect([shown.width, shown.height]).toEqual([256, 256]);
+  });
+
+  it("GET shows the blank icon for a stored photo that can't be read, rather than failing", async () => {
+    tables.players.maybeSingleResult = {
+      data: { ...playerRow, profile_photo: '\\x89504e470d0a1a0a' },
+      error: null,
+    };
+
+    const response = await GET(req('GET'));
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).profile.profilePhotoDataUrl).toBeNull();
   });
 
   it('PATCH updates the bio and returns the refreshed profile', async () => {

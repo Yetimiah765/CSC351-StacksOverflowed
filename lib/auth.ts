@@ -29,7 +29,11 @@ export function hashSessionToken(token: string): string {
 
 // SRS-101.2 / SRS-101.3: first/last names allow letters, spaces, apostrophes,
 // and hyphens, matching chk_players_first_name / chk_players_last_name.
-const NAME_PATTERN = /^[A-Za-z][A-Za-z' -]*$/;
+// Letters include accented ones, as in José, García, Zoë or Nguyễn: A-Z and
+// a-z plus the Latin-1 Supplement letters (not × or ÷), Latin Extended-A and
+// -B, and Latin Extended Additional.
+const NAME_LETTERS = 'A-Za-z\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u024F\\u1E00-\\u1EFF';
+const NAME_PATTERN = new RegExp(`^[${NAME_LETTERS}][${NAME_LETTERS}' -]*$`);
 
 // players.first_name / last_name are VARCHAR(50).
 export const NAME_MAX_LENGTH = 50;
@@ -57,7 +61,8 @@ export function isValidName(value: string): boolean {
 // Returns the trimmed name to store, or the error to show.
 export function checkName(value: unknown, label: string): { name: string; error: null } | { error: string } {
   if (typeof value !== 'string' || !value.trim()) return { error: `${label} is required.` };
-  const name = value.trim();
+  // NFC: an accent typed as a separate mark (e + ´) becomes the one letter é.
+  const name = value.trim().normalize('NFC');
   if (name.length > NAME_MAX_LENGTH) return { error: `${label} must be ${NAME_MAX_LENGTH} characters or fewer.` };
   if (!isValidName(name)) return { error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' };
   return { name, error: null };

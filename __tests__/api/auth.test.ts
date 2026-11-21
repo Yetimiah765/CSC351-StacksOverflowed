@@ -284,6 +284,26 @@ describe('Auth API routes', () => {
       );
     });
 
+    it('accepts accented letters in names, as in José García (SRS-101.2)', async () => {
+      for (const [firstName, lastName] of [['José', 'García'], ['Zoë', 'Nguyễn'], ['Łukasz', "O'Brien-Müller"]]) {
+        resetTable(tables.players);
+        acceptRegistration();
+        const response = await registerPost(registerRequest({ ...validRegistration, firstName, lastName }));
+        expect(response.status, `${firstName} ${lastName}`).toBe(201);
+        expect(insertedPlayer()).toEqual(expect.objectContaining({ first_name: firstName, last_name: lastName }));
+      }
+    });
+
+    it('stores an accent typed as a separate mark as the one accented letter (SRS-101.2)', async () => {
+      acceptRegistration();
+
+      // "Jose" + a combining acute accent, as some keyboards type it.
+      const response = await registerPost(registerRequest({ ...validRegistration, firstName: 'Jose\u0301' }));
+
+      expect(response.status).toBe(201);
+      expect(insertedPlayer().first_name).toBe('Jos\u00E9');
+    });
+
     it('rejects a name containing digits (SRS-101.3)', async () => {
       const response = await registerPost(registerRequest({ ...validRegistration, firstName: 'New1' }));
       expect(response.status).toBe(400);

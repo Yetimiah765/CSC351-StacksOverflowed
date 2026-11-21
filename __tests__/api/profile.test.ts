@@ -198,8 +198,16 @@ describe('Profile API routes', () => {
     expect(tables.players.update).toHaveBeenCalledWith({ last_name: "O'Neil-De La Cruz" });
   });
 
+  it('PATCH accepts accented letters, like registration does (SRS-112.3, SRS-101.2)', async () => {
+    const response = await PATCH(req('PATCH', { firstName: 'José' }));
+
+    expect(response.status).toBe(200);
+    expect(tables.players.update).toHaveBeenCalledWith({ first_name: 'José' });
+  });
+
   it.each([
     ['a number', { firstName: 'Jam3s' }],
+    ['a symbol that is not a letter', { lastName: 'A×B' }],
     ['a special character', { lastName: 'Ortiz!' }],
     ['a leading apostrophe', { firstName: "'James" }],
   ])('PATCH rejects a name with %s, like registration does (SRS-112.3)', async (_, body) => {

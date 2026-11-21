@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../lib/supabase';
-import { getPlayerIdForToken, isValidName, isValidUsername, NAME_MAX_LENGTH } from '../../../lib/auth';
+import { checkName, getPlayerIdForToken, isValidUsername } from '../../../lib/auth';
 import { profilePhotoDataUrl } from '../../../lib/playerDisplay';
 import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -61,16 +61,6 @@ async function requirePlayerId(request: Request, supabase: SupabaseClient) {
   }
 
   return { playerId, errorResponse: null };
-}
-
-// SRS-112.3: an edited name follows the registration rules (SRS-101.2,
-// SRS-101.3) and must fit its column. Returns the trimmed name or an error.
-function checkName(value: unknown, label: string): { name: string; error: null } | { error: string } {
-  if (typeof value !== 'string' || !value.trim()) return { error: `${label} is required.` };
-  const name = value.trim();
-  if (name.length > NAME_MAX_LENGTH) return { error: `${label} must be ${NAME_MAX_LENGTH} characters or fewer.` };
-  if (!isValidName(name)) return { error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' };
-  return { name, error: null };
 }
 
 // "in 5 hours" / "in 12 minutes", for the username cooldown message.
@@ -173,6 +163,7 @@ export async function PATCH(request: Request) {
     changes.bio = trimmedBio || null;
   }
 
+  // SRS-112.3: an edited name follows the same rules as at registration.
   if (firstName !== undefined) {
     const checked = checkName(firstName, 'First name');
     if (checked.error !== null) return Response.json({ error: checked.error }, { status: 400 });

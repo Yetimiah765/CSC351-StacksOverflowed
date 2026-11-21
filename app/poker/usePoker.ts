@@ -5,6 +5,7 @@
 // subscribing to one of the poker Realtime channels (lib/pokerRealtime.ts),
 // and sending actions through POST /api/poker/action.
 
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSupabaseBrowserClient } from '../../lib/supabase';
 import {
@@ -44,16 +45,22 @@ function generateId(): string {
  * player whose own profile — username and picture — is what gets seated.
  */
 export function usePlayerProfile() {
+  const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<OwnProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // SRS-108.3: only logged-in players can play, so the lobby and every table
+  // send a guest, or a player whose session has run out, to log in, like the
+  // other games: the login page hands them to a check-in tablet and brings
+  // them back once they've logged in (SRS-108.8).
   useEffect(() => {
     const stored = localStorage.getItem('player_token');
     setToken(stored);
     if (!stored) {
       setLoading(false);
+      router.replace('/login');
       return;
     }
 
@@ -61,6 +68,12 @@ export function usePlayerProfile() {
     // small avatar thumbnail follows on its own.
     fetch('/api/profile?photo=none', { headers: { Authorization: `Bearer ${stored}` } })
       .then(async (res) => {
+        if (res.status === 401) {
+          localStorage.removeItem('player_token');
+          setToken(null);
+          router.replace('/login');
+          return;
+        }
         const data = await res.json();
         if (!res.ok) {
           setError(data.error || 'Failed to load your profile.');
@@ -76,7 +89,7 @@ export function usePlayerProfile() {
           .catch(() => {});
       })
       .finally(() => setLoading(false));
-  }, []);
+  }, [router]);
 
   return { token, profile, setProfile, loading, error };
 }

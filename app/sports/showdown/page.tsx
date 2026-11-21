@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Showdown, ShowdownTeam } from '../../../lib/sports/showdown';
 import { projectedPayout } from '../../../lib/sports/showdown';
@@ -442,6 +443,7 @@ function RulesDialog({ onClose }: { onClose: () => void }) {
 }
 
 export default function ShowdownPage() {
+  const router = useRouter();
   const [showdowns, setShowdowns] = useState<Showdown[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [token, setToken] = useState<string | null>(null);
@@ -449,9 +451,15 @@ export default function ShowdownPage() {
   const [notice, setNotice] = useState<Notice>(null);
   const [showRules, setShowRules] = useState(false);
 
+  // SRS-108.3: only logged-in players can play, so a guest is sent to log
+  // in, like the other games (and brought back here afterwards, SRS-108.8).
   useEffect(() => {
-    setToken(localStorage.getItem('player_token'));
-  }, []);
+    const stored = localStorage.getItem('player_token');
+    setToken(stored);
+    if (!stored) {
+      router.replace('/login');
+    }
+  }, [router]);
 
   const load = useCallback(async () => {
     try {
@@ -480,10 +488,18 @@ export default function ShowdownPage() {
   useEffect(() => {
     if (!token) return;
     fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${token}` } })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        // A session that has run out: log in again (SRS-108.3).
+        if (res.status === 401) {
+          localStorage.removeItem('player_token');
+          router.replace('/login');
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
       .then((data) => setBalance(data?.balance ?? null))
       .catch(() => setBalance(null));
-  }, [token]);
+  }, [token, router]);
 
   const onPlaced = (next: number, message: Notice) => {
     setBalance(next);

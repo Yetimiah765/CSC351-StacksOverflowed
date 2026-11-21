@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import BackToHome from '../../components/BackToHome';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EventListing, OptionSide, SportsEvent, SportsMarket, SportsOption } from '../../lib/sports/events';
@@ -896,6 +897,7 @@ function ResultsModal({ items, onClose }: { items: ResultItem[]; onClose: () => 
 }
 
 export default function SportsBettingPage() {
+  const router = useRouter();
   const [listing, setListing] = useState<EventListing | null>(null);
   const [loadError, setLoadError] = useState('');
   const [sport, setSport] = useState<string | null>(null);
@@ -968,20 +970,34 @@ export default function SportsBettingPage() {
     return () => clearInterval(timer);
   }, [token, loadMyBets]);
 
+  // SRS-108.3: only logged-in players can bet, so a guest, or a player whose
+  // session has run out, is sent to log in, like the other games: the login
+  // page hands them to a check-in tablet and brings them back here once
+  // they've logged in (SRS-108.8).
   useEffect(() => {
     const stored = localStorage.getItem('player_token');
     setToken(stored);
-    if (!stored) return;
+    if (!stored) {
+      router.replace('/login');
+      return;
+    }
     // The nav bar shows the balance; the slip only needs it to warn about
     // wagers the player can't afford.
     fetch('/api/profile/balance', { headers: { Authorization: `Bearer ${stored}` } })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (res.status === 401) {
+          localStorage.removeItem('player_token');
+          router.replace('/login');
+          return null;
+        }
+        return res.ok ? res.json() : null;
+      })
       .then((data) => {
         setBalance(data?.balance ?? null);
         setPlayerId(data?.playerId ?? null);
       })
       .catch(() => setBalance(null));
-  }, []);
+  }, [router]);
 
   // Keep the slip in sync with refreshed odds, and drop it if the market closed.
   useEffect(() => {

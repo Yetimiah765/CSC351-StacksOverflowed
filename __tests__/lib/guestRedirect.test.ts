@@ -23,3 +23,23 @@ describe.each(PAGES)('the %s page (SRS-108.3)', (page) => {
     );
   });
 });
+
+// The poker lobby and every table get the player from usePlayerProfile() in
+// app/poker/usePoker.ts, so that's where they send a guest to log in.
+describe('the poker lobby and tables, through usePlayerProfile() (SRS-108.3)', () => {
+  const hook = readFileSync(join(__dirname, '../../app/poker/usePoker.ts'), 'utf8');
+
+  it('both get the player from it', () => {
+    for (const page of ['poker', 'poker/[tableId]']) expect(source(page)).toContain('usePlayerProfile()');
+  });
+
+  it('sends a guest with no session to log in', () => {
+    expect(hook).toMatch(/if \(!\w+\) \{[^}]*router\.replace\(["']\/login["']\)/);
+  });
+
+  it('sends a player whose session has run out to log in, forgetting it', () => {
+    expect(hook).toMatch(
+      /status === 401\) \{[^}]*localStorage\.removeItem\(["']player_token["']\);[^}]*router\.replace\(["']\/login["']\)/
+    );
+  });
+});

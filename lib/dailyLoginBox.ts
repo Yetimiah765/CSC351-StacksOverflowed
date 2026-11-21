@@ -45,3 +45,17 @@ export function formatCountdown(ms: number): string {
   const seconds = totalSeconds % 60;
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, '0')).join(':');
 }
+
+// SRS-128.14: once the cooldown is over, the shop asks the server whether the
+// box is ready. If that check fails (no connection, a server error), it asks
+// again this often until one gets through, so the box never stays stuck at
+// 00:00:00 until a reload.
+export const STATUS_RECHECK_MS = 5000;
+
+/**
+ * Whether the shop should ask the server for the box's status now: the
+ * cooldown has run out and no check has failed in the last STATUS_RECHECK_MS.
+ */
+export function statusCheckDue(now: number, readyAt: number, lastFailedAt: number | null): boolean {
+  return now >= readyAt && (lastFailedAt === null || now - lastFailedAt >= STATUS_RECHECK_MS);
+}

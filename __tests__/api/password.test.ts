@@ -35,6 +35,7 @@ vi.mock('../../lib/supabase', () => ({
 }));
 
 import { POST } from '../../app/api/profile/password/route';
+import { verifyPassword } from '../../lib/auth';
 
 function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.select.mockClear();
@@ -87,9 +88,9 @@ describe('Change password route', () => {
     expect(tables.players.eq).toHaveBeenCalledWith('player_id', 1);
     const hash = savedHash()!;
     expect(hash).not.toBe('NewPass456');
-    expect(await bcrypt.compare('NewPass456', hash)).toBe(true);
+    expect(await verifyPassword('NewPass456', hash)).toBe(true);
     // Case-sensitive, like at registration (SRS-113.3).
-    expect(await bcrypt.compare('newpass456', hash)).toBe(false);
+    expect(await verifyPassword('newpass456', hash)).toBe(false);
   });
 
   it('requires the current password (SRS-113.1)', async () => {

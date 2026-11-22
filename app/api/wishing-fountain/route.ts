@@ -100,7 +100,7 @@ export async function POST(request: Request) {
     case 'busy':
       return Response.json({ error: 'Your last wish is still being made.' }, { status: 409 });
     case 'not_active':
-      return Response.json({ error: 'Accounts pending deletion cannot make a wish.' }, { status: 403 });
+      return Response.json({ error: "Accounts that aren't active can't make a wish." }, { status: 403 });
     default:
       return Response.json({ error: 'Player not found.' }, { status: 404 });
   }

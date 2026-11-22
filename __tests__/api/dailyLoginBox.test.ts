@@ -178,12 +178,13 @@ describe('Daily Login Box API route', () => {
       expect(body.msRemaining).toBeGreaterThan(0);
     });
 
-    it('rejects an account pending deletion (SRS-128.20)', async () => {
+    it('rejects an account that is not active, saying so (SRS-128.20)', async () => {
       rpc.mockResolvedValue({ data: { status: 'not_active' }, error: null });
 
       const response = await POST(req('POST'));
 
       expect(response.status).toBe(403);
+      expect((await response.json()).error).toBe("Accounts that aren't active can't open the Daily Login Box.");
     });
 
     it('reports a failed opening so the player can try again (SRS-128.21)', async () => {

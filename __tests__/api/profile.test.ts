@@ -300,10 +300,11 @@ describe('Profile API routes', () => {
       });
     });
 
-    it('returns 403 for an account pending deletion', async () => {
+    it('returns 403 for an account that is not active, saying so', async () => {
       rpc.mockResolvedValue({ data: { status: 'not_active' }, error: null });
       const response = await PATCH(req('PATCH', { username: 'newname3' }));
       expect(response.status).toBe(403);
+      expect((await response.json()).error).toBe("This account isn't active.");
     });
 
     it('returns 500 when the database call fails, e.g. before the migration is run', async () => {

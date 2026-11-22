@@ -111,7 +111,7 @@ export async function POST(request: Request) {
       );
     case 'not_active':
       return Response.json(
-        { error: 'Accounts pending deletion cannot open the Daily Login Box.' },
+        { error: "Accounts that aren't active can't open the Daily Login Box." },
         { status: 403 }
       );
     default:

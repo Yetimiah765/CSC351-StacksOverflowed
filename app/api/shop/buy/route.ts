@@ -110,7 +110,8 @@ export async function POST(request: Request) {
     case 'unavailable':
       return Response.json({ error: 'This box is not in the shop right now.' }, { status: 409 });
     case 'not_active':
-      return Response.json({ error: 'This account is pending deletion.' }, { status: 403 });
+      // SRS-124.8. (Accounts are deleted at once, SRS-106.6, so none waits for deletion.)
+      return Response.json({ error: "This account isn't active, so it can't buy boxes." }, { status: 403 });
     case 'not_found':
       return Response.json({ error: 'Player not found.' }, { status: 404 });
     default:

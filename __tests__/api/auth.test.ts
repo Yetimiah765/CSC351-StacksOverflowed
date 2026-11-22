@@ -576,6 +576,7 @@ describe('Auth API routes', () => {
       const response = await loginPost(loginRequest({ username: 'gooduser1', password }));
 
       expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "This account isn't active and can't be logged in to." });
     });
   });
 });

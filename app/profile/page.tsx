@@ -64,6 +64,8 @@ export default function ProfilePage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [deletePassword, setDeletePassword] = useState('');
+  // The poker table to leave before the account can be deleted (SRS-106.10).
+  const [deleteTableKey, setDeleteTableKey] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('player_token');
@@ -208,6 +210,7 @@ export default function ProfilePage() {
     if (!token) return;
     setDeleting(true);
     setDeleteError('');
+    setDeleteTableKey(null);
     const result = await deleteAccount(token, deletePassword);
     if (!result.ok) {
       setDeleting(false);
@@ -217,6 +220,7 @@ export default function ProfilePage() {
         return;
       }
       setDeleteError(result.error);
+      setDeleteTableKey(result.tableKey ?? null);
       return;
     }
     localStorage.removeItem('player_token');
@@ -321,6 +325,7 @@ export default function ProfilePage() {
                 onClick={() => {
                   setDeleteError('');
                   setDeletePassword('');
+                  setDeleteTableKey(null);
                   setEditing('deleteAccount');
                 }}
                 className="mt-4 rounded-xl border border-red-500/60 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/10"
@@ -372,6 +377,17 @@ export default function ProfilePage() {
           deleting={deleting}
           error={deleteError}
           confirmDisabled={!deletePassword}
+          errorLink={
+            // SRS-106.10: refused while seated at poker; the way to the table to leave.
+            deleteTableKey ? (
+              <Link
+                href={`/poker/${deleteTableKey}`}
+                className="text-sm font-semibold text-emerald-300 underline-offset-2 hover:text-emerald-200 hover:underline"
+              >
+                Go to your poker table
+              </Link>
+            ) : null
+          }
           onConfirm={confirmDeletion}
           onCancel={() => setEditing(null)}
         >

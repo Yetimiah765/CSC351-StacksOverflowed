@@ -27,9 +27,14 @@ const tables = {
   players: makeTableMock(),
 };
 
+// fn_delete_account: deletes the player in one transaction, or refuses while
+// they're seated at poker (supabase/schema.sql).
+const rpc = vi.fn();
+
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(() => ({
     from: vi.fn((table: keyof typeof tables) => tables[table]),
+    rpc,
   })),
 }));
 
@@ -61,10 +66,11 @@ describe('Deleting an account (UR-106)', () => {
   beforeEach(() => {
     resetTable(tables.player_sessions);
     resetTable(tables.players);
+    rpc.mockReset();
     // The bearer token belongs to player 1.
     tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
     tables.players.maybeSingleResult = { data: { password_hash: passwordHash }, error: null };
-    tables.players.defaultResult = { data: [{ player_id: 1 }], error: null };
+    rpc.mockResolvedValue({ data: { status: 'deleted' }, error: null });
   });
 
   it("deletes the logged-in player's account, and with it everything tied to it (SRS-106.3)", async () => {
@@ -72,33 +78,35 @@ describe('Deleting an account (UR-106)', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ deleted: true });
-    expect(tables.players.delete).toHaveBeenCalledTimes(1);
-    expect(tables.players.eq).toHaveBeenCalledWith('player_id', 1);
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('fn_delete_account', { p_player_id: 1 });
+    // The rest goes with the player's row inside fn_delete_account, never row by row here.
+    expect(tables.players.delete).not.toHaveBeenCalled();
   });
 
   it('deletes only the account the session belongs to, whatever the request names', async () => {
-    await DELETE(deleteRequest({ password: PASSWORD, playerId: 2, player_id: 2 }));
+    await DELETE(deleteRequest({ password: PASSWORD, playerId: 2, player_id: 2, p_player_id: 2 }));
 
-    expect(tables.players.delete).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('fn_delete_account', { p_player_id: 1 });
     expect(tables.players.eq.mock.calls.every(([column, value]) => column === 'player_id' && value === 1)).toBe(true);
   });
 
   it('refuses without a session, deleting nothing', async () => {
-    expect((await DELETE(deleteRequest({}, null))).status).toBe(401);
+    expect((await DELETE(deleteRequest(undefined, null))).status).toBe(401);
 
     tables.player_sessions.maybeSingleResult = { data: null, error: null };
-    expect((await DELETE(deleteRequest({}, 'expired-token'))).status).toBe(401);
+    expect((await DELETE(deleteRequest(undefined, 'expired-token'))).status).toBe(401);
 
-    expect(tables.players.delete).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
-  it('requires the player\'s password, deleting nothing without it (SRS-106.2)', async () => {
+  it("requires the player's password, deleting nothing without it (SRS-106.2)", async () => {
     for (const body of [{}, { password: '' }, { password: 123 }]) {
       const response = await DELETE(deleteRequest(body));
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: 'Enter your password to delete your account.' });
     }
-    expect(tables.players.delete).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('refuses a wrong password, deleting nothing (SRS-106.2)', async () => {
@@ -107,7 +115,7 @@ describe('Deleting an account (UR-106)', () => {
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({ error: 'Incorrect password.' });
     }
-    expect(tables.players.delete).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it('checks the password against the stored hash before deleting (SRS-106.2, SRS-104.6)', async () => {
@@ -116,25 +124,35 @@ describe('Deleting an account (UR-106)', () => {
       order.push('password checked');
       return Promise.resolve(tables.players.maybeSingleResult);
     });
-    tables.players.delete.mockImplementationOnce(() => {
+    rpc.mockImplementationOnce(async () => {
       order.push('deleted');
-      return tables.players;
+      return { data: { status: 'deleted' }, error: null };
     });
 
     expect((await DELETE(deleteRequest())).status).toBe(200);
     expect(order).toEqual(['password checked', 'deleted']);
   });
 
-  it('says so when the account is already gone', async () => {
-    tables.players.defaultResult = { data: [], error: null };
+  it('refuses while the player is seated at poker, telling them to leave the table first (SRS-106.10)', async () => {
+    rpc.mockResolvedValue({ data: { status: 'seated', table_key: 'low-1' }, error: null });
 
     const response = await DELETE(deleteRequest());
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "You're seated at a poker table. Leave the table first, then delete your account.",
+      tableKey: 'low-1',
+    });
+  });
+
+  it('says so when the account is already gone', async () => {
+    rpc.mockResolvedValue({ data: { status: 'not_found' }, error: null });
+
+    expect((await DELETE(deleteRequest())).status).toBe(404);
   });
 
   it('reports a database failure without claiming the account was deleted', async () => {
-    tables.players.defaultResult = { data: null, error: { message: 'connection lost' } };
+    rpc.mockResolvedValue({ data: null, error: { message: 'connection lost' } });
 
     const response = await DELETE(deleteRequest());
 

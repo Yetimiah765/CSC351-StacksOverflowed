@@ -40,7 +40,9 @@ describe('the account-deletion confirmation (SRS-106.1)', () => {
   it('is the only way the profile page deletes the account', () => {
     const page = readFileSync(join(__dirname, '../../app/profile/page.tsx'), 'utf8');
     // The Delete account button opens the pop-up; deleteAccount() runs only from its confirmation.
-    expect(page).toMatch(/onClick=\{\(\) => \{\s*setDeleteError\(''\);\s*setDeletePassword\(''\);\s*setEditing\('deleteAccount'\);\s*\}\}/);
+    const opens = page.match(/onClick=\{\(\) => \{([^}]*)setEditing\('deleteAccount'\);\s*\}\}/);
+    expect(opens).not.toBeNull();
+    expect(opens![1]).not.toContain('deleteAccount(');
     expect(page.match(/deleteAccount\(token/g)).toHaveLength(1);
     expect(page).toMatch(/async function confirmDeletion\(\)[\s\S]*?deleteAccount\(token/);
     expect(page).toContain('onConfirm={confirmDeletion}');
@@ -90,6 +92,24 @@ describe('the request the confirmation sends (UR-106)', () => {
 
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
     expect(await deleteAccount('tok', 'pw')).toEqual({ ok: false, error: 'Could not delete your account. Please try again.' });
+  });
+
+  it('passes on the poker table to leave first (SRS-106.10)', async () => {
+    stubFetch(409, { error: "You're seated at a poker table. Leave the table first, then delete your account.", tableKey: 'low-1' });
+    expect(await deleteAccount('tok', 'pw')).toEqual({
+      ok: false,
+      error: "You're seated at a poker table. Leave the table first, then delete your account.",
+      tableKey: 'low-1',
+    });
+
+    const page = readFileSync(join(__dirname, '../../app/profile/page.tsx'), 'utf8');
+    expect(page).toContain('setDeleteTableKey(result.tableKey ?? null)');
+    expect(page).toMatch(/errorLink=\{[\s\S]*?href=\{`\/poker\/\$\{deleteTableKey\}`\}[\s\S]*?Go to your poker table/);
+
+    // The link goes under the message that explains it.
+    const html = dialog({ error: 'Leave the table first.', errorLink: createElement('a', { href: '/poker/low-1' }, 'Go to your poker table') });
+    expect(html.indexOf('Leave the table first.')).toBeLessThan(html.indexOf('Go to your poker table'));
+    expect(dialog({ errorLink: createElement('a', null, 'Go to your poker table') })).not.toContain('Go to your poker table');
   });
 
   it('says when the session has ended, so the page can send the player to log in', async () => {

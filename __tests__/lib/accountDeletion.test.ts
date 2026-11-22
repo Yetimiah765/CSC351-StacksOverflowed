@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sqlFiles } from '../helpers/sql';
+import { functionDefinitions, sqlFiles } from '../helpers/sql';
 
 // SRS-106.3: deleting an account deletes all of its information. The delete
 // route deletes only the player's row; the rest goes with it because every
@@ -40,5 +40,37 @@ describe('Deleting an account deletes all of its information (SRS-106.3)', () =>
   it('deletes their rows along with the player, in schema.sql and every migration', () => {
     const notCascading = references.filter((r) => !/ON DELETE CASCADE/i.test(r.line));
     expect(notCascading.map((r) => `${r.file}: ${r.table}: ${r.line}`)).toEqual([]);
+  });
+});
+
+// fn_delete_account (supabase/schema.sql and the 2026-11-21 migration):
+// checked on a scratch Postgres too, but these hold the shape every copy of
+// the function must keep.
+describe('fn_delete_account (SRS-106.3, SRS-106.10)', () => {
+  const definitions = functionDefinitions('fn_delete_account');
+
+  it('is defined in schema.sql and a migration', () => {
+    expect(definitions.map((d) => d.file)).toEqual(expect.arrayContaining(['schema.sql', 'migrations/2026-11-21_delete_account.sql']));
+  });
+
+  it.each(definitions.map((d) => [d.file, d.body] as const))(
+    'in %s locks the player, refuses while seated at poker, and only then deletes',
+    (_, body) => {
+      const lock = body.search(/FROM players\s+WHERE player_id = p_player_id\s+FOR UPDATE/);
+      const seat = body.search(/FROM poker_seats/);
+      const refuse = body.search(/'status', 'seated'/);
+      const remove = body.search(/DELETE FROM players WHERE player_id = p_player_id/);
+      expect([lock, seat, refuse, remove].every((at) => at >= 0)).toBe(true);
+      expect(lock).toBeLessThan(seat);
+      expect(seat).toBeLessThan(refuse);
+      expect(refuse).toBeLessThan(remove);
+    }
+  );
+
+  it('can be called only by the server, in every file', () => {
+    for (const { name, sql } of sqlFiles().filter((f) => f.sql.includes('FUNCTION fn_delete_account'))) {
+      expect(sql, name).toContain('REVOKE EXECUTE ON FUNCTION fn_delete_account(INTEGER) FROM PUBLIC');
+      expect(sql, name).toContain("REVOKE EXECUTE ON FUNCTION fn_delete_account(INTEGER) FROM anon, authenticated");
+    }
   });
 });

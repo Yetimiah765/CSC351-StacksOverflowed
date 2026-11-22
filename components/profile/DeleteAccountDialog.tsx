@@ -10,6 +10,7 @@ export default function DeleteAccountDialog({
   deleting,
   error,
   confirmDisabled = false,
+  errorLink,
   onConfirm,
   onCancel,
   children,
@@ -17,6 +18,8 @@ export default function DeleteAccountDialog({
   deleting: boolean;
   error: string;
   confirmDisabled?: boolean;
+  // What to do about the error, shown under it, e.g. the poker table to leave (SRS-106.10).
+  errorLink?: React.ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
   children?: React.ReactNode;
@@ -63,6 +66,7 @@ export default function DeleteAccountDialog({
         {error ? (
           <p className="mt-4 rounded-xl border border-red-800 bg-red-950/60 p-3 text-sm text-red-200">{error}</p>
         ) : null}
+        {error && errorLink ? <div className="mt-3">{errorLink}</div> : null}
 
         <div className="mt-6 flex justify-end gap-3">
           <button

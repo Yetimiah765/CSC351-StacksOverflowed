@@ -198,10 +198,11 @@ export async function PATCH(request: Request) {
 
 // SRS-106.3: deleting an account deletes everything tied to it. Every table
 // that refers to players does so ON DELETE CASCADE (checked by
-// __tests__/lib/accountDeletion.test.ts), so deleting the player's row also
-// deletes their username, sessions, balance, statistics, cosmetics and every
-// game's rows. Only the logged-in player's own account, found from their
-// session token, is ever deleted; nothing in the request can name another.
+// __tests__/lib/accountDeletion.test.ts), so deleting the player's row (in
+// fn_delete_account) also deletes their username, sessions, balance,
+// statistics, cosmetics and every game's rows. Only the logged-in player's
+// own account, found from their session token, is ever deleted; nothing in
+// the request can name another.
 export async function DELETE(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -228,9 +229,27 @@ export async function DELETE(request: Request) {
     return Response.json({ error: 'Incorrect password.' }, { status: 403 });
   }
 
-  const { data, error } = await supabase.from('players').delete().eq('player_id', playerId!).select('player_id');
+  // fn_delete_account deletes the row in one transaction, unless the player
+  // is seated at a poker table (SRS-106.10): then nothing is deleted and they
+  // are told to leave the table first, with the table to go to.
+  const { data, error } = await supabase.rpc('fn_delete_account', { p_player_id: playerId });
   if (error) return Response.json({ error: 'Could not delete your account. Please try again.' }, { status: 500 });
-  if (!data || data.length === 0) return Response.json({ error: 'No account was found.' }, { status: 404 });
 
-  return Response.json({ deleted: true }, { status: 200 });
+  const result = data as { status: string; table_key?: string };
+  switch (result.status) {
+    case 'deleted':
+      return Response.json({ deleted: true }, { status: 200 });
+    case 'seated':
+      return Response.json(
+        {
+          error: "You're seated at a poker table. Leave the table first, then delete your account.",
+          tableKey: result.table_key ?? null,
+        },
+        { status: 409 }
+      );
+    case 'not_found':
+      return Response.json({ error: 'No account was found.' }, { status: 404 });
+    default:
+      return Response.json({ error: 'Could not delete your account. Please try again.' }, { status: 500 });
+  }
 }

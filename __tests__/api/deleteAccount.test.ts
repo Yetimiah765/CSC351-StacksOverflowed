@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // See __tests__/api/auth.test.ts for the rationale behind this builder shape.
 function makeTableMock() {
@@ -34,6 +34,10 @@ vi.mock('../../lib/supabase', () => ({
 }));
 
 import { DELETE } from '../../app/api/profile/route';
+import { hashPassword } from '../../lib/auth';
+
+const PASSWORD = 'Secret123';
+let passwordHash: string;
 
 function resetTable(table: ReturnType<typeof makeTableMock>) {
   for (const fn of [table.select, table.eq, table.delete, table.maybeSingle]) fn.mockClear();
@@ -41,7 +45,7 @@ function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.maybeSingleResult = { data: null, error: null };
 }
 
-function deleteRequest(body: object = {}, token: string | null = 'valid-token') {
+function deleteRequest(body: object = { password: PASSWORD }, token: string | null = 'valid-token') {
   return new Request('http://localhost/api/profile', {
     method: 'DELETE',
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -50,11 +54,16 @@ function deleteRequest(body: object = {}, token: string | null = 'valid-token') 
 }
 
 describe('Deleting an account (UR-106)', () => {
+  beforeAll(async () => {
+    passwordHash = await hashPassword(PASSWORD);
+  });
+
   beforeEach(() => {
     resetTable(tables.player_sessions);
     resetTable(tables.players);
     // The bearer token belongs to player 1.
     tables.player_sessions.maybeSingleResult = { data: { player_id: 1 }, error: null };
+    tables.players.maybeSingleResult = { data: { password_hash: passwordHash }, error: null };
     tables.players.defaultResult = { data: [{ player_id: 1 }], error: null };
   });
 
@@ -68,10 +77,10 @@ describe('Deleting an account (UR-106)', () => {
   });
 
   it('deletes only the account the session belongs to, whatever the request names', async () => {
-    await DELETE(deleteRequest({ playerId: 2, player_id: 2 }));
+    await DELETE(deleteRequest({ password: PASSWORD, playerId: 2, player_id: 2 }));
 
-    expect(tables.players.eq).toHaveBeenCalledTimes(1);
-    expect(tables.players.eq).toHaveBeenCalledWith('player_id', 1);
+    expect(tables.players.delete).toHaveBeenCalledTimes(1);
+    expect(tables.players.eq.mock.calls.every(([column, value]) => column === 'player_id' && value === 1)).toBe(true);
   });
 
   it('refuses without a session, deleting nothing', async () => {
@@ -81,6 +90,39 @@ describe('Deleting an account (UR-106)', () => {
     expect((await DELETE(deleteRequest({}, 'expired-token'))).status).toBe(401);
 
     expect(tables.players.delete).not.toHaveBeenCalled();
+  });
+
+  it('requires the player\'s password, deleting nothing without it (SRS-106.2)', async () => {
+    for (const body of [{}, { password: '' }, { password: 123 }]) {
+      const response = await DELETE(deleteRequest(body));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Enter your password to delete your account.' });
+    }
+    expect(tables.players.delete).not.toHaveBeenCalled();
+  });
+
+  it('refuses a wrong password, deleting nothing (SRS-106.2)', async () => {
+    for (const password of ['Wrong1234', 'secret123', 'SECRET123']) {
+      const response = await DELETE(deleteRequest({ password }));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: 'Incorrect password.' });
+    }
+    expect(tables.players.delete).not.toHaveBeenCalled();
+  });
+
+  it('checks the password against the stored hash before deleting (SRS-106.2, SRS-104.6)', async () => {
+    const order: string[] = [];
+    tables.players.maybeSingle.mockImplementationOnce(() => {
+      order.push('password checked');
+      return Promise.resolve(tables.players.maybeSingleResult);
+    });
+    tables.players.delete.mockImplementationOnce(() => {
+      order.push('deleted');
+      return tables.players;
+    });
+
+    expect((await DELETE(deleteRequest())).status).toBe(200);
+    expect(order).toEqual(['password checked', 'deleted']);
   });
 
   it('says so when the account is already gone', async () => {

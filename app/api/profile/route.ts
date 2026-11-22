@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../lib/supabase';
-import { checkName, getPlayerIdForToken, isValidUsername } from '../../../lib/auth';
+import { checkName, getPlayerIdForToken, isValidUsername, verifyPassword } from '../../../lib/auth';
 import { profilePhotoDataUrl } from '../../../lib/playerDisplay';
 import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -208,6 +208,25 @@ export async function DELETE(request: Request) {
 
   const { playerId, errorResponse } = await requirePlayerId(request, supabase);
   if (errorResponse) return errorResponse;
+
+  // SRS-106.2: the player's current password, checked against the stored
+  // hash (SRS-104.6) before anything is deleted. A wrong one is a 403, not
+  // 401, so the page doesn't take it for an expired session.
+  const body = (await request.json().catch(() => null)) as { password?: unknown } | null;
+  const password = body?.password;
+  if (typeof password !== 'string' || !password) {
+    return Response.json({ error: 'Enter your password to delete your account.' }, { status: 400 });
+  }
+  const { data: player, error: lookupError } = await supabase
+    .from('players')
+    .select('password_hash')
+    .eq('player_id', playerId!)
+    .maybeSingle();
+  if (lookupError) return Response.json({ error: 'Could not delete your account. Please try again.' }, { status: 500 });
+  if (!player) return Response.json({ error: 'No account was found.' }, { status: 404 });
+  if (!(await verifyPassword(password, player.password_hash))) {
+    return Response.json({ error: 'Incorrect password.' }, { status: 403 });
+  }
 
   const { data, error } = await supabase.from('players').delete().eq('player_id', playerId!).select('player_id');
   if (error) return Response.json({ error: 'Could not delete your account. Please try again.' }, { status: 500 });

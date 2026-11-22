@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     // pending-deletion account stays locked out (formerly SRS-106.7).
     if (player.account_status === 'Pending Deletion') {
       return Response.json(
-        { error: 'This account is pending deletion and cannot be accessed.' },
+        { error: "This account isn't active and can't be logged in to." },
         { status: 403 }
       );
     }

@@ -158,7 +158,9 @@ describe('Wishing fountain API route (UR-129)', () => {
 
   it('refuses an account that is not active, or a player who no longer exists (SRS-129.1)', async () => {
     rpc.mockResolvedValue({ data: { status: 'not_active' }, error: null });
-    expect((await POST(req())).status).toBe(403);
+    const refused = await POST(req());
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error).toBe("Accounts that aren't active can't make a wish.");
     rpc.mockResolvedValue({ data: { status: 'not_found' }, error: null });
     expect((await POST(req())).status).toBe(404);
   });

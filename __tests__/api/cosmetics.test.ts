@@ -312,13 +312,13 @@ describe('POST /api/shop/buy', () => {
     expect((await response.json()).error).toBe('This box costs 350 coins and you have 100.');
   });
 
-  it('refuses an account pending deletion (SRS-124.8)', async () => {
+  it('refuses an account that is not active, saying so (SRS-124.8)', async () => {
     rpc.mockResolvedValue({ data: { status: 'not_active' }, error: null });
 
     const response = await buy(req('/api/shop/buy', 'POST', { boxId: 1 }));
 
     expect(response.status).toBe(403);
-    expect((await response.json()).error).toBe('This account is pending deletion.');
+    expect((await response.json()).error).toBe("This account isn't active, so it can't buy boxes.");
   });
 
   it('refuses a box that is no longer on sale (SRS-122.4)', async () => {

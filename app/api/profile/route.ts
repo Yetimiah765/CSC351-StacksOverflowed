@@ -106,7 +106,7 @@ async function changeUsername(supabase: SupabaseClient, playerId: number, value:
         { status: 429 }
       );
     case 'not_active':
-      return Response.json({ error: 'This account is pending deletion.' }, { status: 403 });
+      return Response.json({ error: "This account isn't active." }, { status: 403 });
     case 'not_found':
       return Response.json({ error: 'Player not found.' }, { status: 404 });
     default:

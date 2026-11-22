@@ -1,5 +1,13 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
-import { generateSessionToken, hashSessionToken, isValidUsername, verifyPassword } from '../../../../lib/auth';
+import {
+  generateSessionToken,
+  hashSessionToken,
+  isValidUsername,
+  lockedMessage,
+  LOGIN_LOCK_MINUTES,
+  MAX_LOGIN_FAILURES,
+  verifyPassword,
+} from '../../../../lib/auth';
 import { SESSION_MS } from '../../../../lib/session';
 
 export async function POST(request: Request) {
@@ -59,9 +67,43 @@ export async function POST(request: Request) {
       return accountNotFound();
     }
 
+    // SRS-104.8: after 5 wrong passwords in a row the account is locked for
+    // 15 minutes, even to the right one, so nobody can keep guessing. An
+    // attempt while locked isn't checked or counted.
+    const { data: attempts } = await supabase
+      .from('login_attempts')
+      .select('locked_until')
+      .eq('player_id', player.player_id)
+      .maybeSingle();
+    const lockedFor = attempts?.locked_until ? Date.parse(attempts.locked_until) - Date.now() : 0;
+    if (lockedFor > 0) {
+      return Response.json({ error: lockedMessage(lockedFor), lockedUntil: attempts!.locked_until }, { status: 429 });
+    }
+
     // SRS-104.6: verify against the stored hash rather than plaintext.
     const passwordMatches = await verifyPassword(password, player.password_hash);
+
+    // Counted in one statement per attempt, so attempts at once can't slip
+    // past the limit; a correct password clears the count.
+    const { data: recorded, error: recordError } = await supabase.rpc('fn_record_login', {
+      p_player_id: player.player_id,
+      p_success: passwordMatches,
+      p_max_failures: MAX_LOGIN_FAILURES,
+      p_lock_seconds: LOGIN_LOCK_MINUTES * 60,
+    });
+    if (recordError) console.error('fn_record_login failed:', recordError.message);
+
     if (!passwordMatches) {
+      const result = recorded as { status: string; locked_until?: string } | null;
+      if (result?.status === 'locked') {
+        return Response.json(
+          {
+            error: `Incorrect password. That's ${MAX_LOGIN_FAILURES} wrong passwords in a row, so this account is locked for ${LOGIN_LOCK_MINUTES} minutes.`,
+            lockedUntil: result.locked_until,
+          },
+          { status: 429 }
+        );
+      }
       return incorrectPassword();
     }
 

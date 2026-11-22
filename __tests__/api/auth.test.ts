@@ -49,7 +49,11 @@ const tables = {
   usernames: makeTableMock(),
   players: makeTableMock(),
   player_sessions: makeTableMock(),
+  login_attempts: makeTableMock(),
 };
+
+// fn_record_login: counts wrong passwords and locks after 5 (SRS-104.8).
+const rpc = vi.fn();
 
 vi.mock('../../lib/supabase', () => ({
   getSupabaseClient: vi.fn(() => ({
@@ -120,10 +124,14 @@ describe('Auth API routes', () => {
   beforeEach(() => {
     vi.mocked(getSupabaseClient).mockReturnValue({
       from: vi.fn((table: keyof typeof tables) => tables[table]),
+      rpc,
     } as never);
     resetTable(tables.usernames);
     resetTable(tables.players);
     resetTable(tables.player_sessions);
+    resetTable(tables.login_attempts);
+    rpc.mockReset();
+    rpc.mockResolvedValue({ data: { status: 'failed', failures: 1 }, error: null });
   });
 
   describe('register', () => {
@@ -458,6 +466,51 @@ describe('Auth API routes', () => {
       // The start is written even when the player already had a session row.
       expect(started).toBeGreaterThanOrEqual(before);
       expect(Date.parse(body.expiresAt) - started).toBe(3 * 60 * 60 * 1000);
+    });
+
+    it('locks the account on the fifth wrong password in a row, saying for how long (SRS-104.8)', async () => {
+      await seedPlayer();
+      rpc.mockResolvedValue({ data: { status: 'locked', locked_until: '2026-11-22T12:15:00Z' }, error: null });
+
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password: 'wrongpass1' }));
+
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({
+        error: "Incorrect password. That's 5 wrong passwords in a row, so this account is locked for 15 minutes.",
+        lockedUntil: '2026-11-22T12:15:00Z',
+      });
+      expect(tables.player_sessions.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses even the right password while the account is locked, saying when to try again (SRS-104.8)', async () => {
+      await seedPlayer();
+      const lockedUntil = new Date(Date.now() + 11.5 * 60 * 1000).toISOString();
+      tables.login_attempts.maybeSingleResult = { data: { locked_until: lockedUntil }, error: null };
+
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password }));
+
+      expect(response.status).toBe(429);
+      expect(await response.json()).toEqual({ error: 'Too many wrong passwords. Try again in 12 minutes.', lockedUntil });
+      // Not checked or counted while locked, and no session.
+      expect(rpc).not.toHaveBeenCalled();
+      expect(tables.player_sessions.upsert).not.toHaveBeenCalled();
+    });
+
+    it('counts each attempt, and a correct login clears the count (SRS-104.8)', async () => {
+      await seedPlayer();
+
+      expect((await loginPost(loginRequest({ username: 'gooduser1', password: 'wrongpass1' }))).status).toBe(401);
+      expect(rpc).toHaveBeenLastCalledWith('fn_record_login', { p_player_id: 1, p_success: false, p_max_failures: 5, p_lock_seconds: 900 });
+
+      expect((await loginPost(loginRequest({ username: 'gooduser1', password }))).status).toBe(200);
+      expect(rpc).toHaveBeenLastCalledWith('fn_record_login', { p_player_id: 1, p_success: true, p_max_failures: 5, p_lock_seconds: 900 });
+    });
+
+    it('lets the player in again once the lock has passed (SRS-104.8)', async () => {
+      await seedPlayer();
+      tables.login_attempts.maybeSingleResult = { data: { locked_until: new Date(Date.now() - 1000).toISOString() }, error: null };
+
+      expect((await loginPost(loginRequest({ username: 'gooduser1', password }))).status).toBe(200);
     });
 
     it('replaces any existing session on login (SRS-103.5)', async () => {

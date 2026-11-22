@@ -5,6 +5,7 @@
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { sessionExpired } from './session';
 
 // SRS-NFR (password storage): bcrypt with a minimum cost factor of 10.
 const BCRYPT_COST_FACTOR = 10;
@@ -110,7 +111,7 @@ export function isAtLeast21(birthday: string): boolean {
 
 /**
  * Resolves a bearer token to a player_id via player_sessions, or null if the
- * token is missing/expired/unknown. Used by every route that requires a
+ * token is missing, unknown, or its session is over 3 hours old (SRS-105.7). Used by every route that requires a
  * logged-in player (profile, avatar, and future player-scoped routes).
  */
 export async function getPlayerIdForToken(
@@ -121,11 +122,13 @@ export async function getPlayerIdForToken(
 
   const { data, error } = await supabase
     .from('player_sessions')
-    .select('player_id')
+    .select('player_id, created_at')
     .eq('token_hash', tokenHash)
     .maybeSingle();
 
   if (error || !data) return null;
+  // SRS-105.7: a login lasts 3 hours from when it started.
+  if (data.created_at && sessionExpired(data.created_at)) return null;
   return data.player_id as number;
 }
 

@@ -1,3 +1,5 @@
+import { SESSION_EXPIRES_KEY } from './session';
+
 // Logging out in the browser (SRS-105.1), from the profile's Log out button
 // or by leaving through the casino floor's doors (SRS-105.5).
 
@@ -19,6 +21,7 @@ export async function logOut(): Promise<void> {
     // Network failure: still log out locally below.
   }
   localStorage.removeItem('player_token');
+  localStorage.removeItem(SESSION_EXPIRES_KEY);
 }
 
 // Logging out on the profile, the player's then seen leaving the casino on

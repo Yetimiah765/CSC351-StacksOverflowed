@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { generateSessionToken, hashSessionToken, isValidUsername, verifyPassword } from '../../../../lib/auth';
+import { SESSION_MS } from '../../../../lib/session';
 
 export async function POST(request: Request) {
   try {
@@ -79,9 +80,15 @@ export async function POST(request: Request) {
 
     // SRS-103.5: logging in replaces any existing session for this
     // player (player_sessions.player_id is UNIQUE), invalidating it.
+    // SRS-105.7: the session starts now, so created_at is set here; an upsert
+    // would otherwise keep the previous login's start time.
+    const startedAt = new Date();
     const { error: sessionError } = await supabase
       .from('player_sessions')
-      .upsert({ player_id: player.player_id, token_hash: tokenHash }, { onConflict: 'player_id' });
+      .upsert(
+        { player_id: player.player_id, token_hash: tokenHash, created_at: startedAt.toISOString() },
+        { onConflict: 'player_id' }
+      );
 
     if (sessionError) {
       return Response.json({ error: sessionError.message }, { status: 500 });
@@ -90,6 +97,8 @@ export async function POST(request: Request) {
     return Response.json(
       {
         token,
+        // When this login ends (SRS-105.7), so every tab can sign out then.
+        expiresAt: new Date(startedAt.getTime() + SESSION_MS).toISOString(),
         player: {
           playerId: player.player_id,
           firstName: player.first_name,

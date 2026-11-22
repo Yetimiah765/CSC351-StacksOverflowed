@@ -1,6 +1,7 @@
 import './globals.css';
 import NavBar from '../components/NavBar';
 import NavigationTracker from '../components/NavigationTracker';
+import SessionExpiry from '../components/SessionExpiry';
 import PokerRemovalNotices from '../components/PokerRemovalNotices';
 
 export const metadata = {
@@ -15,6 +16,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <NavBar />
         {/* SRS-108.7: remembers the pages visited, for the back buttons. */}
         <NavigationTracker />
+        {/* SRS-105.7: signs the player out in every tab when the login ends. */}
+        <SessionExpiry />
         {/* SRS-9.12: why they lost a poker seat while they were away. */}
         <PokerRemovalNotices />
         {children}

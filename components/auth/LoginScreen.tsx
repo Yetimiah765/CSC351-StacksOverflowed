@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import AuthLink, { type AuthLinkTo } from './AuthLink';
 import CardsAndChipsBackground from './CardsAndChipsBackground';
 import PokerWinHeader from './PokerWinHeader';
+import { SESSION_EXPIRED_KEY, SESSION_EXPIRES_KEY } from '../../lib/session';
 
 // The login screen, shared by the login page and the lobby's check-in
 // tablet (SRS-103.13), which differ only in what its links do, what happens
@@ -29,6 +30,17 @@ export default function LoginScreen({ registered, onLoggedIn, signUp, onTablet =
   const [notice, setNotice] = useState('');
   const passwordRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
+
+  // SRS-105.7: sent here because the login ran out.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(SESSION_EXPIRED_KEY) !== '1') return;
+      sessionStorage.removeItem(SESSION_EXPIRED_KEY);
+      setNotice('Your login has expired. Log in again.');
+    } catch {
+      // Storage blocked: no notice, the form still works.
+    }
+  }, []);
 
   // SRS-101.15: coming straight from sign-up, the new username is filled in
   // and the cursor waits in the password box.
@@ -56,6 +68,8 @@ export default function LoginScreen({ registered, onLoggedIn, signUp, onTablet =
     setLoading(false);
     if (response.ok) {
       if (data?.token) localStorage.setItem('player_token', data.token);
+      // SRS-105.7: when this login ends, for SessionExpiry.
+      if (data?.expiresAt) localStorage.setItem(SESSION_EXPIRES_KEY, data.expiresAt);
       onLoggedIn();
     } else {
       setMessage(data.error || 'Login failed.');

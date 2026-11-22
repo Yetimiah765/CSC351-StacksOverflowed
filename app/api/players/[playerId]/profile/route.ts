@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
-import { photoToAvatarDataUrl } from '../../../../../lib/playerDisplay';
+import { avatarDataUrlOrNull } from '../../../../../lib/playerDisplay';
 import { sumMoney } from '../../../../../lib/playerStats';
 import { orderCollection, toCosmetic, type Cosmetic, type CosmeticCategory, type CosmeticRow } from '../../../../../lib/cosmetics';
 
@@ -67,7 +67,8 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     playerId,
     username: usernameRow.username,
     bio: player.bio?.trim() ? player.bio : null,
-    photoUrl: await photoToAvatarDataUrl(player.profile_photo, PHOTO_SIZE),
+    // A photo that can't be read shows the default icon (SRS-121.5), never a 500.
+    photoUrl: await avatarDataUrlOrNull(player.profile_photo, PHOTO_SIZE),
     moneyWon: sumMoney(stats ?? [], 'money_won'),
     moneyLost: sumMoney(stats ?? [], 'money_lost'),
     equipped: { Card: null, Chip: null, 'Profile Outline': null },

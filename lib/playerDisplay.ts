@@ -41,14 +41,21 @@ export async function photoToAvatarDataUrl(hexBytea: string | null, size = AVATA
 // (up to 5 MB, a third more as base64) can go over (SRS-115.3).
 export const PROFILE_PHOTO_SIZE = 256;
 
-/** The profile page's copy of a player's photo, or null (the blank icon,
- * SRS-115.5) if there's none or it can't be read. */
-export async function profilePhotoDataUrl(hexBytea: string | null): Promise<string | null> {
+/** photoToAvatarDataUrl(), or null (the blank icon, SRS-115.5, SRS-121.5,
+ * SRS-8.2) if there's no photo or it can't be read, so a bad stored photo
+ * never breaks the page showing it. The upload route uses the throwing
+ * version on purpose, to refuse such a file. */
+export async function avatarDataUrlOrNull(hexBytea: string | null, size = AVATAR_THUMBNAIL_SIZE): Promise<string | null> {
   try {
-    return await photoToAvatarDataUrl(hexBytea, PROFILE_PHOTO_SIZE);
+    return await photoToAvatarDataUrl(hexBytea, size);
   } catch {
     return null;
   }
+}
+
+/** The profile page's copy of a player's photo, or null if there's none or it can't be read. */
+export function profilePhotoDataUrl(hexBytea: string | null): Promise<string | null> {
+  return avatarDataUrlOrNull(hexBytea, PROFILE_PHOTO_SIZE);
 }
 
 export interface PlayerDisplay {

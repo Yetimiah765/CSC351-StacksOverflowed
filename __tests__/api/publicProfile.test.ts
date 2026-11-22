@@ -39,6 +39,7 @@ vi.mock('../../lib/supabase', () => ({
 
 import { getSupabaseClient } from '../../lib/supabase';
 import { GET } from '../../app/api/players/[playerId]/profile/route';
+import { GET as getAvatar } from '../../app/api/players/[playerId]/avatar/route';
 import { GET as getOwnStats } from '../../app/api/profile/stats/route';
 
 // Anyone may ask: no Authorization header unless a test passes one.
@@ -94,6 +95,25 @@ describe('Public profile API route', () => {
     expect(photoUrl).toMatch(/^data:image\/png;base64,/);
     const resized = await sharp(Buffer.from(photoUrl.split(',')[1], 'base64')).metadata();
     expect([resized.format, resized.width, resized.height]).toEqual(['png', 256, 256]);
+  });
+
+  it("shows the default icon for a stored photo that can't be read, instead of failing (SRS-121.5, bug #1122)", async () => {
+    // Starts like a PNG but isn't one, as an upload from before PR #1084 could be.
+    tables.players.maybeSingleResult = { data: { bio: null, profile_photo: '\\x89504e470d0a1a0a00' }, error: null };
+
+    const response = await get('7');
+
+    expect(response.status).toBe(200);
+    expect((await response.json()).photoUrl).toBeNull();
+  });
+
+  it("gives poker seats the default icon for a stored photo that can't be read (SRS-8.2, bug #1122)", async () => {
+    tables.players.maybeSingleResult = { data: { profile_photo: '\\x89504e470d0a1a0a00' }, error: null };
+
+    const response = await getAvatar(new Request('http://localhost/api/players/7/avatar'), { params: { playerId: '7' } });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ avatarUrl: null });
   });
 
   it('returns no photo, for the blank default icon, when there is none (SRS-121.5)', async () => {

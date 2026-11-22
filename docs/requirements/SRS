@@ -1982,6 +1982,10 @@ flowchart LR
 
 *Traces to: UR-107*
 
+**SRS-NFR-112, JO, Browser security headers.** Every page and API response of the website shall be sent with headers that forbid other websites from showing it inside a frame, stop browsers from guessing a response's content type, and send other websites no more than the website's own address as the referrer.
+
+*Traces to: UR-103, UR-106, UR-111, UR-113*
+
 # **7\. Sports Betting on Live Sports**
 
 **UR-201, SP \- Browse Sports Events**

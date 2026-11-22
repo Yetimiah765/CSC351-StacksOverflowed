@@ -21,7 +21,7 @@ Copy `.env.example` to `.env.local` and fill in your Supabase credentials before
 
 ## Architecture
 
-This is a Next.js 14 App Router project with Tailwind CSS, backed directly by the Postgres schema in `supabase/schema.sql` (no Supabase Auth — see below). The poker room additionally runs its own Node process (`server/pokerRealtimeServer.ts`) that relays table state through a Supabase Realtime channel (Broadcast + Presence), separate from Next's HTTP server, matching `docs/architecture/C2.mmd`.
+This is a Next.js 14 App Router project with Tailwind CSS, backed directly by the Postgres schema in `supabase/schema.sql` (no Supabase Auth — see below). The poker room additionally runs its own Node process (`server/pokerRealtimeServer.ts`) that relays table state through a Supabase Realtime channel (Broadcast + Presence), separate from Next's HTTP server, matching `docs/architecture/C2.mmd`. `next.config.js` sends security headers with every page and API response (SRS-NFR-112): no framing by other sites (`X-Frame-Options: DENY`, `frame-ancestors 'none'`), `nosniff`, and `strict-origin-when-cross-origin` referrers.
 
 **Auth and profile data model:**
 The schema (`supabase/schema.sql`) has no email column and no link to Supabase's built-in `auth.users` — it is entirely username/password based:

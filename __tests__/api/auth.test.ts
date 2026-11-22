@@ -485,6 +485,20 @@ describe('Auth API routes', () => {
       expect((await response.json()).player.username).toBe('gooduser1');
     });
 
+    it('opens an account only for its exact username, never one with wildcards in it (SRS-104.2)', async () => {
+      await seedPlayer();
+
+      // % and _ are SQL pattern characters and * is PostgREST's, so each of
+      // these would match gooduser1 if it reached the lookup.
+      for (const attempt of ['gooduser1%', 'gooduser_', 'goodu*', '%', 'gooduser1 ']) {
+        const response = await loginPost(loginRequest({ username: attempt, password }));
+        expect(response.status, attempt).toBe(404);
+        expect(await response.json()).toEqual({ error: 'No account was found with that username.', accountNotFound: true });
+      }
+      expect(tables.usernames.ilike).not.toHaveBeenCalled();
+      expect(tables.player_sessions.upsert).not.toHaveBeenCalled();
+    });
+
     it('treats capitals in the password as different characters (SRS-101.9)', async () => {
       await seedPlayer({ password: 'Secret123' });
 

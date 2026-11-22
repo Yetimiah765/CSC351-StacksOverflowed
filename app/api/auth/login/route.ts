@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
-import { generateSessionToken, hashSessionToken, verifyPassword } from '../../../../lib/auth';
+import { generateSessionToken, hashSessionToken, isValidUsername, verifyPassword } from '../../../../lib/auth';
 
 export async function POST(request: Request) {
   try {
@@ -22,6 +22,15 @@ export async function POST(request: Request) {
     const accountNotFound = () =>
       Response.json({ error: 'No account was found with that username.', accountNotFound: true }, { status: 404 });
     const incorrectPassword = () => Response.json({ error: 'Incorrect password.' }, { status: 401 });
+
+    // SRS-104.2: only the exact username, ignoring capitals, opens an account.
+    // ilike reads % and _ (and PostgREST's *) as wildcards, so "name%" would
+    // match "name1". Every username is 6-10 letters and numbers (SRS-101.4,
+    // SRS-101.5, and the CHECK on usernames.username), so anything else can't
+    // be an account, and what reaches ilike has no wildcards in it.
+    if (!isValidUsername(username)) {
+      return accountNotFound();
+    }
 
     // SRS-101.7: username lookup is case-insensitive, and only the current
     // username (not a reserved former one) can be used to log in.

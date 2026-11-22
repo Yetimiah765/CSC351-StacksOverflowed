@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { requirePlayerId } from '../../../../lib/auth';
 import { GAMES } from '../../../../lib/games';
 import { sumMoney } from '../../../../lib/playerStats';
+import { serverError } from '../../../../lib/serverError';
 
 // SRS-117.2 / SRS-117.5 / SRS-118.2 / SRS-118.4: the logged-in player's money
 // won and money lost, overall and for each game, for the profile's statistics
@@ -18,7 +19,7 @@ export async function GET(request: Request) {
     .from('player_game_stats')
     .select('game_code, money_won, money_lost')
     .eq('player_id', playerId);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('stats', error, 'Could not load your statistics. Please try again.');
 
   const rows = (data ?? []) as { game_code: string; money_won: number; money_lost: number }[];
   const moneyWon = sumMoney(rows, 'money_won');

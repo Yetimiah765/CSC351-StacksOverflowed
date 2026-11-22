@@ -3,6 +3,7 @@ import { getPlayerIdForToken } from '../../../../lib/auth';
 import { photoToAvatarDataUrl, PROFILE_PHOTO_SIZE } from '../../../../lib/playerDisplay';
 import { MAX_PHOTO_BYTES } from '../../../../lib/profilePhoto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { serverError } from '../../../../lib/serverError';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -74,7 +75,7 @@ export async function POST(request: Request) {
 
   const { error: updateError } = await supabase.from('players').update({ profile_photo: photo }).eq('player_id', playerId);
 
-  if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
+  if (updateError) return serverError('avatar: upload', updateError, 'Could not save your photo. Please try again.', 400);
 
   return Response.json({ profilePhotoDataUrl: shown }, { status: 200 });
 }
@@ -91,7 +92,7 @@ export async function DELETE(request: Request) {
     .update({ profile_photo: null })
     .eq('player_id', playerId);
 
-  if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
+  if (updateError) return serverError('avatar: remove', updateError, 'Could not remove your photo. Please try again.', 400);
 
   return Response.json({ profilePhotoDataUrl: null }, { status: 200 });
 }

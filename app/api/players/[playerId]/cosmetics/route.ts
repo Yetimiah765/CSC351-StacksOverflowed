@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import type { CosmeticCategory } from '../../../../../lib/cosmetics';
+import { serverError } from '../../../../../lib/serverError';
 
 // The art keys of the cosmetics a player has equipped (UR-120), so the poker
 // table can show each seated player's card backs, chips and profile outline.
@@ -35,7 +36,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     .from('player_equipped_cosmetics')
     .select('category, cosmetics(asset_path)')
     .eq('player_id', playerId);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('public cosmetics', error, "Could not load this player's cosmetics.");
 
   const equipped: EquippedArt = { card: null, chip: null, outline: null };
   for (const row of (data ?? []) as unknown as { category: CosmeticCategory; cosmetics: { asset_path: string } | null }[]) {

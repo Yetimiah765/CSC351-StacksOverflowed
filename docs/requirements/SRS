@@ -1990,6 +1990,10 @@ flowchart LR
 
 *Traces to: UR-107*
 
+**SRS-NFR-111, JO, Error detail disclosure.** When a request fails because of a database or server error, the system shall not send the error's details (database messages and codes, table or constraint names) to the browser. It shall show the player a plain message and keep the details in the server's logs.
+
+*Traces to: UR-101, UR-103, UR-104, UR-111, UR-122, UR-128, UR-129*
+
 **SRS-NFR-112, JO, Browser security headers.** Every page and API response of the website shall be sent with headers that forbid other websites from showing it inside a frame, stop browsers from guessing a response's content type, and send other websites no more than the website's own address as the referrer.
 
 *Traces to: UR-103, UR-106, UR-111, UR-113*

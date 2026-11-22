@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../../lib/supabase';
 import { avatarDataUrlOrNull } from '../../../../../lib/playerDisplay';
 import { sumMoney } from '../../../../../lib/playerStats';
 import { orderCollection, toCosmetic, type Cosmetic, type CosmeticCategory, type CosmeticRow } from '../../../../../lib/cosmetics';
+import { serverError } from '../../../../../lib/serverError';
 
 // A player's public profile (UR-121): what other players and guests may see
 // (SRS-NFR-106). It reads only the columns it returns, so private account
@@ -59,7 +60,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     supabase.from('player_cosmetics').select(`acquired_at, cosmetics(${COSMETIC_COLUMNS})`).eq('player_id', playerId),
   ]);
   const error = usernameError ?? playerError ?? statsError ?? equippedError ?? ownedError;
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('public profile', error, "Could not load this player's profile.");
   // Every account has a current username, so none means no such player.
   if (!usernameRow || !player) return Response.json({ error: 'Player not found.' }, { status: 404 });
 

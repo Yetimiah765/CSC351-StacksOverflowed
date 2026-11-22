@@ -77,6 +77,6 @@ describe("A player's equipped cosmetics (shown at the poker table)", () => {
     tables.player_equipped_cosmetics.result = { data: null, error: { message: 'boom' } };
     const response = await get('7');
     expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: 'boom' });
+    expect(await response.json()).toEqual({ error: "Could not load this player's cosmetics." });
   });
 });

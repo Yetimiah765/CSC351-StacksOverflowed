@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { hashSessionToken } from '../../../../lib/auth';
+import { serverError } from '../../../../lib/serverError';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
   if (!token) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { error } = await supabase.from('player_sessions').delete().eq('token_hash', hashSessionToken(token));
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('logout', error, 'Could not log you out. Please try again.');
 
   return Response.json({ success: true }, { status: 200 });
 }

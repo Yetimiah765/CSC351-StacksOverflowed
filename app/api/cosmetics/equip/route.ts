@@ -1,6 +1,9 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { requirePlayerId } from '../../../../lib/auth';
 import type { CosmeticCategory } from '../../../../lib/cosmetics';
+import { serverError } from '../../../../lib/serverError';
+
+const EQUIP_FAILED = 'Could not equip that cosmetic. Please try again.';
 
 // SRS-120.4 - SRS-120.6: equips one of the player's own cosmetics in its
 // category, replacing whatever was equipped there. The replaced cosmetic
@@ -27,7 +30,7 @@ export async function POST(request: Request) {
     .eq('player_id', playerId)
     .eq('cosmetic_id', cosmeticId)
     .maybeSingle();
-  if (ownedError) return Response.json({ error: ownedError.message }, { status: 500 });
+  if (ownedError) return serverError('equip: ownership', ownedError, EQUIP_FAILED);
   if (!owned) return Response.json({ error: "You don't own that cosmetic." }, { status: 404 });
 
   const category = (owned as unknown as { cosmetics: { category: CosmeticCategory } }).cosmetics.category;
@@ -35,7 +38,7 @@ export async function POST(request: Request) {
   const { error: equipError } = await supabase
     .from('player_equipped_cosmetics')
     .upsert({ player_id: playerId, category, cosmetic_id: cosmeticId }, { onConflict: 'player_id,category' });
-  if (equipError) return Response.json({ error: equipError.message }, { status: 500 });
+  if (equipError) return serverError('equip: save', equipError, EQUIP_FAILED);
 
   return Response.json({ category, cosmeticId }, { status: 200 });
 }

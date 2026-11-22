@@ -5,13 +5,14 @@ export type DeleteAccountResult = { ok: true } | { ok: false; error: string; exp
 
 const FAILED = 'Could not delete your account. Please try again.';
 
-/** Asks the server to delete the account the token belongs to (DELETE /api/profile). */
-export async function deleteAccount(token: string): Promise<DeleteAccountResult> {
+/** Asks the server to delete the account the token belongs to (DELETE /api/profile),
+ * with the player's password, which it checks first (SRS-106.2). */
+export async function deleteAccount(token: string, password: string): Promise<DeleteAccountResult> {
   try {
     const res = await fetch('/api/profile', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ password }),
     });
     if (res.ok) return { ok: true };
     const data = await res.json().catch(() => null);

@@ -63,6 +63,7 @@ export default function ProfilePage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
 
   useEffect(() => {
     const stored = localStorage.getItem('player_token');
@@ -207,7 +208,7 @@ export default function ProfilePage() {
     if (!token) return;
     setDeleting(true);
     setDeleteError('');
-    const result = await deleteAccount(token);
+    const result = await deleteAccount(token, deletePassword);
     if (!result.ok) {
       setDeleting(false);
       if (result.expired) {
@@ -319,6 +320,7 @@ export default function ProfilePage() {
                 type="button"
                 onClick={() => {
                   setDeleteError('');
+                  setDeletePassword('');
                   setEditing('deleteAccount');
                 }}
                 className="mt-4 rounded-xl border border-red-500/60 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/10"
@@ -369,9 +371,23 @@ export default function ProfilePage() {
         <DeleteAccountDialog
           deleting={deleting}
           error={deleteError}
+          confirmDisabled={!deletePassword}
           onConfirm={confirmDeletion}
           onCancel={() => setEditing(null)}
-        />
+        >
+          {/* SRS-106.2: the password is checked before anything is deleted. */}
+          <label className="block text-sm text-slate-300">
+            Enter your password to confirm
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={deletePassword}
+              onChange={(event) => setDeletePassword(event.target.value)}
+              disabled={deleting}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-slate-100 outline-none focus:border-red-400"
+            />
+          </label>
+        </DeleteAccountDialog>
       ) : null}
       {editing === 'bio' && profile ? (
         <BioEditor

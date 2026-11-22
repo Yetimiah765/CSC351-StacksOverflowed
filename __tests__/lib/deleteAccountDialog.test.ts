@@ -40,10 +40,21 @@ describe('the account-deletion confirmation (SRS-106.1)', () => {
   it('is the only way the profile page deletes the account', () => {
     const page = readFileSync(join(__dirname, '../../app/profile/page.tsx'), 'utf8');
     // The Delete account button opens the pop-up; deleteAccount() runs only from its confirmation.
-    expect(page).toMatch(/onClick=\{\(\) => \{\s*setDeleteError\(''\);\s*setEditing\('deleteAccount'\);\s*\}\}/);
+    expect(page).toMatch(/onClick=\{\(\) => \{\s*setDeleteError\(''\);\s*setDeletePassword\(''\);\s*setEditing\('deleteAccount'\);\s*\}\}/);
     expect(page.match(/deleteAccount\(token/g)).toHaveLength(1);
     expect(page).toMatch(/async function confirmDeletion\(\)[\s\S]*?deleteAccount\(token/);
     expect(page).toContain('onConfirm={confirmDeletion}');
+  });
+
+  it('asks for the password in the pop-up, and keeps Delete locked until it is typed (SRS-106.2)', () => {
+    const page = readFileSync(join(__dirname, '../../app/profile/page.tsx'), 'utf8');
+    expect(page).toContain('confirmDisabled={!deletePassword}');
+    expect(page).toMatch(/<DeleteAccountDialog[\s\S]*?type="password"[\s\S]*?<\/DeleteAccountDialog>/);
+    expect(page).toContain('deleteAccount(token, deletePassword)');
+
+    const html = dialog({ confirmDisabled: true, children: createElement('input', { type: 'password' }) });
+    expect(html).toContain('type="password"');
+    expect(html).toMatch(/<button type="submit" disabled=""[^>]*>Delete my account<\/button>/);
   });
 });
 
@@ -61,26 +72,28 @@ describe('the request the confirmation sends (UR-106)', () => {
   it("deletes the account the player's token belongs to", async () => {
     const fetchMock = stubFetch(200, { deleted: true });
 
-    expect(await deleteAccount('tok-123')).toEqual({ ok: true });
+    expect(await deleteAccount('tok-123', 'Secret123')).toEqual({ ok: true });
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/profile');
     expect(init.method).toBe('DELETE');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok-123');
+    // SRS-106.2: with the password the server checks.
+    expect(JSON.parse(init.body as string)).toEqual({ password: 'Secret123' });
   });
 
   it("passes on the server's reason, or a general one", async () => {
-    stubFetch(409, { error: 'Something the server said.' });
-    expect(await deleteAccount('tok')).toEqual({ ok: false, error: 'Something the server said.' });
+    stubFetch(403, { error: 'Incorrect password.' });
+    expect(await deleteAccount('tok', 'Wrong1234')).toEqual({ ok: false, error: 'Incorrect password.' });
 
     stubFetch(500, {});
-    expect(await deleteAccount('tok')).toEqual({ ok: false, error: 'Could not delete your account. Please try again.' });
+    expect(await deleteAccount('tok', 'pw')).toEqual({ ok: false, error: 'Could not delete your account. Please try again.' });
 
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
-    expect(await deleteAccount('tok')).toEqual({ ok: false, error: 'Could not delete your account. Please try again.' });
+    expect(await deleteAccount('tok', 'pw')).toEqual({ ok: false, error: 'Could not delete your account. Please try again.' });
   });
 
   it('says when the session has ended, so the page can send the player to log in', async () => {
     stubFetch(401, { error: 'Invalid or expired session.' });
-    expect(await deleteAccount('tok')).toMatchObject({ ok: false, expired: true });
+    expect(await deleteAccount('tok', 'pw')).toMatchObject({ ok: false, expired: true });
   });
 });

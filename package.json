@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start",
     "test": "vitest run",
+    "test:security": "vitest run --config vitest.security.config.ts",
     "realtime": "tsx server/pokerRealtimeServer.ts",
     "test:shuffle": "tsx scripts/shuffleUniformity.ts",
     "test:latency": "tsx scripts/pokerSyncLatency.ts",

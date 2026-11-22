@@ -98,14 +98,27 @@ export function isValidPassword(value: string): boolean {
 // SRS-102.1: the player must be at least 21 years old. This is a friendly
 // pre-check on the client-provided date; chk_players_minimum_age in the
 // database (evaluated in America/New_York against created_at) is the
-// authoritative check.
-export function isAtLeast21(birthday: string): boolean {
+// authoritative check. So it counts from today's date in New York too, not
+// the server's own (UTC on Vercel), or the two disagree for the hours each
+// evening when the dates differ.
+export function isAtLeast21(birthday: string, now: Date = new Date()): boolean {
   const birthDate = new Date(birthday);
   if (Number.isNaN(birthDate.getTime())) return false;
 
-  const today = new Date();
-  const cutoff = new Date(today.getFullYear() - 21, today.getMonth(), today.getDate());
-  return birthDate <= cutoff;
+  const [year, month, day] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+    .format(now)
+    .split('-')
+    .map(Number);
+  // The same day 21 years ago, or the month's last day if that year's month
+  // is shorter (29 February), as Postgres's date - INTERVAL '21 years' does.
+  const lastDay = new Date(Date.UTC(year - 21, month, 0)).getUTCDate();
+  const cutoff = Date.UTC(year - 21, month - 1, Math.min(day, lastDay));
+  return birthDate.getTime() <= cutoff;
 }
 
 /**

@@ -377,6 +377,19 @@ describe('Auth API routes', () => {
       expect(await response.json()).toEqual({ error: 'You must be at least 21 years old to register.' });
     });
 
+    it("shows the age message, not the database's error, if the database refuses the age (SRS-102.1)", async () => {
+      tables.players.singleResult = {
+        data: null,
+        error: { code: '23514', message: 'new row for relation "players" violates check constraint "chk_players_minimum_age"' },
+      };
+
+      const response = await registerPost(registerRequest(validRegistration));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'You must be at least 21 years old to register.' });
+      expect(tables.usernames.insert).not.toHaveBeenCalled();
+    });
+
     it('rolls back the player row when the username insert loses a race', async () => {
       tables.usernames.maybeSingleResult = { data: null, error: null };
       tables.players.singleResult = {

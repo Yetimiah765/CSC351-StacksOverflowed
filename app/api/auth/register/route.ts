@@ -98,6 +98,13 @@ export async function POST(request: Request) {
       .select('player_id, first_name, last_name, birthday, balance')
       .single();
 
+    // SRS-102.1: the database checks the age too (chk_players_minimum_age).
+    // isAtLeast21() uses the same New York date, but if the two ever disagree
+    // the player is told why, not shown the database's error.
+    if (playerError?.code === '23514' && playerError.message.includes('chk_players_minimum_age')) {
+      return Response.json({ error: 'You must be at least 21 years old to register.' }, { status: 400 });
+    }
+
     if (playerError || !player) {
       // Surfaces the underlying constraint violation (e.g. the minimum-age
       // check) instead of a generic message.

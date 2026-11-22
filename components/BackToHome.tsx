@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { NAV_HISTORY_KEY, parseTrail, previousPage } from '../lib/navHistory';
+import { backStep, NAV_HISTORY_KEY, NAV_LOADED_KEY, parseLoadMark, parseTrail } from '../lib/navHistory';
 
 // The back button on each game's main page (blackjack, roulette, slots, the
 // sportsbook, the poker lobby), the cosmetic shop (SRS-108.5) and the
@@ -9,20 +9,26 @@ import { NAV_HISTORY_KEY, parseTrail, previousPage } from '../lib/navHistory';
 // player was on before, e.g. from the profile back to the game they were
 // playing, or to the home page (the casino floor) when this is the first page
 // of ours opened in the tab, e.g. from a bookmark (SRS-108.7). The trail is
-// kept by NavigationTracker. (The name is from when it always went home; it
-// keeps it so the pages that use it don't change.)
+// kept by NavigationTracker. It uses the browser's Back only when that page
+// is right behind this one in the browser's history; otherwise it goes to the
+// page, since the tab may have been on another website in between, and
+// Back would go there. (The name is from when it always went home; it keeps
+// it so the pages that use it don't change.)
 export default function BackToHome({ className = '' }: { className?: string }) {
   const router = useRouter();
 
   function goBack() {
-    let previous: string | null = null;
+    let step = backStep([], 0);
     try {
-      previous = previousPage(parseTrail(sessionStorage.getItem(NAV_HISTORY_KEY)));
+      step = backStep(
+        parseTrail(sessionStorage.getItem(NAV_HISTORY_KEY)),
+        parseLoadMark(sessionStorage.getItem(NAV_LOADED_KEY))
+      );
     } catch {
       // Storage blocked: go home.
     }
-    if (previous && window.history.length > 1) router.back();
-    else router.push('/');
+    if (step.by === 'history' && window.history.length > 1) router.back();
+    else router.push(step.by === 'link' ? step.path : '/');
   }
 
   return (

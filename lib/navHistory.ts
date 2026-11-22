@@ -5,6 +5,13 @@
 
 export const NAV_HISTORY_KEY = 'nav_history';
 
+// How long the trail was when the page in the tab last loaded (lowered if the
+// trail gets shorter than that). The pages after it were reached inside the
+// website since then, so the browser's history has each one right after the
+// one before. The pages up to it may have another website between them: the
+// trail outlives a visit elsewhere in the same tab.
+export const NAV_LOADED_KEY = 'nav_history_loaded';
+
 // Plenty for going back and forth; older pages drop off the front.
 export const MAX_PAGES = 50;
 
@@ -32,4 +39,30 @@ export function parseTrail(raw: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+/** The trail's length at the last page load, from NAV_LOADED_KEY, or
+ * Infinity if it's missing or damaged, so the back button never trusts the
+ * browser's history without it. */
+export function parseLoadMark(raw: string | null): number {
+  const mark = Number(raw ?? NaN);
+  return Number.isInteger(mark) && mark >= 0 ? mark : Infinity;
+}
+
+/** The load mark after arriving at a page: the new trail's length on the
+ * first page since the page loaded, otherwise the mark, lowered if the trail
+ * is now shorter than it. */
+export function nextLoadMark(mark: number, trail: string[], firstSinceLoad: boolean): number {
+  return firstSinceLoad ? trail.length : Math.min(mark, trail.length);
+}
+
+/** How the back button gets to the page before this one (SRS-108.7): with the
+ * browser's Back when that page is the one before this in the browser's
+ * history, which is certain only for a page reached inside the website since
+ * the page loaded; otherwise by going to it, since the browser's previous page
+ * may be another website. Home when there's no page before. */
+export function backStep(trail: string[], loadMark: number): { by: 'history' } | { by: 'link'; path: string } {
+  const previous = previousPage(trail);
+  if (!previous) return { by: 'link', path: '/' };
+  return trail.length > loadMark ? { by: 'history' } : { by: 'link', path: previous };
 }

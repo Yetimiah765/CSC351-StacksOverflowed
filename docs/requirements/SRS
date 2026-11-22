@@ -992,7 +992,7 @@ flowchart LR
 
 *Traces to: UR-103*
 
-**SRS-103.3, JO, Session persistence.** The system shall keep the player logged in while the active website tab remains open unless the player manually logs out or the session is invalidated.
+**SRS-103.3, JO, Session persistence.** The system shall keep the player logged in while the active website tab remains open unless the player manually logs out, the login expires (SRS-105.7), or the session is invalidated.
 
 *Traces to: UR-103, UR-105*
 
@@ -1113,6 +1113,10 @@ flowchart LR
 *Note: when account deletion (UR-106) is built, deleting an account shall end the same way.*
 
 *Traces to: UR-105*
+
+**SRS-105.7, JO, Session expiry.** A login shall last 3 hours. When it ends, the system shall refuse the session and log the player out in every open tab of the website, telling them that their login has expired and asking them to log in again.
+
+*Traces to: UR-105, UR-103*
 
 ### UR-106, JO – Delete Account
 

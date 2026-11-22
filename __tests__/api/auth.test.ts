@@ -459,6 +459,20 @@ describe('Auth API routes', () => {
       });
     });
 
+    it('starts a 3-hour session and says when it ends (SRS-105.7)', async () => {
+      await seedPlayer();
+      const before = Date.now();
+
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password }));
+      const body = await response.json();
+
+      const [row] = tables.player_sessions.upsert.mock.calls[0] as [{ created_at: string }];
+      const started = Date.parse(row.created_at);
+      // The start is written even when the player already had a session row.
+      expect(started).toBeGreaterThanOrEqual(before);
+      expect(Date.parse(body.expiresAt) - started).toBe(3 * 60 * 60 * 1000);
+    });
+
     it('replaces any existing session on login (SRS-103.5)', async () => {
       await seedPlayer();
 

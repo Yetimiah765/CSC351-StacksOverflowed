@@ -556,6 +556,49 @@ CREATE TRIGGER trg_players_grant_default_cosmetics
     FOR EACH ROW
     EXECUTE FUNCTION fn_players_grant_default_cosmetics();
 
+-- Row Level Security on players (Sprint 6, JO; same as
+-- supabase/rls-players.sql, which explains the rules). A logged-in player may
+-- read, create, change and delete only their own row, auth.uid() compared
+-- with player_id as text; visitors get nothing. Column permissions then let a
+-- player change only their name, bio and photo, never read a password hash,
+-- and leave creating accounts to the server (service role).
+ALTER TABLE public.players ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Players can read their own row"
+    ON public.players
+    FOR SELECT
+    TO authenticated
+    USING ( auth.uid()::text = player_id::text );
+
+CREATE POLICY "Players can create their own row"
+    ON public.players
+    FOR INSERT
+    TO authenticated
+    WITH CHECK ( auth.uid()::text = player_id::text );
+
+CREATE POLICY "Players can update their own row"
+    ON public.players
+    FOR UPDATE
+    TO authenticated
+    USING      ( auth.uid()::text = player_id::text )
+    WITH CHECK ( auth.uid()::text = player_id::text );
+
+CREATE POLICY "Players can delete their own row"
+    ON public.players
+    FOR DELETE
+    TO authenticated
+    USING ( auth.uid()::text = player_id::text );
+
+REVOKE UPDATE ON public.players FROM anon, authenticated;
+GRANT UPDATE (first_name, last_name, bio, profile_photo) ON public.players TO authenticated;
+
+REVOKE SELECT ON public.players FROM anon, authenticated;
+GRANT SELECT (player_id, first_name, last_name, birthday, balance, bio,
+              profile_photo, account_status, created_at, username_changed_at)
+    ON public.players TO authenticated;
+
+REVOKE INSERT ON public.players FROM anon, authenticated;
+
 -- Buys and opens one blind box as one transaction (SRS-124.4 - SRS-126.5):
 --   * The player's row is locked first, so simultaneous purchases run one at
 --     a time and each sees the balance the previous one left.

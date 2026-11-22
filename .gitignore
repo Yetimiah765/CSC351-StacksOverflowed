@@ -4,3 +4,6 @@ node_modules
 .env
 coverage
 tsconfig.tsbuildinfo
+
+# Keys for a throwaway Supabase project the RLS attack tests can target
+.env.rls-copy

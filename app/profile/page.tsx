@@ -6,12 +6,14 @@ import { useEffect, useState } from 'react';
 import BackToHome from '../../components/BackToHome';
 import BioEditor from '../../components/profile/BioEditor';
 import CosmeticsSection from '../../components/profile/CosmeticsSection';
+import DeleteAccountDialog from '../../components/profile/DeleteAccountDialog';
 import PasswordEditor, { type PasswordChange } from '../../components/profile/PasswordEditor';
 import ProfileField from '../../components/profile/ProfileField';
 import ProfilePhoto from '../../components/profile/ProfilePhoto';
 import StatsSection, { type PlayerStats } from '../../components/profile/StatsSection';
 import TextFieldEditor from '../../components/profile/TextFieldEditor';
-import { notifyAppearanceChanged } from '../../lib/balanceEvents';
+import { notifyAppearanceChanged, notifyBalanceChanged } from '../../lib/balanceEvents';
+import { deleteAccount } from '../../lib/deleteAccount';
 import { askToWalkOut, logOut } from '../../lib/logOut';
 import { publicProfilePath } from '../../lib/publicProfile';
 import type { Cosmetic, CosmeticCategory } from '../../lib/cosmetics';
@@ -28,8 +30,9 @@ interface Profile {
 
 // The fields PATCH /api/profile edits, one pop-up each.
 type EditableField = 'firstName' | 'lastName' | 'username' | 'bio';
-// The password has its own route (Change Password, UR-113), not PATCH.
-type Editing = EditableField | 'password';
+// The password has its own route (Change Password, UR-113), not PATCH, and
+// deleting the account its own pop-up (UR-106).
+type Editing = EditableField | 'password' | 'deleteAccount';
 
 const NAME_HINT = 'Letters, spaces, apostrophes, and hyphens.';
 // SRS-112.4, SRS-112.6, SRS-112.7.
@@ -58,6 +61,8 @@ export default function ProfilePage() {
   const [notice, setNotice] = useState('');
 
   const [loggingOut, setLoggingOut] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
     const stored = localStorage.getItem('player_token');
@@ -195,6 +200,30 @@ export default function ProfilePage() {
     router.push('/');
   }
 
+  // SRS-106.1: the account is deleted only from its confirmation pop-up.
+  // Its sessions went with it, so the player is logged out here as with Log
+  // out, and the home page shows them leaving the casino (SRS-105.6).
+  async function confirmDeletion() {
+    if (!token) return;
+    setDeleting(true);
+    setDeleteError('');
+    const result = await deleteAccount(token);
+    if (!result.ok) {
+      setDeleting(false);
+      if (result.expired) {
+        localStorage.removeItem('player_token');
+        router.replace('/login');
+        return;
+      }
+      setDeleteError(result.error);
+      return;
+    }
+    localStorage.removeItem('player_token');
+    notifyBalanceChanged();
+    askToWalkOut();
+    router.push('/');
+  }
+
   // Guests stay on this view until the redirect to /login completes.
   if (loading) {
     return (
@@ -279,6 +308,24 @@ export default function ProfilePage() {
               onEquip={equipCosmetic}
             />
             <StatsSection stats={stats} loadError={statsError} />
+
+            {/* UR-106: deleting the account, apart at the bottom of the page. */}
+            <section className="rounded-3xl border border-red-900/60 bg-slate-900/90 p-6 shadow-2xl shadow-black/30 sm:p-8">
+              <h2 className="text-lg font-semibold">Delete account</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                Permanently delete your account and everything in it. This can&apos;t be undone.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError('');
+                  setEditing('deleteAccount');
+                }}
+                className="mt-4 rounded-xl border border-red-500/60 px-4 py-2 text-sm font-semibold text-red-200 transition hover:bg-red-500/10"
+              >
+                Delete account
+              </button>
+            </section>
           </>
         ) : (
           <p className="text-slate-300">Unable to load your profile.</p>
@@ -317,6 +364,14 @@ export default function ProfilePage() {
       ) : null}
       {editing === 'password' ? (
         <PasswordEditor onSave={changePassword} onCancel={() => setEditing(null)} />
+      ) : null}
+      {editing === 'deleteAccount' ? (
+        <DeleteAccountDialog
+          deleting={deleting}
+          error={deleteError}
+          onConfirm={confirmDeletion}
+          onCancel={() => setEditing(null)}
+        />
       ) : null}
       {editing === 'bio' && profile ? (
         <BioEditor

@@ -9,6 +9,9 @@ import {
   verifyPassword,
 } from '../../../../lib/auth';
 import { SESSION_MS } from '../../../../lib/session';
+import { serverError } from '../../../../lib/serverError';
+
+const LOGIN_FAILED = 'Could not log you in. Please try again.';
 
 export async function POST(request: Request) {
   try {
@@ -51,7 +54,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (usernameError) {
-      return Response.json({ error: usernameError.message }, { status: 500 });
+      return serverError('login: username lookup', usernameError, LOGIN_FAILED);
     }
     if (!usernameRow) {
       return accountNotFound();
@@ -133,7 +136,7 @@ export async function POST(request: Request) {
       );
 
     if (sessionError) {
-      return Response.json({ error: sessionError.message }, { status: 500 });
+      return serverError('login: session', sessionError, LOGIN_FAILED);
     }
 
     return Response.json(
@@ -152,7 +155,6 @@ export async function POST(request: Request) {
       { status: 200 }
     );
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unexpected error';
-    return Response.json({ error: message }, { status: 500 });
+    return serverError('login', error, LOGIN_FAILED);
   }
 }

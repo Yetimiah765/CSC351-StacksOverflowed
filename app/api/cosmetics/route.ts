@@ -1,6 +1,9 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 import { requirePlayerId } from '../../../lib/auth';
 import { orderCollection, type CosmeticCategory, type CosmeticRow } from '../../../lib/cosmetics';
+import { serverError } from '../../../lib/serverError';
+
+const COSMETICS_FAILED = 'Could not load your cosmetics. Please try again.';
 
 // SRS-119.1 / SRS-119.2 / SRS-120.1: the logged-in player's cosmetics and
 // what they have equipped in each category. Defaults come first (the
@@ -17,13 +20,13 @@ export async function GET(request: Request) {
     .from('player_cosmetics')
     .select('acquired_at, cosmetics(cosmetic_id, cosmetic_name, category, is_default, asset_path, is_holographic)')
     .eq('player_id', playerId);
-  if (ownedError) return Response.json({ error: ownedError.message }, { status: 500 });
+  if (ownedError) return serverError('cosmetics: owned', ownedError, COSMETICS_FAILED);
 
   const { data: equippedRows, error: equippedError } = await supabase
     .from('player_equipped_cosmetics')
     .select('category, cosmetic_id')
     .eq('player_id', playerId);
-  if (equippedError) return Response.json({ error: equippedError.message }, { status: 500 });
+  if (equippedError) return serverError('cosmetics: equipped', equippedError, COSMETICS_FAILED);
 
   const owned = orderCollection((ownedRows ?? []) as unknown as { acquired_at: string; cosmetics: CosmeticRow }[]);
 

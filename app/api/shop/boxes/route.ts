@@ -1,6 +1,9 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { getBearerToken, getPlayerIdForToken } from '../../../../lib/auth';
 import { byCategory, duplicateRefund, isBoxOnSale, rewardChances, toCosmetic, type CosmeticRow } from '../../../../lib/cosmetics';
+import { serverError } from '../../../../lib/serverError';
+
+const SHOP_FAILED = 'Could not load the shop. Please try again.';
 
 interface BoxRow {
   box_id: number;
@@ -31,12 +34,12 @@ export async function GET(request: Request) {
     .select('box_id, box_name, description, price, is_available, available_from, available_until, holographic_chance_bp, blind_box_rewards(cosmetics(cosmetic_id, cosmetic_name, category, is_default, asset_path, is_holographic))')
     .eq('is_available', true)
     .order('box_id');
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('shop: boxes', error, SHOP_FAILED);
 
   let ownedIds = new Set<number>();
   if (playerId !== null) {
     const { data: owned, error: ownedError } = await supabase.from('player_cosmetics').select('cosmetic_id').eq('player_id', playerId);
-    if (ownedError) return Response.json({ error: ownedError.message }, { status: 500 });
+    if (ownedError) return serverError('shop: owned', ownedError, SHOP_FAILED);
     ownedIds = new Set((owned ?? []).map((row: { cosmetic_id: number }) => row.cosmetic_id));
   }
 

@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../lib/auth';
 import { msUntilAvailable, pickDailyLoginBoxReward } from '../../../lib/dailyLoginBox';
+import { serverError } from '../../../lib/serverError';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -43,7 +44,7 @@ export async function GET(request: Request) {
     .limit(1)
     .maybeSingle();
 
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('daily login box: status', error, 'Could not load the Daily Login Box.');
 
   // SRS-110.2 / SRS-128.3: a player who has never opened a box can open one now.
   const msRemaining = msUntilAvailable(data?.next_available_at ?? null);

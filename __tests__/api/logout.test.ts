@@ -70,7 +70,7 @@ describe('Logout API route', () => {
     const response = await POST(req());
 
     expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({ error: 'connection lost' });
+    expect(await response.json()).toEqual({ error: 'Could not log you out. Please try again.' });
   });
 
   it('returns a 500 when Supabase credentials are not configured', async () => {

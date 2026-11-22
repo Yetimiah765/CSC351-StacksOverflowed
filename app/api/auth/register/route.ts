@@ -7,6 +7,7 @@ import {
   isValidUsername,
   PASSWORD_RULES_MESSAGE,
 } from '../../../../lib/auth';
+import { serverError } from '../../../../lib/serverError';
 
 interface RegisterBody {
   firstName?: string;
@@ -16,6 +17,8 @@ interface RegisterBody {
   password?: string;
   confirmPassword?: string;
 }
+
+const CREATE_FAILED = 'Could not create your account. Please try again.';
 
 export async function POST(request: Request) {
   try {
@@ -84,7 +87,7 @@ export async function POST(request: Request) {
       .maybeSingle();
 
     if (lookupError) {
-      return Response.json({ error: lookupError.message, code: lookupError.code }, { status: 500 });
+      return serverError('register: username lookup', lookupError, CREATE_FAILED);
     }
     if (existingUsername) {
       return Response.json({ error: 'That username is already taken or reserved.' }, { status: 400 });
@@ -106,12 +109,9 @@ export async function POST(request: Request) {
     }
 
     if (playerError || !player) {
-      // Surfaces the underlying constraint violation (e.g. the minimum-age
-      // check) instead of a generic message.
-      return Response.json(
-        { error: playerError?.message ?? 'Failed to create account.', code: playerError?.code },
-        { status: 400 }
-      );
+      // Anything else the database refused (the fields were all checked
+      // above): logged, never shown (SRS-NFR-111).
+      return serverError('register: player insert', playerError ?? 'no row returned', CREATE_FAILED, 400);
     }
 
     const { error: usernameError } = await supabase
@@ -122,16 +122,12 @@ export async function POST(request: Request) {
       // Two inserts can't share a transaction over PostgREST, so roll back
       // the player row by hand if the username insert loses a race.
       await supabase.from('players').delete().eq('player_id', player.player_id);
-      return Response.json(
-        { error: 'That username is already taken or reserved.', code: usernameError.code },
-        { status: 400 }
-      );
+      console.error('register: username insert:', usernameError.message);
+      return Response.json({ error: 'That username is already taken or reserved.' }, { status: 400 });
     }
 
     return Response.json({ player: { ...player, username } }, { status: 201 });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : 'Unexpected error';
-    const name = error instanceof Error ? error.name : undefined;
-    return Response.json({ error: message, name }, { status: 500 });
+    return serverError('register', error, CREATE_FAILED);
   }
 }

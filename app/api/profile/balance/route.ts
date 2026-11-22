@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../../lib/auth';
+import { serverError } from '../../../../lib/serverError';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -28,7 +29,7 @@ export async function GET(request: Request) {
     .eq('player_id', playerId)
     .maybeSingle();
 
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('balance', error, 'Could not load your balance.');
   if (!data) return Response.json({ error: 'Player not found.' }, { status: 404 });
 
   // The bar still shows the balance if this lookup fails, just without the outline.

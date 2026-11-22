@@ -3,6 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseClient } from '../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../lib/auth';
 import { msUntil, nextWishAt, pickWishReward, wishDay } from '../../../lib/wishingFountain';
+import { serverError } from '../../../lib/serverError';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -44,7 +45,7 @@ export async function GET(request: Request) {
     .eq('wish_day', wishDay(now))
     .maybeSingle();
 
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('wishing fountain: status', error, "Could not check today's wish. Please try again.");
 
   if (!data) return Response.json({ wishedToday: false, nextWishAt: null, msRemaining: 0 }, { status: 200 });
   const next = nextWishAt(now);

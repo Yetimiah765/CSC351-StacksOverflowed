@@ -398,6 +398,20 @@ describe('Auth API routes', () => {
       expect(tables.usernames.insert).not.toHaveBeenCalled();
     });
 
+    it("doesn't send a database error's details to the browser (SRS-NFR-111)", async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      tables.usernames.maybeSingleResult = { data: null, error: { message: 'relation "usernames" does not exist', code: '42P01' } };
+
+      const response = await registerPost(registerRequest(validRegistration));
+      const text = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(JSON.parse(text)).toEqual({ error: 'Could not create your account. Please try again.' });
+      expect(text).not.toMatch(/relation|42P01|usernames/);
+      expect(log).toHaveBeenCalled();
+      log.mockRestore();
+    });
+
     it('rolls back the player row when the username insert loses a race', async () => {
       tables.usernames.maybeSingleResult = { data: null, error: null };
       tables.players.singleResult = {
@@ -414,7 +428,6 @@ describe('Auth API routes', () => {
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({
         error: 'That username is already taken or reserved.',
-        code: '23505',
       });
       expect(tables.players.delete).toHaveBeenCalled();
       expect(tables.players.eq).toHaveBeenCalledWith('player_id', 7);
@@ -623,6 +636,20 @@ describe('Auth API routes', () => {
         const response = await loginPost(loginRequest({ username: 'gooduser1', password: attempt }));
         expect(response.status, `${attempt.length} characters`).toBe(401);
       }
+    });
+
+    it("doesn't send a database error's details to the browser when login fails (SRS-NFR-111)", async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      await seedPlayer();
+      tables.player_sessions.defaultResult = { data: null, error: { message: 'duplicate key value violates unique constraint "player_sessions_token_hash_key"', code: '23505' } };
+
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password }));
+      const text = await response.text();
+
+      expect(response.status).toBe(500);
+      expect(JSON.parse(text)).toEqual({ error: 'Could not log you in. Please try again.' });
+      expect(text).not.toMatch(/duplicate|player_sessions|23505/);
+      log.mockRestore();
     });
 
     it('never adds coins for logging in (SRS-110.4)', async () => {

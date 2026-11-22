@@ -158,7 +158,8 @@ describe('Avatar upload route', () => {
     const file = new Blob([photo], { type: 'image/png' });
     const response = await POST(makeRequest(file));
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Update failed' });
+    // SRS-NFR-111: logged on the server, never sent to the browser.
+    expect(await response.json()).toEqual({ error: 'Could not save your photo. Please try again.' });
   });
 });
 
@@ -202,6 +203,6 @@ describe('Avatar remove route', () => {
     tables.players.defaultResult = { data: null, error: { message: 'Update failed' } };
     const response = await DELETE(makeDeleteRequest());
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'Update failed' });
+    expect(await response.json()).toEqual({ error: 'Could not remove your photo. Please try again.' });
   });
 });

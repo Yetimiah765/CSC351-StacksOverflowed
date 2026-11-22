@@ -6,6 +6,9 @@ import {
   PASSWORD_RULES_MESSAGE,
   verifyPassword,
 } from '../../../../lib/auth';
+import { serverError } from '../../../../lib/serverError';
+
+const PASSWORD_FAILED = 'Could not change your password. Please try again.';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -54,7 +57,7 @@ export async function POST(request: Request) {
     .eq('player_id', playerId)
     .maybeSingle();
 
-  if (lookupError) return Response.json({ error: lookupError.message }, { status: 500 });
+  if (lookupError) return serverError('password: lookup', lookupError, PASSWORD_FAILED);
   if (!player) return Response.json({ error: 'Player not found.' }, { status: 404 });
 
   // SRS-113.2: nothing is saved unless the current password checks out. 403,
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
     .update({ password_hash: await hashPassword(newPassword) })
     .eq('player_id', playerId);
 
-  if (updateError) return Response.json({ error: updateError.message }, { status: 500 });
+  if (updateError) return serverError('password: save', updateError, PASSWORD_FAILED);
 
   return Response.json({ success: true }, { status: 200 });
 }

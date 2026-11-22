@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../../../../../lib/supabase';
 import { avatarDataUrlOrNull } from '../../../../../lib/playerDisplay';
+import { serverError } from '../../../../../lib/serverError';
 
 // Public by design: a seated player's avatar is visible to anyone viewing
 // the poker table (SRS-8.1), the same as their username. Fetched on demand
@@ -29,7 +30,7 @@ export async function GET(_request: Request, { params }: { params: { playerId: s
     .eq('player_id', playerId)
     .maybeSingle();
 
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('public avatar', error, "Could not load this player's photo.");
   if (!player) return Response.json({ error: 'Player not found.' }, { status: 404 });
 
   // A photo that can't be read shows the default icon (SRS-8.2), never a 500.

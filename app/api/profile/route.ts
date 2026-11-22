@@ -3,6 +3,7 @@ import { checkName, getPlayerIdForToken, isValidUsername, verifyPassword } from 
 import { profilePhotoDataUrl } from '../../../lib/playerDisplay';
 import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { serverError } from '../../../lib/serverError';
 
 function getToken(request: Request): string | null {
   const auth = request.headers.get('Authorization');
@@ -88,7 +89,7 @@ async function changeUsername(supabase: SupabaseClient, playerId: number, value:
     p_player_id: playerId,
     p_username: username,
   });
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('profile: change username', error, 'Could not change your username. Please try again.');
 
   const result = data as { status: string; next_change_at?: string };
   switch (result.status) {
@@ -126,7 +127,7 @@ export async function GET(request: Request) {
 
   const withPhoto = new URL(request.url).searchParams.get('photo') !== 'none';
   const { profile, error } = await loadProfile(supabase, playerId!, withPhoto);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('profile: load', error, 'Could not load your profile. Please try again.');
 
   return Response.json({ profile }, { status: 200 });
 }
@@ -187,11 +188,11 @@ export async function PATCH(request: Request) {
 
   if (Object.keys(changes).length > 0) {
     const { error: updateError } = await supabase.from('players').update(changes).eq('player_id', playerId!);
-    if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
+    if (updateError) return serverError('profile: save', updateError, 'Could not save your changes. Please try again.', 400);
   }
 
   const { profile, error } = await loadProfile(supabase, playerId!);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
+  if (error) return serverError('profile: load after save', error, 'Your changes were saved, but the profile could not be reloaded. Please refresh.');
 
   return Response.json({ profile }, { status: 200 });
 }

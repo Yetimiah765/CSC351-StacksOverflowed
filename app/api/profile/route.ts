@@ -195,3 +195,23 @@ export async function PATCH(request: Request) {
 
   return Response.json({ profile }, { status: 200 });
 }
+
+// SRS-106.3: deleting an account deletes everything tied to it. Every table
+// that refers to players does so ON DELETE CASCADE (checked by
+// __tests__/lib/accountDeletion.test.ts), so deleting the player's row also
+// deletes their username, sessions, balance, statistics, cosmetics and every
+// game's rows. Only the logged-in player's own account, found from their
+// session token, is ever deleted; nothing in the request can name another.
+export async function DELETE(request: Request) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
+
+  const { playerId, errorResponse } = await requirePlayerId(request, supabase);
+  if (errorResponse) return errorResponse;
+
+  const { data, error } = await supabase.from('players').delete().eq('player_id', playerId!).select('player_id');
+  if (error) return Response.json({ error: 'Could not delete your account. Please try again.' }, { status: 500 });
+  if (!data || data.length === 0) return Response.json({ error: 'No account was found.' }, { status: 404 });
+
+  return Response.json({ deleted: true }, { status: 200 });
+}

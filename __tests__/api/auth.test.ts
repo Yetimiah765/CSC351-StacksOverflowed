@@ -60,6 +60,7 @@ vi.mock('../../lib/supabase', () => ({
 import { getSupabaseClient } from '../../lib/supabase';
 import { POST as registerPost } from '../../app/api/auth/register/route';
 import { POST as loginPost } from '../../app/api/auth/login/route';
+import { hashPassword, verifyPassword } from '../../lib/auth';
 
 function resetTable(table: ReturnType<typeof makeTableMock>) {
   table.select.mockClear();
@@ -187,7 +188,7 @@ describe('Auth API routes', () => {
       expect(row.password_hash).not.toBe(validRegistration.password);
       expect(JSON.stringify(row)).not.toContain(validRegistration.password);
       expect(JSON.stringify(tables.usernames.insert.mock.calls)).not.toContain(validRegistration.password);
-      expect(await bcrypt.compare(validRegistration.password, row.password_hash as string)).toBe(true);
+      expect(await verifyPassword(validRegistration.password, row.password_hash as string)).toBe(true);
     });
 
     it('hashes with salted bcrypt at cost 10 or more and never logs the password (SRS-NFR-101)', async () => {
@@ -198,7 +199,8 @@ describe('Auth API routes', () => {
       await registerPost(registerRequest(validRegistration));
       const firstHash = insertedPlayer().password_hash as string;
 
-      const [, cost] = firstHash.match(/^\$2[aby]\$(\d{2})\$/) ?? [];
+      // bcrypt of the password's SHA-256 (see lib/auth.ts), after a 'sha256$' marker.
+      const [, cost] = firstHash.match(/^sha256\$\$2[aby]\$(\d{2})\$/) ?? [];
       expect(Number(cost)).toBeGreaterThanOrEqual(10);
 
       // Salted: the same password hashes differently for a second account.
@@ -508,6 +510,39 @@ describe('Auth API routes', () => {
       }
       const response = await loginPost(loginRequest({ username: 'gooduser1', password: 'Secret123' }));
       expect(response.status).toBe(200);
+    });
+
+    it('checks every character of a password longer than 72, which bcrypt alone cuts off (SRS-104.4)', async () => {
+      // 72 letters and digits, then X: 73 characters, as in bug #1003.
+      const prefix = 'Ab1'.repeat(24);
+      await seedPlayer();
+      tables.players.maybeSingleResult = {
+        data: { ...(tables.players.maybeSingleResult.data as object), password_hash: await hashPassword(prefix + 'X') },
+        error: null,
+      };
+
+      for (const attempt of [prefix + 'Y', prefix, prefix + 'X ', prefix + 'XX']) {
+        const response = await loginPost(loginRequest({ username: 'gooduser1', password: attempt }));
+        expect(response.status, `${attempt.length} characters`).toBe(401);
+      }
+      const response = await loginPost(loginRequest({ username: 'gooduser1', password: prefix + 'X' }));
+      expect(response.status).toBe(200);
+    });
+
+    it("still logs in with a hash made before passwords were pre-hashed, but only for passwords it covered in full", async () => {
+      // seedPlayer() stores plain bcrypt of the password, as every account
+      // made before this change has.
+      await seedPlayer();
+      expect((await loginPost(loginRequest({ username: 'gooduser1', password }))).status).toBe(200);
+
+      // An old hash of a 73-character password covers only its first 72, so
+      // it can't tell the real password from one with a different end.
+      const prefix = 'Ab1'.repeat(24);
+      await seedPlayer({ password: prefix + 'X' });
+      for (const attempt of [prefix + 'Y', prefix, prefix + 'X']) {
+        const response = await loginPost(loginRequest({ username: 'gooduser1', password: attempt }));
+        expect(response.status, `${attempt.length} characters`).toBe(401);
+      }
     });
 
     it('never adds coins for logging in (SRS-110.4)', async () => {

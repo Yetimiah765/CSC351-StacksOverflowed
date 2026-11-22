@@ -9,11 +9,30 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 // SRS-NFR (password storage): bcrypt with a minimum cost factor of 10.
 const BCRYPT_COST_FACTOR = 10;
 
+// bcrypt reads only the first 72 bytes of what it's given, so a longer
+// password would match any other with the same first 72 characters
+// (SRS-104.4). So bcrypt is given the password's SHA-256 instead, which is
+// always 44 characters, and every character of the password counts. Those
+// hashes start with PREHASHED; older ones are plain bcrypt of the password.
+const PREHASHED = 'sha256$';
+const BCRYPT_MAX_BYTES = 72;
+
+function sha256(password: string): string {
+  return createHash('sha256').update(password, 'utf8').digest('base64');
+}
+
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, BCRYPT_COST_FACTOR);
+  return PREHASHED + (await bcrypt.hash(sha256(password), BCRYPT_COST_FACTOR));
 }
 
 export async function verifyPassword(password: string, passwordHash: string): Promise<boolean> {
+  if (passwordHash.startsWith(PREHASHED)) {
+    return bcrypt.compare(sha256(password), passwordHash.slice(PREHASHED.length));
+  }
+  // An older hash covers only the first 72 bytes, so a password of 72 or more
+  // can't be told apart from a different one that starts the same way.
+  // Shorter ones were hashed in full, so they're checked exactly.
+  if (Buffer.byteLength(password, 'utf8') >= BCRYPT_MAX_BYTES) return false;
   return bcrypt.compare(password, passwordHash);
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { notifyAppearanceChanged } from '../../lib/balanceEvents';
+import { isPng, MAX_PHOTO_BYTES, shrinkScale, UPLOAD_LIMIT_BYTES } from '../../lib/profilePhoto';
 import CosmeticArt from '../cosmetics/CosmeticArt';
 import DefaultAvatar from './DefaultAvatar';
 
@@ -85,9 +86,16 @@ export default function ProfilePhoto({
     // Cleared so choosing the same file again still fires a change.
     event.target.value = '';
     if (!file) return;
-    const formData = new FormData();
-    formData.append('image', file);
     setBusy('uploading');
+    setError('');
+    const upload = await photoToUpload(file);
+    if (typeof upload === 'string') {
+      setError(upload);
+      setBusy(null);
+      return;
+    }
+    const formData = new FormData();
+    formData.append('image', upload, 'photo.png');
     const ok = await send('POST', formData, 'Could not upload your photo.');
     setBusy(null);
     if (ok) closeMenu();
@@ -171,4 +179,33 @@ export default function ProfilePhoto({
       <input ref={fileInputRef} type="file" accept="image/png" className="hidden" onChange={handleFileChosen} />
     </div>
   );
+}
+
+// The file to send for a chosen photo, or the reason it can't be. A PNG of up
+// to 5 MB is allowed (SRS-115.1, SRS-115.3; the server checks again), but
+// Vercel refuses a request over 4.5 MB before the upload route sees it, so a
+// photo over UPLOAD_LIMIT_BYTES is drawn smaller, as a PNG again, until it
+// fits. It's shown at most 256px across, so nothing is lost on screen.
+async function photoToUpload(file: File): Promise<Blob | string> {
+  if (!isPng(new Uint8Array(await file.slice(0, 8).arrayBuffer()))) return 'Profile photos must be PNG images.';
+  if (file.size > MAX_PHOTO_BYTES) return 'Profile photos must be 5 MB or smaller.';
+  if (file.size <= UPLOAD_LIMIT_BYTES) return file;
+
+  let image: ImageBitmap;
+  try {
+    image = await createImageBitmap(file);
+  } catch {
+    return 'Profile photos must be PNG images.';
+  }
+  let scale = shrinkScale(file.size);
+  // Each try is smaller, in case the browser's PNG is bigger than expected.
+  for (let attempt = 0; attempt < 6; attempt++, scale *= 0.8) {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+    canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const smaller = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (smaller && smaller.size <= UPLOAD_LIMIT_BYTES) return smaller;
+  }
+  return 'Could not upload your photo. Please try a smaller one.';
 }

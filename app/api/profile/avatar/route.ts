@@ -1,5 +1,7 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import { getPlayerIdForToken } from '../../../../lib/auth';
+import { photoToAvatarDataUrl, PROFILE_PHOTO_SIZE } from '../../../../lib/playerDisplay';
+import { MAX_PHOTO_BYTES } from '../../../../lib/profilePhoto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 function getToken(request: Request): string | null {
@@ -28,8 +30,6 @@ async function requirePlayer(
 
 // SRS-115.1: PNG is verified by file signature, not filename.
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-// SRS-115.3: 5 MB maximum, matching chk_players_profile_photo.
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 
 // Uploads a new photo, replacing any existing one (SRS-115.4).
 export async function POST(request: Request) {
@@ -60,17 +60,23 @@ export async function POST(request: Request) {
   }
 
   // PostgREST accepts bytea input as a Postgres hex-escaped string.
-  const { error: updateError } = await supabase
-    .from('players')
-    .update({ profile_photo: `\\x${buffer.toString('hex')}` })
-    .eq('player_id', playerId);
+  const photo = `\\x${buffer.toString('hex')}`;
+
+  // The reply carries the profile's 256px copy, not the photo itself, which
+  // as base64 could go over Vercel's 4.5 MB limit on a reply (SRS-115.3).
+  // Making it also checks the file is a PNG that can be shown.
+  let shown: string | null;
+  try {
+    shown = await photoToAvatarDataUrl(photo, PROFILE_PHOTO_SIZE);
+  } catch {
+    return Response.json({ error: 'Profile photos must be PNG images.' }, { status: 400 });
+  }
+
+  const { error: updateError } = await supabase.from('players').update({ profile_photo: photo }).eq('player_id', playerId);
 
   if (updateError) return Response.json({ error: updateError.message }, { status: 400 });
 
-  return Response.json(
-    { profilePhotoDataUrl: `data:image/png;base64,${buffer.toString('base64')}` },
-    { status: 200 }
-  );
+  return Response.json({ profilePhotoDataUrl: shown }, { status: 200 });
 }
 
 // SRS-115.6: removing the photo clears the column, and a NULL photo shows the

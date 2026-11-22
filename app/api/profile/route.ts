@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../../../lib/supabase';
 import { getPlayerIdForToken, isValidName, isValidUsername, NAME_MAX_LENGTH } from '../../../lib/auth';
-import { photoToDataUrl } from '../../../lib/playerDisplay';
+import { profilePhotoDataUrl } from '../../../lib/playerDisplay';
 import { BIO_MAX_WORDS, countBioWords } from '../../../lib/bio';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
@@ -41,7 +41,8 @@ async function loadProfile(supabase: SupabaseClient, playerId: number, withPhoto
       username: usernameRow?.username ?? null,
       bio: row.bio,
       balance: row.balance,
-      profilePhotoDataUrl: photoToDataUrl(row.profile_photo ?? null),
+      // A 256px copy, not the photo itself, so the reply fits Vercel's limit.
+      profilePhotoDataUrl: await profilePhotoDataUrl(row.profile_photo ?? null),
     },
     error: null,
   };

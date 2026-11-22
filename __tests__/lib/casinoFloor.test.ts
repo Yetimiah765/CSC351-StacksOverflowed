@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BAR,
+  dailyLoginBoxRange,
   BAR_STOOLS,
   BAR_ALCOVE,
   BAR_STOOL_SPACING,
@@ -76,6 +77,13 @@ describe('the casino floor', () => {
     const ids = INTERACTIVE_OBJECTS.map((object) => object.id);
     for (const game of GAMES) expect(ids).toContain(game.id);
     expect(ids).toContain('shop');
+  });
+
+  it("gives the Daily Login Box's range of rewards at the shop, linking to it (SRS-107.4)", () => {
+    expect(dailyLoginBoxRange()).toBe('250 to 1,000 coins');
+    const shop = INTERACTIVE_OBJECTS.find((object) => object.id === 'shop')!.interactive!;
+    expect(shop.description).toContain('Daily Login Box for 250 to 1,000 coins');
+    expect(shop.href).toBe('/shop');
   });
 
   it('keeps every object inside the room, with nothing overlapping', () => {

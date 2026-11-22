@@ -71,6 +71,18 @@ const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*[0-9])[A-Za-z0-9]{8,}$/;
 export const PASSWORD_RULES_MESSAGE =
   'Passwords must be at least 8 characters, contain only letters and numbers, and include at least one letter and one number.';
 
+// SRS-104.8: wrong passwords in a row before an account is locked, and for
+// how long. fn_record_login does the counting.
+export const MAX_LOGIN_FAILURES = 5;
+export const LOGIN_LOCK_MINUTES = 15;
+
+/** What a player trying to log in to a locked account is told, e.g.
+ * "Too many wrong passwords. Try again in 12 minutes." */
+export function lockedMessage(msLeft: number): string {
+  const minutes = Math.max(1, Math.ceil(msLeft / 60_000));
+  return `Too many wrong passwords. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+}
+
 export function isValidName(value: string): boolean {
   return NAME_PATTERN.test(value);
 }

@@ -1084,6 +1084,10 @@ flowchart LR
 
 *Traces to: UR-104*
 
+**SRS-104.8, JO, Login attempt limit.** After 5 incorrect passwords in a row for an account, the system shall refuse to log in to that account for 15 minutes, even with the correct password, and shall tell the player when they can try again. A successful login shall reset the count.
+
+*Traces to: UR-104*
+
 ### UR-105, JO – Log Out
 
 *User story: As a logged-in player, I want to manually log out of my account and have my login session end when I close the website tab, so that my account is not automatically accessible when I reopen the website.*

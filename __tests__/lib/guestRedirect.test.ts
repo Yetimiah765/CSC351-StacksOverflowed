@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 // once they've logged in (SRS-108.8). The pages run only in a browser, so
 // this checks what they do in their code.
 
-const PAGES = ['blackjack', 'roulette', 'slots'];
+const PAGES = ['blackjack', 'roulette', 'slots', 'sports', 'sports/showdown'];
 
 const source = (page: string) => readFileSync(join(__dirname, '../../app', page, 'page.tsx'), 'utf8');
 

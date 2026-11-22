@@ -1,8 +1,8 @@
 import { getSupabaseClient } from '../../../../lib/supabase';
 import {
+  checkName,
   hashPassword,
   isAtLeast21,
-  isValidName,
   isValidPassword,
   isValidUsername,
   PASSWORD_RULES_MESSAGE,
@@ -31,12 +31,13 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!isValidName(firstName) || !isValidName(lastName)) {
-      return Response.json(
-        { error: 'Names may only contain letters, spaces, apostrophes, and hyphens.' },
-        { status: 400 }
-      );
-    }
+    // The same name rules as editing a name on the profile (SRS-112.3):
+    // stored trimmed, and one too long for its column is refused here
+    // rather than failing the insert.
+    const first = checkName(firstName, 'First name');
+    if (first.error !== null) return Response.json({ error: first.error }, { status: 400 });
+    const last = checkName(lastName, 'Last name');
+    if (last.error !== null) return Response.json({ error: last.error }, { status: 400 });
 
     if (!isValidUsername(username)) {
       return Response.json(
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
 
     const { data: player, error: playerError } = await supabase
       .from('players')
-      .insert({ first_name: firstName, last_name: lastName, birthday, password_hash: passwordHash })
+      .insert({ first_name: first.name, last_name: last.name, birthday, password_hash: passwordHash })
       .select('player_id, first_name, last_name, birthday, balance')
       .single();
 

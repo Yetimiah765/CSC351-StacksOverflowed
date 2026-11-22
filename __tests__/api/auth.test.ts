@@ -289,6 +289,35 @@ describe('Auth API routes', () => {
       expect(response.status).toBe(400);
     });
 
+    it('stores names trimmed, as the profile editor does (SRS-112.3)', async () => {
+      acceptRegistration();
+
+      const response = await registerPost(registerRequest({ ...validRegistration, firstName: 'Tester ', lastName: '  Quality' }));
+
+      expect(response.status).toBe(201);
+      expect(insertedPlayer()).toEqual(expect.objectContaining({ first_name: 'Tester', last_name: 'Quality' }));
+    });
+
+    it('refuses a name too long for its column with a message, creating nothing (SRS-112.3, SRS-104.3)', async () => {
+      acceptRegistration();
+      const response = await registerPost(registerRequest({ ...validRegistration, firstName: 'A'.repeat(51) }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'First name must be 50 characters or fewer.' });
+      expect(tables.players.insert).not.toHaveBeenCalled();
+
+      const fits = await registerPost(registerRequest({ ...validRegistration, lastName: 'B'.repeat(50) }));
+      expect(fits.status).toBe(201);
+    });
+
+    it('treats a name of only spaces as missing (SRS-101.1)', async () => {
+      const response = await registerPost(registerRequest({ ...validRegistration, lastName: '   ' }));
+
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: 'Last name is required.' });
+      expect(tables.players.insert).not.toHaveBeenCalled();
+    });
+
     it('rejects a username outside 6-10 alphanumeric characters (SRS-101.4/101.5)', async () => {
       const response = await registerPost(registerRequest({ ...validRegistration, username: 'ab' }));
       expect(response.status).toBe(400);

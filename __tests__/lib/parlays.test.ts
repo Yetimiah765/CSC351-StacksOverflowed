@@ -4,9 +4,12 @@ import {
   MIN_PARLAY_LEGS,
   SAME_GAME_ERROR,
   allDifferentEvents,
+  canParlayWinCoins,
   hasPickFromEvent,
   isParlaySize,
   legCountProblem,
+  parlayOdds,
+  parlayPayout,
   removeLeg,
   toggleLeg,
 } from '../../lib/sports/parlays';
@@ -106,5 +109,45 @@ describe('one pick per game (SRS-219.5)', () => {
     expect(allDifferentEvents([leg(1, 7), leg(2, 8)])).toBe(true);
     expect(allDifferentEvents([leg(1, 7), leg(2, 7)])).toBe(false);
     expect(allDifferentEvents([])).toBe(true);
+  });
+});
+
+describe('combined odds and payout (SRS-219.2)', () => {
+  it('multiplies the picks\' odds', () => {
+    expect(parlayOdds([1.33, 2.24])).toBeCloseTo(2.9792, 6);
+    expect(parlayOdds([2, 2, 2])).toBe(8);
+    expect(parlayOdds([1.68, 2.1, 2.7])).toBeCloseTo(9.5256, 6);
+  });
+
+  it('pays the stake times the combined odds, rounded down to a whole coin', () => {
+    expect(parlayPayout(100, [1.33, 2.24])).toBe(297); // 297.92
+    expect(parlayPayout(50, [2, 2, 2])).toBe(400);
+    expect(parlayPayout(250, [1.68, 2.1, 2.7])).toBe(2381); // 2381.4
+  });
+
+  it('works out the payout exactly, where multiplying decimals would lose a coin', () => {
+    // 50 x 1.15 x 2 is exactly 115, but in floating point it's 114.999…
+    expect(Math.floor(50 * 1.15 * 2)).toBe(114);
+    expect(parlayPayout(50, [1.15, 2])).toBe(115);
+  });
+
+  it('stays exact for a 10-pick parlay with large odds', () => {
+    const odds = Array(10).fill(3.333);
+    // 3.333^10 = 166,333.9…, so 1,000 coins pay 166,333,9xx.
+    expect(parlayPayout(1000, odds)).toBe(Math.floor(1000 * 3.333 ** 10));
+    expect(parlayOdds(odds)).toBeCloseTo(3.333 ** 10, 3);
+  });
+
+  it('pays nothing for an amount or odds that are not valid', () => {
+    expect(parlayPayout(0, [2, 2])).toBe(0);
+    expect(parlayPayout(-50, [2, 2])).toBe(0);
+    expect(parlayPayout(50.5, [2, 2])).toBe(0);
+    expect(parlayPayout(50, [])).toBe(0);
+    expect(parlayPayout(50, [2, 1])).toBe(0);
+  });
+
+  it('only lets a parlay through if it can win more than its stake', () => {
+    expect(canParlayWinCoins(50, [1.01, 1.01])).toBe(true); // pays 51
+    expect(canParlayWinCoins(1, [1.01, 1.01])).toBe(false); // pays 1
   });
 });

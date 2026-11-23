@@ -58,3 +58,48 @@ export function legCountProblem(count: number): string | null {
 export function isParlaySize(count: number): boolean {
   return legCountProblem(count) === null;
 }
+
+// SRS-219.2: odds are stored with 3 decimals (NUMERIC(7,3)), so each one is a
+// whole number of thousandths. Multiplying those as integers gives the exact
+// product, the same value Postgres's NUMERIC arithmetic gives when the parlay
+// is placed (SRS-219.3); floating-point multiplication can be off in the last
+// digit and round a payout to the wrong coin.
+const SCALE = BigInt(1000);
+
+function thousandths(odds: number): bigint {
+  return BigInt(Math.round(odds * 1000));
+}
+
+function exactProduct(odds: number[]): { value: bigint; scale: bigint } {
+  let value = BigInt(1);
+  let scale = BigInt(1);
+  for (const o of odds) {
+    value *= thousandths(o);
+    scale *= SCALE;
+  }
+  return { value, scale };
+}
+
+// SRS-219.2: a parlay's combined odds are the product of its picks' odds.
+// For showing on the slip; the payout is worked out exactly below.
+export function parlayOdds(odds: number[]): number {
+  const { value, scale } = exactProduct(odds);
+  // Two decimals are shown, so split off the whole part to keep precision.
+  const whole = value / scale;
+  const rest = value % scale;
+  return Number(whole) + Number((rest * BigInt(1_000_000)) / scale) / 1_000_000;
+}
+
+// SRS-219.2: what a winning parlay pays back in total (stake included),
+// rounded down to a whole coin like a single bet (potentialPayout).
+export function parlayPayout(amount: number, odds: number[]): number {
+  if (!Number.isSafeInteger(amount) || amount <= 0 || odds.length === 0 || !odds.every((o) => o > 1)) return 0;
+  const { value, scale } = exactProduct(odds);
+  return Number((BigInt(amount) * value) / scale);
+}
+
+// A winning parlay must pay back more than its stake (the same rule as
+// canWinCoins for a single bet).
+export function canParlayWinCoins(amount: number, odds: number[]): boolean {
+  return parlayPayout(amount, odds) > amount;
+}

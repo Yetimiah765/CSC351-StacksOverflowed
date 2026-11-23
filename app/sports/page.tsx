@@ -7,7 +7,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EventListing, OptionSide, SportsEvent, SportsMarket, SportsOption } from '../../lib/sports/events';
 import { potentialPayout } from '../../lib/sports/payout';
 import { MIN_WAGER, canWinCoins, checkWagerAmount } from '../../lib/sports/wagers';
-import { MAX_PARLAY_LEGS, legCountProblem, removeLeg, toggleLeg } from '../../lib/sports/parlays';
+import {
+  MAX_PARLAY_LEGS,
+  canParlayWinCoins,
+  legCountProblem,
+  parlayOdds,
+  parlayPayout,
+  removeLeg,
+  toggleLeg,
+} from '../../lib/sports/parlays';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import type { MyBet, MyBets, WagerResult } from '../../lib/sports/myBets';
 import type { MyShowdownEntry, MyShowdowns } from '../../lib/sports/showdown';
@@ -274,20 +282,47 @@ function SlipModeSwitch({ mode, onChange }: { mode: SlipMode; onChange: (mode: S
 }
 
 // SRS-219.1: the slip in Parlay mode, listing the picks made so far.
+// SRS-219.2: once it has enough picks, its combined odds and the payout for
+// the amount entered.
 function ParlaySlip({
   legs,
   modeSwitch,
+  balance,
   message,
+  onMessage,
   onRemove,
   onClear,
 }: {
   legs: ParlayPick[];
   modeSwitch: React.ReactNode;
+  balance: number | null;
   message: SlipMessage;
+  onMessage: (message: SlipMessage) => void;
   onRemove: (optionId: number) => void;
   onClear: () => void;
 }) {
+  const [amountText, setAmountText] = useState('');
   const problem = legCountProblem(legs.length);
+  const odds = legs.map((leg) => leg.option.decimalOdds);
+  const combinedOdds = parlayOdds(odds);
+
+  const check = checkWagerAmount(amountText);
+  const amount = check.ok ? check.amount : null;
+  const payout = amount !== null && !problem ? parlayPayout(amount, odds) : 0;
+
+  // The same rules as a single bet (SRS-206.1, SRS-206.3), shown early.
+  let amountError = '';
+  if (amountText && !check.ok) amountError = check.error;
+  else if (amount !== null && !canParlayWinCoins(amount, odds)) {
+    amountError = "This parlay can't win any coins at these odds. Try a larger amount.";
+  } else if (amount !== null && balance !== null && amount > balance) {
+    amountError = "You don't have enough coins for this parlay.";
+  }
+
+  function clearSuccess() {
+    if (message?.kind === 'success') onMessage(null);
+  }
+
   return (
     <div className="rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/60 lg:border-slate-800">
       <div className="flex items-center justify-between">
@@ -342,6 +377,60 @@ function ParlaySlip({
               ? `${legs.length}-pick parlay. That's the most a parlay can have.`
               : `${legs.length}-pick parlay. Every pick has to win for it to win.`)}
         </p>
+      ) : null}
+
+      {legs.length > 0 && !problem ? (
+        <>
+          <label htmlFor="parlay-amount" className="mt-5 block text-sm text-slate-300">
+            Wager (coins, minimum {MIN_WAGER})
+          </label>
+          <input
+            id="parlay-amount"
+            inputMode="numeric"
+            value={amountText}
+            onChange={(e) => {
+              setAmountText(e.target.value.trim());
+              clearSuccess();
+            }}
+            placeholder={String(MIN_WAGER)}
+            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-sky-400"
+          />
+          <div className="mt-2 flex flex-wrap gap-2">
+            {QUICK_AMOUNTS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setAmountText(String(value));
+                  clearSuccess();
+                }}
+                className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-sky-400/70"
+              >
+                {value}
+              </button>
+            ))}
+          </div>
+          {amountError ? <p className="mt-2 text-sm text-red-300">{amountError}</p> : null}
+
+          <dl className="mt-5 space-y-2 text-sm">
+            <div className="flex justify-between">
+              <dt className="text-slate-400">Combined odds</dt>
+              <dd className="font-semibold tabular-nums text-sky-300">{formatOdds(combinedOdds)}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-slate-400">Potential payout</dt>
+              <dd className="font-semibold tabular-nums">{payout.toLocaleString()} coins</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-slate-400">Profit if it wins</dt>
+              <dd className="tabular-nums text-emerald-300">+{Math.max(payout - (amount ?? 0), 0).toLocaleString()}</dd>
+            </div>
+          </dl>
+          <p className="mt-2 text-xs text-slate-500">
+            {formatOdds(odds[0])}
+            {odds.slice(1).map((o) => ` × ${formatOdds(o)}`).join('')} = {formatOdds(combinedOdds)}
+          </p>
+        </>
       ) : null}
     </div>
   );
@@ -1374,13 +1463,15 @@ export default function SportsBettingPage() {
 
           <aside
             aria-label="Bet slip"
-            className={`${slipOpen ? 'fixed inset-x-0 bottom-0 z-20 max-h-[75vh] overflow-y-auto px-3 pb-3' : 'hidden'} lg:sticky lg:top-20 lg:block lg:max-h-none lg:overflow-visible lg:p-0`}
+            className={`${slipOpen ? 'fixed inset-x-0 bottom-0 z-20 max-h-[75vh] overflow-y-auto px-3 pb-3' : 'hidden'} lg:sticky lg:top-20 lg:block lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-3xl lg:p-0`}
           >
             {slipMode === 'parlay' ? (
               <ParlaySlip
                 legs={parlayLegs}
                 modeSwitch={modeSwitch}
+                balance={balance}
                 message={slipMessage}
+                onMessage={setSlipMessage}
                 onRemove={(optionId) => {
                   setParlayLegs((current) => removeLeg(current, optionId));
                   setSlipMessage(null);

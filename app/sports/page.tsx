@@ -17,8 +17,13 @@ import { HighlightReel } from '../../components/sports/HighlightReel';
 import { SportsLeaderboard } from '../../components/sports/SportsLeaderboard';
 
 type Selection = { event: SportsEvent; market: SportsMarket; option: SportsOption };
-// SRS-219.1: one outcome in a parlay, keyed by its option for the shared rules.
-type ParlayPick = Selection & { optionId: number };
+// SRS-219.1 / SRS-219.5: one outcome in a parlay, keyed by its option and its
+// game for the shared rules.
+type ParlayPick = Selection & { optionId: number; eventId: number };
+
+function toPick(selection: Selection): ParlayPick {
+  return { ...selection, optionId: selection.option.id, eventId: selection.event.id };
+}
 type SlipMode = 'single' | 'parlay';
 type SlipMessage = { kind: 'success' | 'error'; text: string } | null;
 // GET /api/sports/wagers: regular bets plus the player's Showdown entries.
@@ -1134,7 +1139,7 @@ export default function SportsBettingPage() {
       const market = event?.markets.find((m) => m.id === leg.market.id);
       const option = market?.options.find((o) => o.id === leg.optionId);
       if (!event || !market || !option || !canBet(event, market)) dropped += 1;
-      else next.push({ event, market, option, optionId: option.id });
+      else next.push(toPick({ event, market, option }));
     }
     setParlayLegs(next);
     if (dropped > 0) {
@@ -1146,14 +1151,15 @@ export default function SportsBettingPage() {
   }, [listing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // SRS-219.1: in Parlay mode an odds button adds the pick, or takes it out
-  // again; in Single mode it picks the one outcome to bet on.
+  // again; in Single mode it picks the one outcome to bet on. SRS-219.5: a
+  // second pick from a game already in the parlay is refused, with the reason.
   function pickOutcome(next: Selection) {
     if (slipMode === 'single') {
       setSelection(next);
       setSlipMessage(null);
       return;
     }
-    const change = toggleLeg(parlayLegs, { ...next, optionId: next.option.id });
+    const change = toggleLeg(parlayLegs, toPick(next));
     setParlayLegs(change.legs);
     setSlipMessage(change.ok ? null : { kind: 'error', text: change.error });
   }
@@ -1162,7 +1168,7 @@ export default function SportsBettingPage() {
     if (mode === slipMode) return;
     // Starting a parlay carries the single pick over as its first pick.
     if (mode === 'parlay' && parlayLegs.length === 0 && selection) {
-      setParlayLegs([{ ...selection, optionId: selection.option.id }]);
+      setParlayLegs([toPick(selection)]);
     }
     setSlipMode(mode);
     setSlipMessage(null);

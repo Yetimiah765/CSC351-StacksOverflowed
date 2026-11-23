@@ -6,17 +6,34 @@
 export const MIN_PARLAY_LEGS = 2;
 export const MAX_PARLAY_LEGS = 10;
 
-// The least a leg needs to carry for these rules; the slip's legs carry more
-// (the game, market and option shown).
-export type LegKey = { optionId: number };
+// The least a leg needs to carry for these rules: the outcome picked and the
+// sports event (game) it belongs to. The slip's legs carry more (the market
+// and option shown).
+export type LegKey = { optionId: number; eventId: number };
 
 export type LegChange<T> = { ok: true; legs: T[] } | { ok: false; legs: T[]; error: string };
 
+export const SAME_GAME_ERROR = 'You already have a pick from this game. A parlay can have only one pick per game.';
+
+// SRS-219.5: whether the parlay already has a pick from this game.
+export function hasPickFromEvent(legs: LegKey[], eventId: number): boolean {
+  return legs.some((l) => l.eventId === eventId);
+}
+
+// SRS-219.5: every pick in the parlay is from a different game.
+export function allDifferentEvents(legs: LegKey[]): boolean {
+  return new Set(legs.map((l) => l.eventId)).size === legs.length;
+}
+
 // SRS-219.1: picking an outcome that's already a leg takes it out again;
-// otherwise it's added at the end, as long as the parlay isn't full.
+// otherwise it's added at the end, as long as the parlay isn't full and
+// (SRS-219.5) has no other pick from the same game.
 export function toggleLeg<T extends LegKey>(legs: T[], leg: T): LegChange<T> {
   if (legs.some((l) => l.optionId === leg.optionId)) {
     return { ok: true, legs: legs.filter((l) => l.optionId !== leg.optionId) };
+  }
+  if (hasPickFromEvent(legs, leg.eventId)) {
+    return { ok: false, legs, error: SAME_GAME_ERROR };
   }
   if (legs.length >= MAX_PARLAY_LEGS) {
     return { ok: false, legs, error: `A parlay can have at most ${MAX_PARLAY_LEGS} picks.` };

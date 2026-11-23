@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { EventListing, OptionSide, SportsEvent, SportsMarket, SportsOption } from '../../lib/sports/events';
 import { potentialPayout } from '../../lib/sports/payout';
 import { MIN_WAGER, canWinCoins, checkWagerAmount } from '../../lib/sports/wagers';
+import { MAX_PARLAY_LEGS, legCountProblem, removeLeg, toggleLeg } from '../../lib/sports/parlays';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import type { MyBet, MyBets, WagerResult } from '../../lib/sports/myBets';
 import type { MyShowdownEntry, MyShowdowns } from '../../lib/sports/showdown';
@@ -16,6 +17,9 @@ import { HighlightReel } from '../../components/sports/HighlightReel';
 import { SportsLeaderboard } from '../../components/sports/SportsLeaderboard';
 
 type Selection = { event: SportsEvent; market: SportsMarket; option: SportsOption };
+// SRS-219.1: one outcome in a parlay, keyed by its option for the shared rules.
+type ParlayPick = Selection & { optionId: number };
+type SlipMode = 'single' | 'parlay';
 type SlipMessage = { kind: 'success' | 'error'; text: string } | null;
 // GET /api/sports/wagers: regular bets plus the player's Showdown entries.
 type BetsData = MyBets & { showdowns: MyShowdowns };
@@ -107,11 +111,12 @@ function FilterSelect({
 
 function EventCard({
   event,
-  selectedOptionId,
+  selectedOptionIds,
   onSelect,
 }: {
   event: SportsEvent;
-  selectedOptionId: number | null;
+  // The single bet's pick, or every pick in the parlay (SRS-219.1).
+  selectedOptionIds: number[];
   onSelect: (selection: Selection) => void;
 }) {
   const hasDraw = event.markets.some((m) => m.options.some((o) => o.side === 'draw'));
@@ -187,7 +192,7 @@ function EventCard({
                   }
 
                   const open = canBet(event, market);
-                  const selected = option.id === selectedOptionId;
+                  const selected = selectedOptionIds.includes(option.id);
                   const caption = cellCaption(market, option);
                   return (
                     <td key={column.type}>
@@ -236,8 +241,110 @@ function SlipNotice({ message }: { message: SlipMessage }) {
   );
 }
 
+// SRS-219.1: switches the slip between a single bet and a parlay.
+function SlipModeSwitch({ mode, onChange }: { mode: SlipMode; onChange: (mode: SlipMode) => void }) {
+  return (
+    <div role="radiogroup" aria-label="Bet type" className="mt-4 grid grid-cols-2 rounded-full border border-slate-800 bg-slate-950 p-1 text-sm">
+      {(
+        [
+          ['single', 'Single'],
+          ['parlay', 'Parlay'],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="radio"
+          aria-checked={mode === key}
+          onClick={() => onChange(key)}
+          className={`rounded-full px-3 py-1.5 font-semibold transition ${
+            mode === key ? 'bg-sky-400 text-slate-950' : 'text-slate-300 hover:text-slate-100'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// SRS-219.1: the slip in Parlay mode, listing the picks made so far.
+function ParlaySlip({
+  legs,
+  modeSwitch,
+  message,
+  onRemove,
+  onClear,
+}: {
+  legs: ParlayPick[];
+  modeSwitch: React.ReactNode;
+  message: SlipMessage;
+  onRemove: (optionId: number) => void;
+  onClear: () => void;
+}) {
+  const problem = legCountProblem(legs.length);
+  return (
+    <div className="rounded-3xl border border-slate-700 bg-slate-900 p-6 shadow-2xl shadow-black/60 lg:border-slate-800">
+      <div className="flex items-center justify-between">
+        <p className="text-sm uppercase tracking-[0.25em] text-sky-300">Bet slip</p>
+        {legs.length > 0 ? (
+          <button type="button" onClick={onClear} className="text-sm text-slate-400 hover:text-slate-200">
+            Clear
+          </button>
+        ) : null}
+      </div>
+      {modeSwitch}
+
+      {legs.length === 0 ? (
+        <p className="mt-4 text-sm text-slate-400">
+          Pick 2 to {MAX_PARLAY_LEGS} outcomes from different games. Every pick has to win for the parlay to win.
+        </p>
+      ) : (
+        <ol className="mt-4 space-y-2" aria-label="Parlay picks">
+          {legs.map((leg, index) => (
+            <li key={leg.optionId} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-400">
+                    {index + 1}. {leg.event.awayTeam} @ {leg.event.homeTeam}
+                  </p>
+                  <p className="font-semibold">{leg.option.label}</p>
+                  <p className="text-xs text-slate-400">{leg.market.name}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <span className="font-semibold tabular-nums text-sky-300">{formatOdds(leg.option.decimalOdds)}</span>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(leg.optionId)}
+                    aria-label={`Remove ${leg.option.label} from the parlay`}
+                    className="rounded-full px-2 text-lg leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <SlipNotice message={message} />
+
+      {legs.length > 0 ? (
+        <p className={`mt-4 text-sm ${problem ? 'text-amber-300' : 'text-emerald-300'}`}>
+          {problem ??
+            (legs.length === MAX_PARLAY_LEGS
+              ? `${legs.length}-pick parlay. That's the most a parlay can have.`
+              : `${legs.length}-pick parlay. Every pick has to win for it to win.`)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function BetSlip({
   selection,
+  modeSwitch,
   balance,
   token,
   message,
@@ -250,6 +357,7 @@ function BetSlip({
   onClear,
 }: {
   selection: Selection | null;
+  modeSwitch: React.ReactNode;
   balance: number | null;
   token: string | null;
   message: SlipMessage;
@@ -279,6 +387,7 @@ function BetSlip({
     return (
       <div className="rounded-3xl border border-slate-800 bg-slate-900/90 p-6">
         <p className="text-sm uppercase tracking-[0.25em] text-sky-300">Bet slip</p>
+        {modeSwitch}
         <SlipNotice message={message} />
         <p className="mt-4 text-sm text-slate-400">Pick an outcome to see its rules and what you could win.</p>
       </div>
@@ -347,6 +456,7 @@ function BetSlip({
           Clear
         </button>
       </div>
+      {modeSwitch}
 
       <p className="mt-4 text-xs text-slate-400">
         {event.awayTeam} @ {event.homeTeam}
@@ -904,6 +1014,9 @@ export default function SportsBettingPage() {
   const [leagueId, setLeagueId] = useState<number | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('current');
   const [selection, setSelection] = useState<Selection | null>(null);
+  // SRS-219.1: the slip builds either a single bet or a parlay.
+  const [slipMode, setSlipMode] = useState<SlipMode>('single');
+  const [parlayLegs, setParlayLegs] = useState<ParlayPick[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
   const [slipMessage, setSlipMessage] = useState<SlipMessage>(null);
@@ -1011,6 +1124,55 @@ export default function SportsBettingPage() {
     } else if (option !== selection.option) setSelection({ event, market, option });
   }, [listing]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The same for each parlay pick: refreshed odds, and closed games dropped.
+  useEffect(() => {
+    if (!listing || parlayLegs.length === 0) return;
+    let dropped = 0;
+    const next: ParlayPick[] = [];
+    for (const leg of parlayLegs) {
+      const event = listing.events.find((e) => e.id === leg.event.id);
+      const market = event?.markets.find((m) => m.id === leg.market.id);
+      const option = market?.options.find((o) => o.id === leg.optionId);
+      if (!event || !market || !option || !canBet(event, market)) dropped += 1;
+      else next.push({ event, market, option, optionId: option.id });
+    }
+    setParlayLegs(next);
+    if (dropped > 0) {
+      setSlipMessage({
+        kind: 'error',
+        text: `Betting closed on ${dropped === 1 ? 'one of your picks' : `${dropped} of your picks`}, so ${dropped === 1 ? 'it was' : 'they were'} taken out of the parlay.`,
+      });
+    }
+  }, [listing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // SRS-219.1: in Parlay mode an odds button adds the pick, or takes it out
+  // again; in Single mode it picks the one outcome to bet on.
+  function pickOutcome(next: Selection) {
+    if (slipMode === 'single') {
+      setSelection(next);
+      setSlipMessage(null);
+      return;
+    }
+    const change = toggleLeg(parlayLegs, { ...next, optionId: next.option.id });
+    setParlayLegs(change.legs);
+    setSlipMessage(change.ok ? null : { kind: 'error', text: change.error });
+  }
+
+  function changeSlipMode(mode: SlipMode) {
+    if (mode === slipMode) return;
+    // Starting a parlay carries the single pick over as its first pick.
+    if (mode === 'parlay' && parlayLegs.length === 0 && selection) {
+      setParlayLegs([{ ...selection, optionId: selection.option.id }]);
+    }
+    setSlipMode(mode);
+    setSlipMessage(null);
+  }
+
+  const slipOpen = slipMode === 'single' ? selection !== null : parlayLegs.length > 0;
+  const selectedOptionIds =
+    slipMode === 'single' ? (selection ? [selection.option.id] : []) : parlayLegs.map((leg) => leg.optionId);
+  const modeSwitch = <SlipModeSwitch mode={slipMode} onChange={changeSlipMode} />;
+
   const visibleLeagues = useMemo(
     () => (listing?.leagues ?? []).filter((l) => !sport || l.sport === sport),
     [listing, sport],
@@ -1039,7 +1201,7 @@ export default function SportsBettingPage() {
 
   return (
     <main
-      className={`min-h-page bg-slate-950 bg-[radial-gradient(ellipse_80%_40%_at_50%_-10%,rgba(56,189,248,0.14),transparent)] px-4 py-6 text-slate-100 sm:px-6 ${selection && view === 'games' ? 'pb-[28rem] lg:pb-10' : ''}`}
+      className={`min-h-page bg-slate-950 bg-[radial-gradient(ellipse_80%_40%_at_50%_-10%,rgba(56,189,248,0.14),transparent)] px-4 py-6 text-slate-100 sm:px-6 ${slipOpen && view === 'games' ? 'pb-[28rem] lg:pb-10' : ''}`}
     >
       <div className="mx-auto w-full max-w-5xl">
         <BackToHome className="mb-4" />
@@ -1195,11 +1357,8 @@ export default function SportsBettingPage() {
                     <EventCard
                       key={event.id}
                       event={event}
-                      selectedOptionId={selection?.option.id ?? null}
-                      onSelect={(next) => {
-                        setSelection(next);
-                        setSlipMessage(null);
-                      }}
+                      selectedOptionIds={selectedOptionIds}
+                      onSelect={pickOutcome}
                     />
                   ))}
                 </div>
@@ -1209,31 +1368,48 @@ export default function SportsBettingPage() {
 
           <aside
             aria-label="Bet slip"
-            className={`${selection ? 'fixed inset-x-0 bottom-0 z-20 max-h-[75vh] overflow-y-auto px-3 pb-3' : 'hidden'} lg:sticky lg:top-20 lg:block lg:max-h-none lg:overflow-visible lg:p-0`}
+            className={`${slipOpen ? 'fixed inset-x-0 bottom-0 z-20 max-h-[75vh] overflow-y-auto px-3 pb-3' : 'hidden'} lg:sticky lg:top-20 lg:block lg:max-h-none lg:overflow-visible lg:p-0`}
           >
-            <BetSlip
-              selection={selection}
-              balance={balance}
-              token={token}
-              message={slipMessage}
-              onMessage={setSlipMessage}
-              onBalance={(next) => {
-                setBalance(next);
-                notifyBalanceChanged();
-              }}
-              onOddsChanged={(odds) =>
-                setSelection((current) =>
-                  current ? { ...current, option: { ...current.option, decimalOdds: odds } } : current,
-                )
-              }
-              onRefresh={loadEvents}
-              onPlaced={loadMyBets}
-              onCelebrate={setPlacedBet}
-              onClear={() => {
-                setSelection(null);
-                setSlipMessage(null);
-              }}
-            />
+            {slipMode === 'parlay' ? (
+              <ParlaySlip
+                legs={parlayLegs}
+                modeSwitch={modeSwitch}
+                message={slipMessage}
+                onRemove={(optionId) => {
+                  setParlayLegs((current) => removeLeg(current, optionId));
+                  setSlipMessage(null);
+                }}
+                onClear={() => {
+                  setParlayLegs([]);
+                  setSlipMessage(null);
+                }}
+              />
+            ) : (
+              <BetSlip
+                selection={selection}
+                modeSwitch={modeSwitch}
+                balance={balance}
+                token={token}
+                message={slipMessage}
+                onMessage={setSlipMessage}
+                onBalance={(next) => {
+                  setBalance(next);
+                  notifyBalanceChanged();
+                }}
+                onOddsChanged={(odds) =>
+                  setSelection((current) =>
+                    current ? { ...current, option: { ...current.option, decimalOdds: odds } } : current,
+                  )
+                }
+                onRefresh={loadEvents}
+                onPlaced={loadMyBets}
+                onCelebrate={setPlacedBet}
+                onClear={() => {
+                  setSelection(null);
+                  setSlipMessage(null);
+                }}
+              />
+            )}
           </aside>
         </div>
       </div>

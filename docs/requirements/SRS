@@ -2242,6 +2242,38 @@ Traces to: UR-216
 
 Traces to: UR-216
 
+**UR-219, SP \- Place Parlay Bets**
+
+**User story:** As a player, I want to combine picks from different games into one bet, so that I can win a bigger payout when all of them come in.
+
+**SRS-219.1, Build a parlay.** The system shall allow the player to combine between 2 and 10 available betting outcomes from different sports events into a single parlay wager.
+
+Traces to: UR-219
+
+**SRS-219.2, Calculate parlay odds and payout.** The system shall calculate a parlay's combined odds as the product of its outcomes' odds and shall display the potential total payout for the entered wager amount before the parlay is submitted.
+
+Traces to: UR-219
+
+**SRS-219.3, Place a parlay.** The system shall deduct the parlay wager amount from the player's balance, record the odds of each outcome at placement, and record the parlay as active when the player confirms it.
+
+Traces to: UR-219
+
+**SRS-219.4, Settle a parlay.** The system shall settle a parlay as won only when every outcome in it wins, as lost when any outcome loses, and shall remove refunded outcomes and recalculate the payout from the remaining outcomes, refunding the wager if every outcome is refunded.
+
+Traces to: UR-219
+
+**SRS-219.5, Prevent outcomes from the same event.** The system shall prevent the player from adding more than one outcome from the same sports event to a parlay.
+
+Traces to: UR-219
+
+**SRS-219.6, Cancel a parlay.** The system shall allow the player to cancel an active parlay and return the full wager amount, up to 1 hour before the earliest start time of the sports events in that parlay.
+
+Traces to: UR-219
+
+**SRS-219.7, Count parlays on the leaderboard.** The system shall count each decided parlay on the weekly sports leaderboard as a single bet, in the leaderboard week in which the last of its sports events started.
+
+Traces to: UR-219
+
 # **8\. Roulette**
 
 ## **Definitions**

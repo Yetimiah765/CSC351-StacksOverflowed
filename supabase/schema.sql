@@ -1880,6 +1880,22 @@ CREATE TABLE wagers (
                OR (result = 'Won'       AND payout > amount))
 );
 
+-- Row Level Security (migration 2026-11-19_wagers_rls.sql, which explains the
+-- rules; tested by npm run test:security). Bets are placed, cancelled and
+-- settled only by our server with the service-role key, which bypasses RLS,
+-- so nobody reaching the database with the public anon key, logged in to
+-- Supabase Auth or not, may read, add, change or delete a bet.
+ALTER TABLE wagers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "wagers: no access from the public API"
+    ON wagers
+    AS RESTRICTIVE
+    FOR ALL
+    TO anon, authenticated
+    USING (false)
+    WITH CHECK (false);
+REVOKE ALL ON wagers FROM anon, authenticated;
+REVOKE ALL ON SEQUENCE wagers_wager_id_seq FROM anon, authenticated;
+
 -- Places a sports wager as one transaction (SRS-205.1 - SRS-205.3,
 -- SRS-NFR-4): takes the stake from the player's balance and records the
 -- wager with the odds the player saw. If any check fails, nothing changes.

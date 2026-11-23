@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_PARLAY_LEGS, MIN_PARLAY_LEGS, isParlaySize, legCountProblem, removeLeg, toggleLeg } from '../../lib/sports/parlays';
+import {
+  MAX_PARLAY_LEGS,
+  MIN_PARLAY_LEGS,
+  SAME_GAME_ERROR,
+  allDifferentEvents,
+  hasPickFromEvent,
+  isParlaySize,
+  legCountProblem,
+  removeLeg,
+  toggleLeg,
+} from '../../lib/sports/parlays';
 
-const leg = (optionId: number) => ({ optionId, label: `Pick ${optionId}` });
+// Each pick is from its own game unless a test says otherwise.
+const leg = (optionId: number, eventId = optionId * 100) => ({ optionId, eventId, label: `Pick ${optionId}` });
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
 
 describe('parlay size (SRS-219.1)', () => {
@@ -56,5 +67,44 @@ describe('adding and removing picks (SRS-219.1)', () => {
   it('removes a pick by its option', () => {
     expect(removeLeg([leg(1), leg(2)], 1).map((l) => l.optionId)).toEqual([2]);
     expect(removeLeg([leg(1)], 9).map((l) => l.optionId)).toEqual([1]);
+  });
+});
+
+describe('one pick per game (SRS-219.5)', () => {
+  it('refuses a second pick from the same game and leaves the parlay as it was', () => {
+    const legs = [leg(1, 7), leg(2, 8)];
+    // Option 3 is another outcome of game 7, e.g. its spread after its moneyline.
+    const result = toggleLeg(legs, leg(3, 7));
+    expect(result.ok).toBe(false);
+    expect(result.legs).toBe(legs);
+    if (!result.ok) expect(result.error).toBe(SAME_GAME_ERROR);
+  });
+
+  it('still takes a pick out when that same pick is chosen again', () => {
+    const result = toggleLeg([leg(1, 7), leg(2, 8)], leg(1, 7));
+    expect(result.ok).toBe(true);
+    expect(result.legs.map((l) => l.optionId)).toEqual([2]);
+  });
+
+  it('allows a pick from that game again once the first one is removed', () => {
+    const without = removeLeg([leg(1, 7), leg(2, 8)], 1);
+    const result = toggleLeg(without, leg(3, 7));
+    expect(result.ok).toBe(true);
+    expect(result.legs.map((l) => l.optionId)).toEqual([2, 3]);
+  });
+
+  it('says the same-game rule before the parlay-is-full rule', () => {
+    const full = range(1, 10).map((n) => leg(n));
+    const result = toggleLeg(full, leg(99, 100));
+    if (!result.ok) expect(result.error).toBe(SAME_GAME_ERROR);
+    expect(result.ok).toBe(false);
+  });
+
+  it('tells whether a game already has a pick, and whether every pick is from a different game', () => {
+    expect(hasPickFromEvent([leg(1, 7)], 7)).toBe(true);
+    expect(hasPickFromEvent([leg(1, 7)], 8)).toBe(false);
+    expect(allDifferentEvents([leg(1, 7), leg(2, 8)])).toBe(true);
+    expect(allDifferentEvents([leg(1, 7), leg(2, 7)])).toBe(false);
+    expect(allDifferentEvents([])).toBe(true);
   });
 });

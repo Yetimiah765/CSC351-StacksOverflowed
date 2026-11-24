@@ -1023,7 +1023,7 @@ function ParlayCard({
                   <span className="text-sky-300">{formatOdds(leg.odds)}</span>
                   {leg.result ? (
                     <span className={`ml-2 ${LEG_RESULT_STYLES[leg.result]}`}>{leg.result}</span>
-                  ) : parlay.decision === 'Decided' ? (
+                  ) : parlay.result === 'Lost' ? (
                     // SRS-219.4: a parlay is lost as soon as one pick loses, so
                     // picks whose games were still to play never needed grading.
                     <span className="ml-2 text-slate-500">Not needed</span>

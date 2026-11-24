@@ -37,10 +37,14 @@ export type MyParlay = {
   result: WagerResult | null;
   payout: number | null;
   settledAt: string | null;
+  // Whether the player has dismissed the results pop-up for this parlay.
+  resultSeen: boolean;
   legs: MyParlayLeg[];
 };
 
-export type MyParlays = { open: MyParlay[]; settled: MyParlay[] };
+// `unseen` is the settled parlays the results pop-up should show
+// (SRS-219.4): decided by settlement and not yet dismissed.
+export type MyParlays = { open: MyParlay[]; settled: MyParlay[]; unseen: MyParlay[] };
 
 type ParlayLegRow = {
   leg_number: number;
@@ -74,11 +78,12 @@ export type ParlayRow = {
   result: WagerResult | null;
   payout: number | string | null;
   settled_at: string | null;
+  result_seen_at?: string | null;
   legs: ParlayLegRow[] | null;
 };
 
 export const PARLAY_SELECT = `
-  parlay_id, amount, combined_odds, potential_payout, placed_at, result, payout, settled_at,
+  parlay_id, amount, combined_odds, potential_payout, placed_at, result, payout, settled_at, result_seen_at,
   legs:parlay_legs(
     leg_number, odds_at_placement, result,
     option:betting_options(
@@ -131,6 +136,7 @@ export function toMyParlay(row: ParlayRow, now: Date = new Date()): MyParlay {
     result: row.result,
     payout: row.payout === null ? null : Number(row.payout),
     settledAt: row.settled_at,
+    resultSeen: !!row.result_seen_at,
     legs: (row.legs ?? []).map((leg) => toLeg(leg, now)).sort((a, b) => a.legNumber - b.legNumber),
   };
 }
@@ -154,8 +160,10 @@ export async function fetchMyParlays(supabase: SupabaseClient, playerId: number,
   ]);
   if (open.error) throw new Error(open.error.message);
   if (settled.error) throw new Error(settled.error.message);
+  const settledParlays = (settled.data as unknown as ParlayRow[]).map((row) => toMyParlay(row, now));
   return {
     open: (open.data as unknown as ParlayRow[]).map((row) => toMyParlay(row, now)),
-    settled: (settled.data as unknown as ParlayRow[]).map((row) => toMyParlay(row, now)),
+    settled: settledParlays,
+    unseen: settledParlays.filter((p) => !p.resultSeen && p.result !== 'Cancelled'),
   };
 }

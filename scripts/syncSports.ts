@@ -12,6 +12,7 @@ import { getSupabaseClient } from '../lib/supabase';
 import { getOddsApiClient, getSecondOddsApiClient } from '../lib/oddsApi';
 import { configuredSportKeys, mergeSyncSummaries, secondSportKeys, syncSports, type SyncSummary } from '../lib/sports/sync';
 import { settleWagers } from '../lib/sports/settle';
+import { settleParlays } from '../lib/sports/settleParlays';
 import { selectShowdowns, settleShowdowns } from '../lib/sports/showdown';
 import { notifyShowdownChanged } from '../lib/sports/showdownRealtime';
 
@@ -50,6 +51,11 @@ async function main() {
   console.log(
     `Settled ${settled.settled} wager(s): ${settled.won} won, ${settled.lost} lost, ${settled.refunded} refunded.`,
   );
+  // SRS-219.4: then the parlays, whose legs are graded the same way.
+  const parlays = await settleParlays(supabase);
+  console.log(
+    `Settled ${parlays.settled} parlay(s): ${parlays.won} won, ${parlays.lost} lost, ${parlays.refunded} refunded.`,
+  );
 
   // The Showdown (SRS-212 - SRS-214): pay out finished ones, then give each
   // sport a new one once its last game has started.
@@ -65,7 +71,7 @@ async function main() {
     });
   }
 
-  const errors = [...summary.errors, ...settled.errors, ...showdowns.errors, ...picked.errors];
+  const errors = [...summary.errors, ...settled.errors, ...parlays.errors, ...showdowns.errors, ...picked.errors];
   if (errors.length > 0) {
     console.error(`${errors.length} error(s):`);
     for (const error of errors) console.error(`  - ${error}`);

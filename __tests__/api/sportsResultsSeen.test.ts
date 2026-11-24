@@ -101,6 +101,24 @@ describe('POST /api/sports/wagers/seen', () => {
     expect((await markSeen({ ids: [1], showdownEntryIds: ['x'] })).status).toBe(400);
   });
 
+  it("marks the player's own settled parlays as seen too (SRS-219.4)", async () => {
+    const response = await markSeen({ parlayIds: [8, 9] });
+
+    expect(response.status).toBe(200);
+    expect(tablesUpdated).toEqual(['parlays']);
+    expect(wagers.calls.slice(1)).toEqual([
+      ['eq', 'player_id', 7],
+      ['in', 'parlay_id', [8, 9]],
+      ['not', 'result', 'is', null],
+      ['is', 'result_seen_at', null],
+    ]);
+  });
+
+  it('rejects a malformed parlay id list', async () => {
+    expect((await markSeen({ ids: [1], parlayIds: [0] })).status).toBe(400);
+    expect(wagers.calls).toEqual([]);
+  });
+
   it("marks only the player's own settled, unseen wagers as seen", async () => {
     const response = await markSeen({ ids: [3, 5] });
 

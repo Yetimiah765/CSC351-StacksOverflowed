@@ -27,10 +27,10 @@ async function requirePlayerId(request: Request, supabase: SupabaseClient) {
 }
 
 // Called when the player closes the results pop-up (SRS-209.1, SRS-210.2,
-// SRS-210.4). Body: { ids?: number[], showdownEntryIds?: number[] } (wager
-// ids and Showdown entry ids). Marks them as seen so the pop-up never shows
-// them again, on any device. Only the player's own, already-settled ones are
-// touched.
+// SRS-210.4, SRS-219.4). Body: { ids?: number[], showdownEntryIds?: number[],
+// parlayIds?: number[] } (wager, Showdown entry and parlay ids). Marks them
+// as seen so the pop-up never shows them again, on any device. Only the
+// player's own, already-settled ones are touched.
 export async function POST(request: Request) {
   const supabase = getSupabaseClient();
   if (!supabase) return Response.json({ error: 'Supabase credentials are not configured.' }, { status: 500 });
@@ -38,10 +38,18 @@ export async function POST(request: Request) {
   const { playerId, errorResponse } = await requirePlayerId(request, supabase);
   if (errorResponse) return errorResponse;
 
-  const body = (await request.json().catch(() => null)) as { ids?: unknown; showdownEntryIds?: unknown } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { ids?: unknown; showdownEntryIds?: unknown; parlayIds?: unknown }
+    | null;
   const ids = idList(body?.ids);
   const showdownEntryIds = idList(body?.showdownEntryIds);
-  if (ids === null || showdownEntryIds === null || ids.length + showdownEntryIds.length === 0) {
+  const parlayIds = idList(body?.parlayIds);
+  if (
+    ids === null ||
+    showdownEntryIds === null ||
+    parlayIds === null ||
+    ids.length + showdownEntryIds.length + parlayIds.length === 0
+  ) {
     return Response.json({ error: 'ids must be a list of wager ids.' }, { status: 400 });
   }
 
@@ -66,6 +74,17 @@ export async function POST(request: Request) {
       .eq('player_id', playerId!)
       .in('entry_id', showdownEntryIds)
       .not('payout', 'is', null)
+      .is('result_seen_at', null);
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+  }
+
+  if (parlayIds.length > 0) {
+    const { error } = await supabase
+      .from('parlays')
+      .update({ result_seen_at: seenAt })
+      .eq('player_id', playerId!)
+      .in('parlay_id', parlayIds)
+      .not('result', 'is', null)
       .is('result_seen_at', null);
     if (error) return Response.json({ error: error.message }, { status: 500 });
   }

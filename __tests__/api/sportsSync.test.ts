@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   secondOddsApi: null as unknown,
   syncSports: vi.fn(),
   settleWagers: vi.fn(),
+  settleParlays: vi.fn(),
   settleShowdowns: vi.fn(),
   selectShowdowns: vi.fn(),
   notifyShowdownChanged: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('../../lib/sports/sync', async (importOriginal) => ({
 }));
 
 vi.mock('../../lib/sports/settle', () => ({ settleWagers: mocks.settleWagers }));
+vi.mock('../../lib/sports/settleParlays', () => ({ settleParlays: mocks.settleParlays }));
 vi.mock('../../lib/sports/showdown', () => ({
   settleShowdowns: mocks.settleShowdowns,
   selectShowdowns: mocks.selectShowdowns,
@@ -189,6 +191,7 @@ describe('POST /api/sports/sync', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.settleParlays.mockResolvedValue(NO_SETTLEMENT);
     mocks.settleShowdowns.mockResolvedValue({ settled: 0, refunded: 0, errors: [] });
     mocks.selectShowdowns.mockResolvedValue({ picked: [], errors: [] });
     vi.stubEnv('SPORTS_SYNC_SECRET', 'secret');
@@ -232,6 +235,9 @@ describe('POST /api/sports/sync', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.settleWagers).toHaveBeenCalledWith(mocks.supabase);
+    // SRS-219.4: parlays are settled straight after the single bets.
+    expect(mocks.settleParlays).toHaveBeenCalledWith(mocks.supabase);
+    expect(mocks.settleParlays.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.settleWagers.mock.invocationCallOrder[0]);
     expect(mocks.settleShowdowns).toHaveBeenCalledWith(mocks.supabase);
     expect(mocks.selectShowdowns).toHaveBeenCalledWith(mocks.supabase);
     // Settling a Showdown pings open Showdown pages.
@@ -239,6 +245,7 @@ describe('POST /api/sports/sync', () => {
     expect(await response.json()).toEqual({
       ...summary,
       settlement,
+      parlays: NO_SETTLEMENT,
       showdowns: { settled: 1, refunded: 0, errors: [], picked: [{ sport: 'Basketball', eventId: 9 }] },
     });
   });
@@ -272,6 +279,15 @@ describe('POST /api/sports/sync', () => {
 
     expect(response.status).toBe(207);
     expect((await response.json()).errors).toEqual(['Wager 3: timeout']);
+  });
+
+  it('returns 207 when settling a parlay failed', async () => {
+    mocks.syncSports.mockResolvedValue({ events: 0, markets: 0, options: 0, skipped: [], errors: [] });
+    mocks.settleWagers.mockResolvedValue(NO_SETTLEMENT);
+    mocks.settleParlays.mockResolvedValue({ ...NO_SETTLEMENT, errors: ['Parlay 4: timeout'] });
+    const response = await POST(request('Bearer secret'));
+    expect(response.status).toBe(207);
+    expect((await response.json()).errors).toEqual(['Parlay 4: timeout']);
   });
 
   it('returns 207 when some events failed to save', async () => {

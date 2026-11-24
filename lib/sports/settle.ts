@@ -59,29 +59,29 @@ export function gradeWager({ marketType, line, side, homeScore, awayScore }: Gra
   return 'Refunded';
 }
 
-type PendingRow = {
-  wager_id: number;
-  option: {
-    team_id: number | null;
-    option_label: string;
-    market: {
-      market_type_code: MarketTypeCode;
-      line: number | string | null;
-      betting_options: { option_label: string; team_id: number | null }[];
-      event: {
-        start_time: string;
-        status: 'Upcoming' | 'In Progress' | 'Completed' | 'Canceled' | 'Postponed';
-        home_score: number | null;
-        away_score: number | null;
-        home_team_id: number;
-        away_team_id: number;
-      } | null;
+// An open bet's option, with what grading needs; parlay legs use it too.
+export type PendingOption = {
+  team_id: number | null;
+  option_label: string;
+  market: {
+    market_type_code: MarketTypeCode;
+    line: number | string | null;
+    betting_options: { option_label: string; team_id: number | null }[];
+    event: {
+      start_time: string;
+      status: 'Upcoming' | 'In Progress' | 'Completed' | 'Canceled' | 'Postponed';
+      home_score: number | null;
+      away_score: number | null;
+      home_team_id: number;
+      away_team_id: number;
     } | null;
   } | null;
 };
 
-const PENDING_SELECT = `
-  wager_id,
+type PendingRow = { wager_id: number; option: PendingOption | null };
+
+// What PENDING_SELECT reads for each option, shared with settling parlays.
+export const PENDING_OPTION_SELECT = `
   option:betting_options(
     team_id, option_label,
     market:betting_markets(
@@ -92,6 +92,8 @@ const PENDING_SELECT = `
   )
 `;
 
+const PENDING_SELECT = `wager_id, ${PENDING_OPTION_SELECT}`;
+
 function sideOf(teamId: number | null, label: string, homeTeamId: number, awayTeamId: number): WagerSide {
   if (teamId !== null && teamId === homeTeamId) return 'home';
   if (teamId !== null && teamId === awayTeamId) return 'away';
@@ -101,7 +103,7 @@ function sideOf(teamId: number | null, label: string, homeTeamId: number, awayTe
 }
 
 // Decides one open wager, or returns null while its game is still undecided.
-export function decideWager(row: PendingRow, now: Date): GradedResult | null {
+export function decideWager(row: { option: PendingOption | null }, now: Date): GradedResult | null {
   const market = row.option?.market;
   const event = market?.event;
   if (!row.option || !market || !event) return 'Refunded';

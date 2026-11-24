@@ -4,6 +4,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { effectiveStatus, type SportsEvent } from './events';
 import { MY_BETS_LIMIT, type WagerResult } from './myBets';
+import { canCancelWager, cancelDeadline } from './wagers';
 
 export type LegResult = 'Won' | 'Lost' | 'Refunded';
 
@@ -39,6 +40,10 @@ export type MyParlay = {
   settledAt: string | null;
   // Whether the player has dismissed the results pop-up for this parlay.
   resultSeen: boolean;
+  // SRS-219.6: an open parlay can be cancelled, whole, for a full refund until
+  // 1 hour before its earliest game starts (fn_cancel_parlay).
+  canCancel: boolean;
+  cancelUntil: string;
   legs: MyParlayLeg[];
 };
 
@@ -125,7 +130,15 @@ function toLeg(row: ParlayLegRow, now: Date): MyParlayLeg {
   };
 }
 
+// When the earliest of the parlay's games starts.
+export function firstStart(legs: { event: { startTime: string } }[]): string | null {
+  const starts = legs.map((leg) => leg.event.startTime).filter(Boolean).sort();
+  return starts[0] ?? null;
+}
+
 export function toMyParlay(row: ParlayRow, now: Date = new Date()): MyParlay {
+  const legs = (row.legs ?? []).map((leg) => toLeg(leg, now)).sort((a, b) => a.legNumber - b.legNumber);
+  const first = firstStart(legs);
   return {
     id: row.parlay_id,
     placedAt: row.placed_at,
@@ -137,7 +150,9 @@ export function toMyParlay(row: ParlayRow, now: Date = new Date()): MyParlay {
     payout: row.payout === null ? null : Number(row.payout),
     settledAt: row.settled_at,
     resultSeen: !!row.result_seen_at,
-    legs: (row.legs ?? []).map((leg) => toLeg(leg, now)).sort((a, b) => a.legNumber - b.legNumber),
+    canCancel: !row.result && first !== null && canCancelWager(first, now),
+    cancelUntil: cancelDeadline(first ?? row.placed_at).toISOString(),
+    legs,
   };
 }
 

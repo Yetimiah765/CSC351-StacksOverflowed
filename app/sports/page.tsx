@@ -18,6 +18,7 @@ import {
 } from '../../lib/sports/parlays';
 import { notifyBalanceChanged } from '../../lib/balanceEvents';
 import type { MyBet, MyBets, WagerResult } from '../../lib/sports/myBets';
+import type { LegResult, MyParlay, MyParlays } from '../../lib/sports/myParlays';
 import type { MyShowdownEntry, MyShowdowns } from '../../lib/sports/showdown';
 import { LogoNotice, SPORT_ICONS, StatusBadge, TeamCrest, formatDateTime, startsIn } from '../../components/sports/shared';
 import { BetPlacedStamp, type PlacedBet } from '../../components/sports/BetPlacedStamp';
@@ -34,8 +35,9 @@ function toPick(selection: Selection): ParlayPick {
 }
 type SlipMode = 'single' | 'parlay';
 type SlipMessage = { kind: 'success' | 'error'; text: string } | null;
-// GET /api/sports/wagers: regular bets plus the player's Showdown entries.
-type BetsData = MyBets & { showdowns: MyShowdowns };
+// GET /api/sports/wagers: regular bets plus the player's Showdown entries;
+// GET /api/sports/parlays: their parlays (SRS-219.3).
+type BetsData = MyBets & { showdowns: MyShowdowns; parlays: MyParlays };
 
 // The sync job only refreshes the database a few times a day, so polling
 // our own API (free) once a minute is plenty.
@@ -283,28 +285,48 @@ function SlipModeSwitch({ mode, onChange }: { mode: SlipMode; onChange: (mode: S
 
 // SRS-219.1: the slip in Parlay mode, listing the picks made so far.
 // SRS-219.2: once it has enough picks, its combined odds and the payout for
-// the amount entered.
+// the amount entered. SRS-219.3: placing it, once the player confirms.
 function ParlaySlip({
   legs,
   modeSwitch,
   balance,
+  token,
   message,
   onMessage,
   onRemove,
   onClear,
+  onBalance,
+  onOddsChanged,
+  onRefresh,
+  onPlaced,
+  onCelebrate,
 }: {
   legs: ParlayPick[];
   modeSwitch: React.ReactNode;
   balance: number | null;
+  token: string | null;
   message: SlipMessage;
   onMessage: (message: SlipMessage) => void;
   onRemove: (optionId: number) => void;
   onClear: () => void;
+  onBalance: (balance: number) => void;
+  onOddsChanged: (changes: { optionId: number; currentOdds: number }[]) => void;
+  onRefresh: () => void;
+  onPlaced: () => void;
+  onCelebrate: (bet: PlacedBet) => void;
 }) {
   const [amountText, setAmountText] = useState('');
+  const [stage, setStage] = useState<'edit' | 'confirm' | 'placing'>('edit');
   const problem = legCountProblem(legs.length);
   const odds = legs.map((leg) => leg.option.decimalOdds);
   const combinedOdds = parlayOdds(odds);
+
+  // If a pick or its odds change while the player is confirming, make them
+  // look again.
+  const legsKey = legs.map((leg) => `${leg.optionId}@${leg.option.decimalOdds}`).join(',');
+  useEffect(() => {
+    setStage((current) => (current === 'confirm' ? 'edit' : current));
+  }, [legsKey]);
 
   const check = checkWagerAmount(amountText);
   const amount = check.ok ? check.amount : null;
@@ -318,9 +340,48 @@ function ParlaySlip({
   } else if (amount !== null && balance !== null && amount > balance) {
     amountError = "You don't have enough coins for this parlay.";
   }
+  const canPlace = amount !== null && !problem && !amountError;
 
   function clearSuccess() {
     if (message?.kind === 'success') onMessage(null);
+  }
+
+  async function placeParlay() {
+    if (!token || amount === null) return;
+    setStage('placing');
+    onMessage(null);
+    try {
+      const res = await fetch('/api/sports/parlays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ amount, legs: legs.map((leg) => ({ optionId: leg.optionId, odds: leg.option.decimalOdds })) }),
+      });
+      const data = await res.json();
+
+      if (res.ok) {
+        onBalance(data.balance);
+        onPlaced();
+        onCelebrate({
+          amount,
+          label: `${legs.length}-pick parlay`,
+          odds: formatOdds(data.parlay.combinedOdds),
+          payout: Number(data.parlay.potentialPayout),
+        });
+        setAmountText('');
+        setStage('edit');
+        onClear();
+        return;
+      }
+      onMessage({ kind: 'error', text: data.error || 'Could not place your parlay.' });
+      if (typeof data.balance === 'number') onBalance(data.balance);
+      if (Array.isArray(data.changes)) onOddsChanged(data.changes);
+      // A game may have started or a line moved; reload what's open, which
+      // also takes closed picks out of the parlay.
+      if (res.status === 409 || res.status === 404) onRefresh();
+    } catch {
+      onMessage({ kind: 'error', text: 'Could not reach the server. Your coins were not taken. Please try again.' });
+    }
+    setStage('edit');
   }
 
   return (
@@ -388,23 +449,25 @@ function ParlaySlip({
             id="parlay-amount"
             inputMode="numeric"
             value={amountText}
+            disabled={stage !== 'edit'}
             onChange={(e) => {
               setAmountText(e.target.value.trim());
               clearSuccess();
             }}
             placeholder={String(MIN_WAGER)}
-            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-sky-400"
+            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-lg tabular-nums text-slate-100 outline-none transition focus:border-sky-400 disabled:opacity-60"
           />
           <div className="mt-2 flex flex-wrap gap-2">
             {QUICK_AMOUNTS.map((value) => (
               <button
                 key={value}
                 type="button"
+                disabled={stage !== 'edit'}
                 onClick={() => {
                   setAmountText(String(value));
                   clearSuccess();
                 }}
-                className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-sky-400/70"
+                className="rounded-full border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-300 hover:border-sky-400/70 disabled:opacity-60"
               >
                 {value}
               </button>
@@ -430,6 +493,53 @@ function ParlaySlip({
             {formatOdds(odds[0])}
             {odds.slice(1).map((o) => ` × ${formatOdds(o)}`).join('')} = {formatOdds(combinedOdds)}
           </p>
+
+          {!token ? (
+            <Link
+              href="/login"
+              className="mt-5 block w-full rounded-xl bg-sky-400 px-6 py-3 text-center font-semibold text-slate-950 transition hover:bg-sky-300"
+            >
+              Log in to place bets
+            </Link>
+          ) : stage === 'edit' ? (
+            <button
+              type="button"
+              disabled={!canPlace}
+              onClick={() => setStage('confirm')}
+              className="mt-5 w-full rounded-xl bg-sky-400 px-6 py-3 font-semibold text-slate-950 transition hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Place parlay
+            </button>
+          ) : (
+            // SRS-219.3: placed only once the player confirms it.
+            <div className="mt-5 rounded-xl border border-sky-700/60 bg-sky-950/40 p-4">
+              <p className="text-sm text-slate-200">
+                Bet <span className="font-semibold">{amount?.toLocaleString()} coins</span> on this{' '}
+                <span className="font-semibold">{legs.length}-pick parlay</span> at{' '}
+                <span className="font-semibold">{formatOdds(combinedOdds)}</span>? Pays{' '}
+                <span className="font-semibold">{payout.toLocaleString()} coins</span> if every pick wins. The coins come
+                out of your balance now.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={placeParlay}
+                  disabled={stage === 'placing'}
+                  className="flex-1 rounded-xl bg-sky-400 px-4 py-2.5 font-semibold text-slate-950 transition hover:bg-sky-300 disabled:opacity-60"
+                >
+                  {stage === 'placing' ? 'Placing…' : 'Confirm parlay'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStage('edit')}
+                  disabled={stage === 'placing'}
+                  className="rounded-xl border border-slate-700 px-4 py-2.5 text-slate-300 transition hover:border-slate-500 disabled:opacity-60"
+                >
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
         </>
       ) : null}
     </div>
@@ -671,7 +781,7 @@ function BetSlip({
 
 // SRS-208.1 / SRS-211.1: Pending while open; once decided, the result and the
 // coins it paid back (or lost).
-function BetOutcome({ bet }: { bet: MyBet }) {
+function BetOutcome({ bet }: { bet: Pick<MyBet, 'decision' | 'result' | 'amount' | 'payout'> }) {
   if (bet.decision === 'Pending') {
     return (
       <span className="rounded-full border border-slate-700 bg-slate-800 px-2.5 py-0.5 text-xs text-slate-300">Pending</span>
@@ -833,6 +943,76 @@ function BetCard({
   );
 }
 
+const LEG_RESULT_STYLES: Record<LegResult, string> = {
+  Won: 'text-emerald-300',
+  Lost: 'text-red-300',
+  Refunded: 'text-slate-300',
+};
+
+// SRS-219.3: a placed parlay in My bets, with every pick and its game.
+function ParlayCard({ parlay }: { parlay: MyParlay }) {
+  return (
+    <article className="rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-500/10 to-slate-900 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+        <span className="flex items-center gap-2">
+          <span className="rounded-md bg-sky-400/15 px-1.5 py-0.5 font-semibold text-sky-200">{parlay.legs.length}-pick parlay</span>
+          Placed {formatDateTime(parlay.placedAt)}
+        </span>
+        <BetOutcome bet={parlay} />
+      </div>
+
+      <ol className="mt-3 space-y-2" aria-label="Parlay picks">
+        {parlay.legs.map((leg) => {
+          const showScore = leg.event.status !== 'Upcoming' && leg.event.homeScore !== null && leg.event.awayScore !== null;
+          return (
+            <li key={leg.legNumber} className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
+                <span>
+                  {leg.event.awayTeam} @ {leg.event.homeTeam}
+                  {showScore ? (
+                    <span className="ml-2 tabular-nums text-slate-200">
+                      {leg.event.awayScore} – {leg.event.homeScore}
+                    </span>
+                  ) : (
+                    <span className="ml-2">{formatDateTime(leg.event.startTime)}</span>
+                  )}
+                </span>
+                <StatusBadge status={leg.event.status} />
+              </div>
+              <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="font-semibold">
+                  {leg.selection} <span className="font-normal text-slate-400">· {leg.market}</span>
+                </p>
+                <p className="text-sm tabular-nums">
+                  <span className="text-sky-300">{formatOdds(leg.odds)}</span>
+                  {leg.result ? <span className={`ml-2 ${LEG_RESULT_STYLES[leg.result]}`}>{leg.result}</span> : null}
+                </p>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+
+      <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
+        <div>
+          <dt className="text-xs text-slate-500">Wager</dt>
+          <dd className="tabular-nums">{parlay.amount.toLocaleString()}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-slate-500">Combined odds</dt>
+          <dd className="tabular-nums">{formatOdds(parlay.combinedOdds)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-slate-500">{parlay.decision === 'Pending' ? 'Pays if it wins' : 'Paid back'}</dt>
+          <dd className="tabular-nums">
+            {(parlay.decision === 'Pending' ? parlay.potentialPayout : parlay.payout ?? 0).toLocaleString()}
+          </dd>
+        </div>
+      </dl>
+    </article>
+  );
+}
+
 // A Showdown entry's result, from the player's side.
 function showdownResult(entry: MyShowdownEntry): 'Won' | 'Lost' | 'Refunded' | null {
   if (entry.outcome === 'Refunded') return 'Refunded';
@@ -910,9 +1090,21 @@ function MyBetsView({
   if (error) return <p className="rounded-xl border border-red-800 bg-red-950/60 p-4 text-sm text-red-200">{error}</p>;
   if (!bets) return <p className="text-slate-400">Loading your bets…</p>;
   const showdownEntries = [...bets.showdowns.open, ...bets.showdowns.settled];
+  const parlays = [...bets.parlays.open, ...bets.parlays.settled];
 
   return (
     <div className="space-y-10">
+      {parlays.length > 0 ? (
+        <section aria-label="Parlays">
+          <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-sky-300">Parlays ({parlays.length})</h2>
+          <div className="grid gap-3 md:grid-cols-2">
+            {parlays.map((parlay) => (
+              <ParlayCard key={parlay.id} parlay={parlay} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {showdownEntries.length > 0 ? (
         <section aria-label="The Showdown">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-amber-300">The Showdown ({showdownEntries.length})</h2>
@@ -1142,10 +1334,16 @@ export default function SportsBettingPage() {
   const loadMyBets = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch('/api/sports/wagers', { cache: 'no-store', headers: { Authorization: `Bearer ${token}` } });
+      const headers = { Authorization: `Bearer ${token}` };
+      const [res, parlaysRes] = await Promise.all([
+        fetch('/api/sports/wagers', { cache: 'no-store', headers }),
+        fetch('/api/sports/parlays', { cache: 'no-store', headers }),
+      ]);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load your bets.');
-      setMyBets(data as BetsData);
+      // The single bets still show if the parlays can't be loaded.
+      const parlays: MyParlays = parlaysRes.ok ? await parlaysRes.json() : { open: [], settled: [] };
+      setMyBets({ ...data, parlays } as BetsData);
       setBetsError('');
     } catch (error) {
       setBetsError(error instanceof Error ? error.message : 'Could not load your bets.');
@@ -1273,7 +1471,7 @@ export default function SportsBettingPage() {
     [listing, sport],
   );
 
-  const openCount = myBets ? myBets.open.length + myBets.showdowns.open.length : 0;
+  const openCount = myBets ? myBets.open.length + myBets.showdowns.open.length + myBets.parlays.open.length : 0;
 
   const inLeague = useMemo(
     () => (listing?.events ?? []).filter((e) => (!sport || e.sport === sport) && (!leagueId || e.leagueId === leagueId)),
@@ -1470,8 +1668,24 @@ export default function SportsBettingPage() {
                 legs={parlayLegs}
                 modeSwitch={modeSwitch}
                 balance={balance}
+                token={token}
                 message={slipMessage}
                 onMessage={setSlipMessage}
+                onBalance={(next) => {
+                  setBalance(next);
+                  notifyBalanceChanged();
+                }}
+                onOddsChanged={(changes) =>
+                  setParlayLegs((current) =>
+                    current.map((leg) => {
+                      const change = changes.find((c) => c.optionId === leg.optionId);
+                      return change ? { ...leg, option: { ...leg.option, decimalOdds: change.currentOdds } } : leg;
+                    }),
+                  )
+                }
+                onRefresh={loadEvents}
+                onPlaced={loadMyBets}
+                onCelebrate={setPlacedBet}
                 onRemove={(optionId) => {
                   setParlayLegs((current) => removeLeg(current, optionId));
                   setSlipMessage(null);

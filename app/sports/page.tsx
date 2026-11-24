@@ -518,7 +518,8 @@ function ParlaySlip({
                 <span className="font-semibold">{legs.length}-pick parlay</span> at{' '}
                 <span className="font-semibold">{formatOdds(combinedOdds)}</span>? Pays{' '}
                 <span className="font-semibold">{payout.toLocaleString()} coins</span> if every pick wins. The coins come
-                out of your balance now.
+                out of your balance now. You can cancel the whole parlay for a full refund until 1 hour before its first
+                game starts.
               </p>
               <div className="mt-3 flex gap-2">
                 <button
@@ -951,7 +952,41 @@ const LEG_RESULT_STYLES: Record<LegResult, string> = {
 
 // SRS-219.3: a placed parlay in My bets, with every pick and its game.
 // SRS-219.4: once settled, each pick's result and what the parlay paid.
-function ParlayCard({ parlay }: { parlay: MyParlay }) {
+// SRS-219.6: while open, Cancel until 1 hour before its first game.
+function ParlayCard({
+  parlay,
+  token,
+  onCancelled,
+}: {
+  parlay: MyParlay;
+  token: string | null;
+  onCancelled: (balance: number) => void;
+}) {
+  const [cancelStage, setCancelStage] = useState<'idle' | 'confirm' | 'cancelling'>('idle');
+  const [cancelError, setCancelError] = useState('');
+
+  // SRS-219.6: cancels the whole parlay, every pick, for the whole stake.
+  async function cancelParlay() {
+    if (!token) return;
+    setCancelStage('cancelling');
+    setCancelError('');
+    try {
+      const res = await fetch(`/api/sports/parlays/${parlay.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        onCancelled(data.balance);
+        return;
+      }
+      setCancelError(data.error || 'Could not cancel your parlay.');
+    } catch {
+      setCancelError('Could not reach the server. Your parlay is still active.');
+    }
+    setCancelStage('idle');
+  }
+
   return (
     <article className="rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-500/10 to-slate-900 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
@@ -1016,6 +1051,51 @@ function ParlayCard({ parlay }: { parlay: MyParlay }) {
           </dd>
         </div>
       </dl>
+
+      {parlay.decision === 'Pending' ? (
+        <div className="mt-3 border-t border-slate-800 pt-3 text-sm">
+          {!parlay.canCancel ? (
+            <p className="text-xs text-slate-500">Locked in: parlays can be cancelled until 1 hour before their first game.</p>
+          ) : cancelStage === 'idle' ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-slate-500">Can cancel until {formatDateTime(parlay.cancelUntil)}</p>
+              <button
+                type="button"
+                onClick={() => setCancelStage('confirm')}
+                className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-red-700 hover:text-red-200"
+              >
+                Cancel parlay
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-slate-300">
+                Cancel this whole parlay, all {parlay.legs.length} picks? You&apos;ll get{' '}
+                <span className="font-semibold">{parlay.amount.toLocaleString()} coins</span> back.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={cancelParlay}
+                  disabled={cancelStage === 'cancelling'}
+                  className="rounded-lg bg-red-400 px-3 py-1.5 text-xs font-semibold text-slate-950 transition hover:bg-red-300 disabled:opacity-60"
+                >
+                  {cancelStage === 'cancelling' ? 'Cancelling…' : 'Yes, cancel it'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCancelStage('idle')}
+                  disabled={cancelStage === 'cancelling'}
+                  className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-500 disabled:opacity-60"
+                >
+                  Keep it
+                </button>
+              </div>
+            </div>
+          )}
+          {cancelError ? <p className="mt-2 text-xs text-red-300">{cancelError}</p> : null}
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -1106,7 +1186,7 @@ function MyBetsView({
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-sky-300">Parlays ({parlays.length})</h2>
           <div className="grid gap-3 md:grid-cols-2">
             {parlays.map((parlay) => (
-              <ParlayCard key={parlay.id} parlay={parlay} />
+              <ParlayCard key={parlay.id} parlay={parlay} token={token} onCancelled={onCancelled} />
             ))}
           </div>
         </section>

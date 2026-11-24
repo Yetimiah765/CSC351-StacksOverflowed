@@ -2,6 +2,7 @@ import { getSupabaseClient } from '../../../../lib/supabase';
 import { getOddsApiClient, getSecondOddsApiClient } from '../../../../lib/oddsApi';
 import { mergeSyncSummaries, secondSportKeys, syncSports } from '../../../../lib/sports/sync';
 import { settleWagers } from '../../../../lib/sports/settle';
+import { settleParlays } from '../../../../lib/sports/settleParlays';
 import { selectShowdowns, settleShowdowns } from '../../../../lib/sports/showdown';
 import { notifyShowdownChanged } from '../../../../lib/sports/showdownRealtime';
 
@@ -36,6 +37,8 @@ export async function POST(request: Request) {
     if (second) summary = mergeSyncSummaries(summary, await syncSports(supabase, second, secondSportKeys()));
     // SRS-209 / SRS-210: pay out wagers whose games the sync just decided.
     const settlement = await settleWagers(supabase);
+    // SRS-219.4: then the parlays, whose legs are graded the same way.
+    const parlays = await settleParlays(supabase);
     // SRS-212 - SRS-214: pay out finished Showdowns, then pick new ones.
     const showdowns = await settleShowdowns(supabase);
     const picked = await selectShowdowns(supabase);
@@ -45,9 +48,9 @@ export async function POST(request: Request) {
         reason: showdowns.settled + showdowns.refunded > 0 ? 'settled' : 'picked',
       });
     }
-    const errors = [...summary.errors, ...settlement.errors, ...showdowns.errors, ...picked.errors];
+    const errors = [...summary.errors, ...settlement.errors, ...parlays.errors, ...showdowns.errors, ...picked.errors];
     return Response.json(
-      { ...summary, errors, settlement, showdowns: { ...showdowns, picked: picked.picked } },
+      { ...summary, errors, settlement, parlays, showdowns: { ...showdowns, picked: picked.picked } },
       { status: errors.length > 0 ? 207 : 200 },
     );
   } catch (error: unknown) {

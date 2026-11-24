@@ -5,6 +5,7 @@ import {
   SAME_GAME_ERROR,
   allDifferentEvents,
   canParlayWinCoins,
+  decideParlay,
   hasPickFromEvent,
   isParlaySize,
   legCountProblem,
@@ -149,5 +150,43 @@ describe('combined odds and payout (SRS-219.2)', () => {
   it('only lets a parlay through if it can win more than its stake', () => {
     expect(canParlayWinCoins(50, [1.01, 1.01])).toBe(true); // pays 51
     expect(canParlayWinCoins(1, [1.01, 1.01])).toBe(false); // pays 1
+  });
+});
+
+describe('settling a parlay (SRS-219.4)', () => {
+  const W = (odds: number) => ({ result: 'Won' as const, odds });
+  const L = (odds: number) => ({ result: 'Lost' as const, odds });
+  const R = (odds: number) => ({ result: 'Refunded' as const, odds });
+  const open = (odds: number) => ({ result: null, odds });
+
+  it('wins only when every pick wins, paying the stake times the combined odds', () => {
+    expect(decideParlay(100, [W(1.33), W(2.24)])).toEqual({ result: 'Won', payout: 297 });
+    expect(decideParlay(50, [W(1.15), W(2)])).toEqual({ result: 'Won', payout: 115 });
+  });
+
+  it('loses as soon as any pick loses, even with games still to play', () => {
+    expect(decideParlay(100, [W(2), L(2), W(2)])).toEqual({ result: 'Lost', payout: 0 });
+    expect(decideParlay(100, [open(2), L(2)])).toEqual({ result: 'Lost', payout: 0 });
+  });
+
+  it('waits while a pick is undecided and none has lost', () => {
+    expect(decideParlay(100, [W(2), open(2)])).toBeNull();
+    expect(decideParlay(100, [R(2), open(2)])).toBeNull();
+  });
+
+  it('drops refunded picks and works the payout out from the rest', () => {
+    // 2.00 x 3.00 without the refunded 5.00 pick: 100 pays 600, not 3,000.
+    expect(decideParlay(100, [W(2), R(5), W(3)])).toEqual({ result: 'Won', payout: 600 });
+    // One pick left is paid like a single bet.
+    expect(decideParlay(100, [R(2), W(1.85)])).toEqual({ result: 'Won', payout: 185 });
+  });
+
+  it('gives the stake back when every pick is refunded', () => {
+    expect(decideParlay(100, [R(2), R(3)])).toEqual({ result: 'Refunded', payout: 100 });
+  });
+
+  it('gives the stake back when what is left after refunds would win nothing', () => {
+    // 50 x 1.01 = 50.5, which rounds down to the stake.
+    expect(decideParlay(50, [W(1.01), R(3)])).toEqual({ result: 'Refunded', payout: 50 });
   });
 });

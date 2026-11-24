@@ -950,6 +950,7 @@ const LEG_RESULT_STYLES: Record<LegResult, string> = {
 };
 
 // SRS-219.3: a placed parlay in My bets, with every pick and its game.
+// SRS-219.4: once settled, each pick's result and what the parlay paid.
 function ParlayCard({ parlay }: { parlay: MyParlay }) {
   return (
     <article className="rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-500/10 to-slate-900 p-4 sm:p-5">
@@ -985,7 +986,13 @@ function ParlayCard({ parlay }: { parlay: MyParlay }) {
                 </p>
                 <p className="text-sm tabular-nums">
                   <span className="text-sky-300">{formatOdds(leg.odds)}</span>
-                  {leg.result ? <span className={`ml-2 ${LEG_RESULT_STYLES[leg.result]}`}>{leg.result}</span> : null}
+                  {leg.result ? (
+                    <span className={`ml-2 ${LEG_RESULT_STYLES[leg.result]}`}>{leg.result}</span>
+                  ) : parlay.decision === 'Decided' ? (
+                    // SRS-219.4: a parlay is lost as soon as one pick loses, so
+                    // picks whose games were still to play never needed grading.
+                    <span className="ml-2 text-slate-500">Not needed</span>
+                  ) : null}
                 </p>
               </div>
             </li>
@@ -1191,6 +1198,18 @@ function fromShowdown(entry: MyShowdownEntry): ResultItem {
   };
 }
 
+function fromParlay(parlay: MyParlay): ResultItem {
+  return {
+    key: `p${parlay.id}`,
+    selection: `${parlay.legs.length}-pick parlay`,
+    market: `Parlay at ${formatOdds(parlay.combinedOdds)}`,
+    matchup: parlay.legs.map((leg) => leg.selection).join(' · '),
+    result: parlay.result === 'Won' || parlay.result === 'Lost' ? parlay.result : 'Refunded',
+    amount: parlay.amount,
+    payout: parlay.payout ?? 0,
+  };
+}
+
 // The coins a settled bet made or lost: profit for a win, the stake for a
 // loss, nothing for a refund.
 function netChange(item: ResultItem) {
@@ -1199,8 +1218,8 @@ function netChange(item: ResultItem) {
   return 0;
 }
 
-// SRS-209.1, SRS-210.2, SRS-210.4, SRS-214.2: shows the results of wagers and
-// Showdown entries settled since the player last looked, once. Closing it
+// SRS-209.1, SRS-210.2, SRS-210.4, SRS-214.2, SRS-219.4: shows the results of
+// wagers, parlays and Showdown entries settled since the player last looked, once. Closing it
 // marks them seen on the server.
 function ResultsModal({ items, onClose }: { items: ResultItem[]; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -1342,7 +1361,7 @@ export default function SportsBettingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load your bets.');
       // The single bets still show if the parlays can't be loaded.
-      const parlays: MyParlays = parlaysRes.ok ? await parlaysRes.json() : { open: [], settled: [] };
+      const parlays: MyParlays = parlaysRes.ok ? await parlaysRes.json() : { open: [], settled: [], unseen: [] };
       setMyBets({ ...data, parlays } as BetsData);
       setBetsError('');
     } catch (error) {
@@ -1353,14 +1372,24 @@ export default function SportsBettingPage() {
   const dismissResults = useCallback(() => {
     const ids = myBets?.unseen.map((bet) => bet.id) ?? [];
     const showdownEntryIds = myBets?.showdowns.unseen.map((entry) => entry.entryId) ?? [];
-    setMyBets((current) => (current ? { ...current, unseen: [], showdowns: { ...current.showdowns, unseen: [] } } : current));
+    const parlayIds = myBets?.parlays.unseen.map((parlay) => parlay.id) ?? [];
+    setMyBets((current) =>
+      current
+        ? {
+            ...current,
+            unseen: [],
+            showdowns: { ...current.showdowns, unseen: [] },
+            parlays: { ...current.parlays, unseen: [] },
+          }
+        : current,
+    );
     // Winnings were credited when the wager settled; make sure the nav bar shows them.
     notifyBalanceChanged();
-    if (token && ids.length + showdownEntryIds.length > 0) {
+    if (token && ids.length + showdownEntryIds.length + parlayIds.length > 0) {
       fetch('/api/sports/wagers/seen', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ids, showdownEntryIds }),
+        body: JSON.stringify({ ids, showdownEntryIds, parlayIds }),
       }).catch(() => {
         // If this fails the pop-up shows again next visit, which is harmless.
       });
@@ -1729,8 +1758,15 @@ export default function SportsBettingPage() {
 
       {placedBet ? <BetPlacedStamp bet={placedBet} onDone={clearPlacedBet} /> : null}
 
-      {myBets && myBets.unseen.length + myBets.showdowns.unseen.length > 0 ? (
-        <ResultsModal items={[...myBets.showdowns.unseen.map(fromShowdown), ...myBets.unseen.map(fromWager)]} onClose={dismissResults} />
+      {myBets && myBets.unseen.length + myBets.showdowns.unseen.length + myBets.parlays.unseen.length > 0 ? (
+        <ResultsModal
+          items={[
+            ...myBets.showdowns.unseen.map(fromShowdown),
+            ...myBets.parlays.unseen.map(fromParlay),
+            ...myBets.unseen.map(fromWager),
+          ]}
+          onClose={dismissResults}
+        />
       ) : null}
     </main>
   );

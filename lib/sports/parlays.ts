@@ -103,3 +103,27 @@ export function parlayPayout(amount: number, odds: number[]): number {
 export function canParlayWinCoins(amount: number, odds: number[]): boolean {
   return parlayPayout(amount, odds) > amount;
 }
+
+// SRS-219.4: how a parlay is settled, from its legs' results (null for a leg
+// whose game isn't decided yet). The same rules as fn_settle_parlay in
+// supabase/schema.sql, which works out the payout again from the stored odds.
+export type ParlayLegOutcome = { result: 'Won' | 'Lost' | 'Refunded' | null; odds: number };
+export type ParlayDecision = { result: 'Won' | 'Lost' | 'Refunded'; payout: number };
+
+export function decideParlay(amount: number, legs: ParlayLegOutcome[]): ParlayDecision | null {
+  // Lost as soon as any leg loses, even with other games still to play.
+  if (legs.some((leg) => leg.result === 'Lost')) return { result: 'Lost', payout: 0 };
+  // Otherwise it waits until every leg is decided.
+  if (legs.length === 0 || legs.some((leg) => leg.result === null)) return null;
+
+  // Refunded legs drop out and the odds are worked out from the rest; with
+  // none left, the stake comes back.
+  const won = legs.filter((leg) => leg.result === 'Won');
+  if (won.length === 0) return { result: 'Refunded', payout: amount };
+
+  const payout = parlayPayout(amount, won.map((leg) => leg.odds));
+  // With refunds taking out most of the odds, the payout can round down to
+  // the stake itself; that's a refund, since nothing was won.
+  if (payout <= amount) return { result: 'Refunded', payout: amount };
+  return { result: 'Won', payout };
+}
